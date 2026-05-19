@@ -12,7 +12,7 @@ from mudae.parsers.embed import (
     is_character_embed,
     is_ownership_footer,
 )
-from mudae.parsers.kakera import parse_keys
+from mudae.parsers.kakera import parse_keys, parse_omega_keys
 from mudae.soulmate_log import record_new_soulmate
 from mudae.parsers.utils import strip_discord_emojis, strip_markdown
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
@@ -28,8 +28,13 @@ ROLL_FIELD_KEYS: tuple[str, ...] = (
     "total_kakera",
     "spheres",
     "perk_8",
+    "perk_6",
+    "spawned_by",
+    "rolls_left",
+    "wished_by",
     "has_sphere_button",
     "keys",
+    "omega_keys",
     "claimed",
     "owner",
     "can_claim",
@@ -83,6 +88,15 @@ def _is_new_soulmate(description: str) -> bool:
     )
 
 
+def _parse_perk_6_spawn(description: str) -> tuple[bool, str | None]:
+    """Perk 6 extra spawn — ``[SPAWNED BY Name]`` in description (often after ``<:spG:...>``)."""
+    match = re.search(r"\[SPAWNED BY\s+([^\]]+)\]", description, re.IGNORECASE)
+    if not match:
+        return False, None
+    spawner = strip_markdown(match.group(1)).strip()
+    return True, spawner or None
+
+
 def _has_perk_8(footer: str) -> bool:
     """Perk 8: half-power kakera — footer shows ``💎/2`` before belongs."""
     if not footer:
@@ -91,6 +105,38 @@ def _has_perk_8(footer: str) -> bool:
     if re.match(r"^\d", head):
         return False
     return bool(re.search(r"/\s*2(?:\s|\u200b|$)", head))
+
+
+def _parse_wished_by(content: str) -> list[int]:
+    """User IDs pinged after ``Wished by`` when a wishlist character drops."""
+    if not content:
+        return []
+    idx = content.lower().find("wished by")
+    if idx < 0:
+        return []
+    chunk = content[idx:]
+    ids: list[int] = []
+    seen: set[int] = set()
+    for match in re.finditer(r"<@!?(\d+)>", chunk):
+        user_id = int(match.group(1))
+        if user_id not in seen:
+            seen.add(user_id)
+            ids.append(user_id)
+    return ids
+
+
+def _parse_rolls_left_warning(footer: str) -> int | None:
+    """Low-roll warning in footer, e.g. ``⚠️ 2 ROLLS LEFT ⚠️``."""
+    if not footer:
+        return None
+    match = re.search(
+        r"(\d{1,3}(?:,\d{3})*|\d+)\s+rolls?\s+left",
+        footer,
+        re.IGNORECASE,
+    )
+    if match:
+        return int(match.group(1).replace(",", ""))
+    return None
 
 
 def _parse_spheres_from_footer(footer: str) -> int | None:
@@ -228,9 +274,20 @@ def parse_roll(
     fields["total_kakera"] = total_kakera
     fields["spheres"] = _parse_spheres(description, footer)
     fields["perk_8"] = True if _has_perk_8(footer) else None
+    perk_6, spawned_by = _parse_perk_6_spawn(description)
+    fields["perk_6"] = True if perk_6 else None
+    fields["spawned_by"] = spawned_by
+    rolls_left = _parse_rolls_left_warning(footer)
+    fields["rolls_left"] = rolls_left
+
+    wished_by = _parse_wished_by(snapshot.content)
+    fields["wished_by"] = wished_by if wished_by else None
 
     keys = parse_keys(description)
     fields["keys"] = keys if keys else None
+
+    omega_keys = parse_omega_keys(description)
+    fields["omega_keys"] = omega_keys if omega_keys else None
 
     fields["claimed"] = claimed
     fields["owner"] = owner
@@ -255,10 +312,18 @@ def parse_roll(
         summary += f" · {fields['spheres']} sp"
     if fields.get("perk_8"):
         summary += " · perk 8"
+    if fields.get("perk_6"):
+        summary += " · perk 6 spawn"
+        if spawned_by:
+            summary += f" by {spawned_by}"
+    if rolls_left is not None:
+        summary += f" · {rolls_left} rolls left"
     if fields["series"]:
         summary += f" · {fields['series']}"
     if fields.get("starwish"):
         summary += " · starwish"
+    if wished_by:
+        summary += f" · wished by {len(wished_by)}"
     if new_soulmate:
         summary += " · new soulmate"
         record_new_soulmate(snapshot, fields)
@@ -266,6 +331,9 @@ def parse_roll(
         summary += " · bku reset"
     elif fields.get("bku") is not None:
         summary += f" · bku +{fields['bku']}"
+    if fields.get("omega_keys"):
+        total_omega = sum(entry["gain"] for entry in fields["omega_keys"])
+        summary += f" · omega +{total_omega}"
     if parts > 1:
         summary = f"$roll ({part}/{parts}) · {name}"
 
@@ -294,8 +362,12 @@ def parse_roll_ownership(snapshot: MudaeMessageSnapshot) -> ParseResult:
     fields["character_name"] = character_name
     fields["claimed"] = owner is not None
     fields["owner"] = owner
+    if snapshot.edited:
+        fields["via_embed_edit"] = True
 
-    summary = f"$roll ownership · {character_name or '?'} → {owner or '?'}"
+    summary = f"Roll claimed · {character_name or '?'} → {owner or '?'}"
+    if snapshot.edited:
+        summary += " (embed edit)"
     return ParseResult(
         kind=MessageKind.ROLL_OWNERSHIP,
         summary=summary,

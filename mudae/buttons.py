@@ -8,6 +8,7 @@ from typing import Any
 from mudae.constants import CLAIM_EMOJIS, KAKERA_EMOJIS, SPHERE_EMOJI_PREFIX
 
 _SPHERE_CUSTOM_ID_RE = re.compile(r"\d+s\d+$")
+_CLAIM_CUSTOM_ID_RE = re.compile(r"\d+p\d+p\d+$", re.IGNORECASE)
 
 
 def classify_button_kind(
@@ -20,6 +21,8 @@ def classify_button_kind(
     emoji_key = (emoji or "").strip()
     cid = (custom_id or "").strip()
 
+    if cid and _CLAIM_CUSTOM_ID_RE.search(cid):
+        return "claim"
     if cid and _SPHERE_CUSTOM_ID_RE.search(cid):
         return "sphere"
     if (

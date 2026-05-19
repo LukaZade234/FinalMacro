@@ -14,10 +14,14 @@ from gui.bridge import AppBridge
 
 def main() -> None:
     app = QGuiApplication(sys.argv)
-    app.setApplicationName("Mudae Reader")
+    app.setApplicationName("FinalMacro")
 
     bridge = AppBridge()
     engine = QQmlApplicationEngine()
+
+    project_root = Path(__file__).resolve().parent.parent
+    engine.addImportPath(str(project_root))
+
     engine.rootContext().setContextProperty("App", bridge)
 
     qml_path = Path(__file__).resolve().parent / "Main.qml"

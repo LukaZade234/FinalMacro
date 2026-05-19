@@ -11,11 +11,13 @@ from mudae.channel_cache import remember_settings
 from mudae.commands import ResolvedCommand, normalize_command, resolve_command
 from mudae.parsers.bonus import parse_bonus
 from mudae.parsers.classify import classify_message
-from mudae.parsers.embed import parse_character_embed, parse_ownership_update
+from mudae.parsers.embed import is_character_embed, parse_character_embed, parse_ownership_update
 from mudae.parsers.claim_interval import parse_claim_interval
 from mudae.parsers.kakera import parse_kakera_claim
+from mudae.parsers.claim import parse_claim
 from mudae.parsers.marriage import parse_marriage
 from mudae.parsers.settings import parse_settings
+from mudae.parsers.sphere import parse_sphere_click
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.tu import parse_tu
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
@@ -29,7 +31,10 @@ _KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll"})
 # GUI kind column — human-readable names for non-command message types.
 _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.KAKERA_CLAIM: "kakera claim",
+    MessageKind.SPHERE_CLICK: "sphere click",
+    MessageKind.CLAIM: "claim",
     MessageKind.CLAIM_INTERVAL: "claim interval",
+    MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
 }
 
@@ -134,26 +139,30 @@ def parse_mudae_message(
         return parse_tu(snapshot.content)
     if kind == MessageKind.KAKERA_CLAIM:
         return parse_kakera_claim(snapshot.content)
+    if kind == MessageKind.SPHERE_CLICK:
+        return parse_sphere_click(snapshot.content)
     if kind == MessageKind.MARRIAGE:
         return parse_marriage(snapshot.content)
+    if kind == MessageKind.CLAIM:
+        return parse_claim(snapshot.content)
+    if kind == MessageKind.ROLL_OWNERSHIP:
+        return parse_roll_ownership(snapshot)
     if kind == MessageKind.CLAIM_INTERVAL:
         return parse_claim_interval(snapshot.content)
     if kind == MessageKind.OWNERSHIP_UPDATE:
         return parse_ownership_update(snapshot)
     if kind == MessageKind.CHARACTER_EMBED and snapshot.embeds:
         return parse_character_embed(snapshot)
-    if kind == MessageKind.KAKERA_BUTTONS:
-        result = _parse_buttons(snapshot, MessageKind.KAKERA_BUTTONS)
-        if snapshot.embeds:
+    if kind in {MessageKind.KAKERA_BUTTONS, MessageKind.CLAIM_BUTTONS}:
+        if snapshot.embeds and is_character_embed(snapshot.embeds[0]):
             embed_result = parse_character_embed(snapshot)
-            result.fields.update(embed_result.fields)
-        return result
-    if kind == MessageKind.CLAIM_BUTTONS:
-        result = _parse_buttons(snapshot, MessageKind.CLAIM_BUTTONS)
-        if snapshot.embeds:
-            embed_result = parse_character_embed(snapshot)
-            result.fields.update(embed_result.fields)
-        return result
+            return ParseResult(
+                kind=kind,
+                summary=embed_result.summary,
+                fields=embed_result.fields,
+                warnings=embed_result.warnings,
+            )
+        return _parse_buttons(snapshot, kind)
 
     # User sent a $command we do not parse yet, but have no content match.
     if resolved is not None:
@@ -210,8 +219,14 @@ def _parse_command_response(
             result = parse_tu(snapshot.content)
         elif kind == MessageKind.KAKERA_CLAIM:
             result = parse_kakera_claim(snapshot.content)
+        elif kind == MessageKind.SPHERE_CLICK:
+            result = parse_sphere_click(snapshot.content)
         elif kind == MessageKind.MARRIAGE:
             result = parse_marriage(snapshot.content)
+        elif kind == MessageKind.CLAIM:
+            result = parse_claim(snapshot.content)
+        elif kind == MessageKind.ROLL_OWNERSHIP:
+            result = parse_roll_ownership(snapshot)
         elif kind == MessageKind.CLAIM_INTERVAL:
             result = parse_claim_interval(snapshot.content)
         elif kind in {MessageKind.CHARACTER_EMBED, MessageKind.KAKERA_BUTTONS, MessageKind.CLAIM_BUTTONS}:

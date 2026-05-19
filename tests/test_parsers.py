@@ -82,6 +82,36 @@ def test_parse_tu_legacy_en():
     assert result.fields["dk_stock"] == 3
 
 
+def test_parse_sphere_click():
+    from mudae.parsers.classify import classify_message
+    from mudae.parsers.sphere import parse_sphere_click
+
+    content = "<:spB:1437140639987929108> **lukazade234 +72**  (1/15)"
+    snapshot = MudaeMessageSnapshot(
+        message_id=101,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=content,
+        embeds=[],
+        buttons=[],
+        created_at="01:05:00",
+    )
+    assert classify_message(snapshot) == MessageKind.SPHERE_CLICK
+    result = parse_sphere_click(content)
+    assert result.fields["sphere_type"] == "spB"
+    assert result.fields["claimed_by"] == "lukazade234"
+    assert result.fields["amount"] == 72
+    assert result.fields["daily_used"] == 1
+    assert result.fields["daily_max"] == 15
+    assert "1/15" in result.summary
+    assert "+72" in result.summary
+
+
 def test_parse_kakera_claim():
     content = "<:kakeraT:123> TestUser +546 ($k)"
     result = parse_kakera_claim(content)
@@ -101,6 +131,33 @@ def test_kakera_claim_parses_spheres():
     assert result.fields["spheres"] == 46
 
 
+def test_kakera_claim_white_breakdown():
+    content = (
+        "<:kakeraL:815961697918779422>breaks down into"
+        "<:kakeraT:609264180851376132>+<:kakera:469791929106956298>"
+        "+<:kakera:469791929106956298>+<:kakeraG:609264166381027329>"
+        " => **lukazade234 +5,934** ($k)"
+    )
+    result = parse_kakera_claim(content)
+    assert result.fields["kakera_type"] == "kakeraL"
+    assert result.fields["amount"] == 5934
+    assert result.fields["claimed_by"] == "lukazade234"
+    assert "raw_content" not in result.fields
+    assert "breakdown" not in result.fields
+
+
+def test_kakera_claim_white_breakdown_with_spheres():
+    content = (
+        "<:kakeraL:815961697918779422>breaks down into<:kakeraT:123>+<:kakera:456>"
+        " => **lukazade234 +100** ($k) **+12** <:sp:1437140700604137554>"
+    )
+    result = parse_kakera_claim(content)
+    assert result.fields["kakera_type"] == "kakeraL"
+    assert result.fields["amount"] == 100
+    assert result.fields["claimed_by"] == "lukazade234"
+    assert result.fields["spheres"] == 12
+
+
 def test_kakera_claim_parses_spheres_3618():
     content = (
         "<:kakeraO:605112954391887888>**lukazade234 +3,618** ($k) "
@@ -108,12 +165,12 @@ def test_kakera_claim_parses_spheres_3618():
     )
     result = parse_kakera_claim(content)
     assert result.fields == {
-        "raw_content": content,
         "kakera_type": "kakeraO",
         "amount": 3618,
         "spheres": 46,
         "claimed_by": "lukazade234",
     }
+    assert "raw_content" not in result.fields
 
 
 def test_kakera_claim_gui_label():
@@ -150,6 +207,234 @@ def test_parse_marriage():
     result = parse_marriage(content)
     assert result.fields["winner"] == "Winner"
     assert result.fields["character"] == "Rem"
+    assert "raw_content" not in result.fields
+    assert "kakera" not in result.fields
+    assert "spheres" not in result.fields
+
+
+def test_parse_custom_claim_arbitrary_text_sums_kakera():
+    from mudae.parsers.claim import parse_claim
+    from mudae.parsers.classify import classify_message
+
+    content = (
+        "**lukazade234** yoinked **Evernight Goddess**\n"
+        "**+59**<:kakera:469835869059153940>(Emerald IV bonus) +**30** <:sp:1437140700604137554>\n"
+        "**+575**<:kakera:469835869059153940>(Bronze IV bonus)"
+    )
+    snapshot = MudaeMessageSnapshot(
+        message_id=90,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=content,
+        embeds=[],
+        buttons=[],
+        created_at="12:20:00",
+    )
+    assert classify_message(snapshot) == MessageKind.CLAIM
+    result = parse_claim(content)
+    assert result.kind == MessageKind.CLAIM
+    assert result.fields["winner"] == "lukazade234"
+    assert result.fields["character"] == "Evernight Goddess"
+    assert result.fields["kakera"] == 634
+    assert result.fields["spheres"] == 30
+    assert len(result.fields["kakera_bonuses"]) == 2
+    assert "claim_style" not in result.fields
+
+
+def test_parse_custom_claim_names_anywhere_in_sentence():
+    from mudae.parsers.claim import parse_claim, is_custom_claim
+
+    content = (
+        "Finally! After years of searching, **lukazade234** has secured "
+        "**Evernight Goddess** for the collection!"
+    )
+    assert is_custom_claim(content)
+    result = parse_claim(content)
+    assert result.fields["winner"] == "lukazade234"
+    assert result.fields["character"] == "Evernight Goddess"
+
+
+def test_parse_roll_wished_by():
+    from mudae.parsers.roll import parse_roll
+
+    embed = {
+        "title": "",
+        "author": "Evernight Goddess",
+        "description": (
+            "Lord of the Mysteries\n"
+            "Claims: #11,237\n"
+            "Likes: #12,653\n"
+            "**51**<:kakera:469835869059153940>"
+        ),
+        "footer": "Evernight Goddess / Lord of the - 51 ka",
+        "image_url": "https://mudae.net/uploads/8799063/q56ROpr~8fLxgmJ.png",
+    }
+    snapshot = MudaeMessageSnapshot(
+        message_id=91,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="Wished by <@554009750375890945>",
+        embeds=[embed],
+        buttons=[
+            {
+                "label": "",
+                "emoji": "\ud83d\udc98",
+                "custom_id": "1506071029863157850p1378357044624494662p0",
+                "kind": "other",
+                "disabled": False,
+            }
+        ],
+        created_at="12:19:00",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["wished_by"] == [554009750375890945]
+    assert result.fields["can_claim"] is True
+    assert result.fields["has_claim_button"] is True
+    assert "wished by 1" in result.summary
+
+
+def test_parse_roll_five_wishers():
+    from mudae.parsers.roll import parse_roll
+
+    wishers = [
+        111111111111111111,
+        222222222222222222,
+        333333333333333333,
+        444444444444444444,
+        555555555555555555,
+    ]
+    pings = " ".join(f"<@{user_id}>" for user_id in wishers)
+    snapshot = MudaeMessageSnapshot(
+        message_id=92,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=f"Wished by {pings}",
+        embeds=[
+            {
+                "author": "Evernight Goddess",
+                "description": "Lord of the Mysteries\n**51**<:kakera:469835869059153940>",
+                "footer": "",
+            }
+        ],
+        buttons=[],
+        created_at="12:19:30",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["wished_by"] == wishers
+    assert "wished by 5" in result.summary
+
+
+def test_claim_context_confirms_matching_embed_edit():
+    from mudae.claim_context import ClaimContextTracker
+
+    tracker = ClaimContextTracker()
+    assert (
+        tracker.try_confirm_embed(
+            99,
+            character_name="Evernight Goddess",
+            owner="lukazade234",
+        )
+        is None
+    )
+    tracker.register(99, winner="lukazade234", character="Evernight Goddess")
+    confirmed = tracker.try_confirm_embed(
+        99,
+        character_name="Evernight Goddess",
+        owner="lukazade234",
+    )
+    assert confirmed is not None
+    assert confirmed.winner == "lukazade234"
+    assert (
+        tracker.try_confirm_embed(
+            99,
+            character_name="Evernight Goddess",
+            owner="lukazade234",
+        )
+        is None
+    )
+
+
+def test_claim_context_rejects_wrong_owner():
+    from mudae.claim_context import ClaimContextTracker
+
+    tracker = ClaimContextTracker()
+    tracker.register(99, winner="lukazade234", character="Evernight Goddess")
+    assert (
+        tracker.try_confirm_embed(
+            99,
+            character_name="Evernight Goddess",
+            owner="someone_else",
+        )
+        is None
+    )
+    assert (
+        tracker.try_confirm_embed(
+            99,
+            character_name="Evernight Goddess",
+            owner="lukazade234",
+        )
+        is not None
+    )
+
+
+def test_parse_roll_ownership_embed_edit():
+    from mudae.parsers.classify import classify_message
+    from mudae.parsers.roll import parse_roll_ownership
+
+    embed = {
+        "author": "Evernight Goddess",
+        "description": "Lord of the Mysteries\nClaims: #11,237",
+        "footer": "Belongs to lukazade234",
+    }
+    snapshot = MudaeMessageSnapshot(
+        message_id=91,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[embed],
+        buttons=[],
+        created_at="12:21:00",
+        edited=True,
+    )
+    assert classify_message(snapshot) == MessageKind.ROLL_OWNERSHIP
+    result = parse_roll_ownership(snapshot)
+    assert result.fields["owner"] == "lukazade234"
+    assert result.fields["via_embed_edit"] is True
+
+
+def test_parse_marriage_kakera_and_spheres():
+    content = (
+        "💖 **lukazade234** and **Saya Kisaragi** are now married! 💖\n"
+        "**+248**<:kakera:469835869059153940>(Emerald IV bonus) +**68** <:sp:1437140700604137554>"
+    )
+    result = parse_marriage(content)
+    assert result.fields["winner"] == "lukazade234"
+    assert result.fields["character"] == "Saya Kisaragi"
+    assert result.fields["kakera"] == 248
+    assert result.fields["spheres"] == 68
+    assert "raw_content" not in result.fields
+    assert "+248 kakera" in result.summary
+    assert "+68 sp" in result.summary
 
 
 def test_parse_claim_interval():
@@ -735,6 +1020,28 @@ LUCY_ROLL_EMBED = {
 }
 
 
+MIKU_ROLL_EMBED = {
+    "title": "",
+    "author": "Hatsune Miku",
+    "description": (
+        "VOCALOID <:sw:1163913219782492220>\n"
+        "<:bku:1163913181920497755> $bku completed and reset!\n"
+        "**3.84%** chance to happen again if you roll\n"
+        "another starwish before the next $bku reset.\n"
+        "**+8,880**<:kakera:469835869059153940>\n"
+        "<:chaoskey:690110264166842421> (**169**) +5% kakera value\n"
+        "<:chaoskey:690110264166842421> (**170**) +5% kakera value\n"
+        "**+5** default kakera value\n"
+        "<:omegakey:1473308158263951582> **+1** \n"
+        "Claims: #1\n"
+        "Likes: #4\n"
+        "**15,998**<:kakera:469835869059153940>"
+    ),
+    "footer": "23\ud83d\udd34 \u2611\ufe0f  (\u2b50170)  \u2013  3.84% \u00b7 Belongs to lukazade234",
+    "image_url": "https://cdn.imgchest.com/files/c37946253974.png",
+}
+
+
 def test_parse_lucy_starwish_and_bku():
     from mudae.parsers.roll import parse_roll
 
@@ -759,6 +1066,37 @@ def test_parse_lucy_starwish_and_bku():
     assert result.fields["bku_reset"] is True
     assert result.fields["total_kakera"] == 13781
     assert result.fields["claim_rank"] == 91
+
+
+def test_parse_miku_omega_keys():
+    from mudae.parsers.roll import parse_roll
+
+    snapshot = MudaeMessageSnapshot(
+        message_id=61,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[MIKU_ROLL_EMBED],
+        buttons=[],
+        created_at="12:04:30",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["keys"] == [
+        {"type": "chaos", "level": 169},
+        {"type": "chaos", "level": 170},
+    ]
+    assert result.fields["omega_keys"] == [{"gain": 1}]
+    assert result.fields["starwish"] is True
+    assert result.fields["bku"] == 8880
+    assert result.fields["bku_reset"] is True
+    assert result.fields["total_kakera"] == 15998
+    assert result.fields["spheres"] == 23
+    assert "omega +1" in result.summary
 
 
 PATTY_BKU_ROLL_EMBED = {
@@ -816,6 +1154,24 @@ NAMI_ROLL_EMBED = {
 }
 
 
+TWO_B_ROLL_EMBED = {
+    "title": "",
+    "author": "2B",
+    "description": (
+        "NieR: Automata <:sw:1163913219782492220>\n"
+        "<:chaoskey:690110264166842421> (**69**) +5% kakera value\n"
+        "Claims: #11\n"
+        "Likes: #26\n"
+        "**6,494**<:kakera:469835869059153940>"
+    ),
+    "footer": (
+        "23\ud83d\udd34 \u2611\ufe0f \u26a0\ufe0f 2 ROLLS LEFT \u26a0\ufe0f "
+        "(\u2b5069)  \u00b7 Belongs to lukazade234"
+    ),
+    "image_url": "https://cdn.imgchest.com/files/3f32ffdf8b03.png",
+}
+
+
 MILDRETTA_SOULMATE_EMBED = {
     "title": "",
     "author": "Mildretta",
@@ -832,6 +1188,40 @@ MILDRETTA_SOULMATE_EMBED = {
     "footer": "\u26a0\ufe0f 2 ROLLS LEFT \u26a0\ufe0f \u00b7 Belongs to lukazade234",
     "image_url": "https://mudae.net/uploads/2175234/PPHbCJn~ki4bILE.png",
 }
+
+
+def test_parse_2b_rolls_left_warning_in_footer():
+    from mudae.parsers.roll import parse_roll
+
+    snapshot = MudaeMessageSnapshot(
+        message_id=64,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[TWO_B_ROLL_EMBED],
+        buttons=[
+            {
+                "label": "",
+                "emoji": "kakeraY",
+                "custom_id": "1506066968577577080k1473101129184186552k0",
+                "kind": "kakera",
+                "disabled": False,
+            }
+        ],
+        created_at="12:06:30",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["rolls_left"] == 2
+    assert result.fields["spheres"] == 23
+    assert result.fields["starwish"] is True
+    assert result.fields["character_name"] == "2B"
+    assert result.fields["total_kakera"] == 6494
+    assert "2 rolls left" in result.summary
 
 
 def test_parse_mildretta_new_soulmate():
@@ -871,10 +1261,12 @@ def test_parse_mildretta_new_soulmate():
         )
         result = parse_roll(snapshot)
         assert result.fields["new_soulmate"] is True
+        assert result.fields["rolls_left"] == 2
         assert result.fields["claimed"] is True
         assert result.fields["owner"] == "lukazade234"
         assert result.fields["series"] == "Gachiakuta"
         assert "new soulmate" in result.summary
+        assert "2 rolls left" in result.summary
 
         assert log_path.is_file()
         logged = json.loads(log_path.read_text())
@@ -941,6 +1333,58 @@ NAZUNA_PERK8_BUTTONS = [
         "disabled": False,
     },
 ]
+
+
+def test_parse_perk_6_spawn():
+    from mudae.parsers.pipeline import parse_mudae_message
+
+    embed = {
+        "title": "",
+        "author": "Han Ah-Reun",
+        "description": (
+            "My Bias Gets on the Last Train\n"
+            "<:chaoskey:690110264166842421> (**54**) +5% kakera value\n"
+            "<:omegakey:1473308158263951582> **+6** \n"
+            "Claims: #25,917\n"
+            "Likes: #54,275\n"
+            "**518**<:kakera:469835869059153940>\n"
+            "<:spG:1437140664193126441> **[SPAWNED BY TRISSY]**"
+        ),
+        "footer": "(\ud83d\udd1154)  \u00b7 Belongs to lukazade234",
+        "image_url": "https://mudae.net/uploads/9939054/YjFUoYh~6fYqsaPcE.png",
+    }
+    snapshot = MudaeMessageSnapshot(
+        message_id=100,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[embed],
+        buttons=[
+            {
+                "label": "",
+                "emoji": "kakeraL",
+                "custom_id": "1506078075027193967wk1473101129184186552k0",
+                "kind": "kakera",
+                "disabled": False,
+            }
+        ],
+        created_at="23:36:34",
+    )
+    result = parse_mudae_message(snapshot)
+    assert result.fields["perk_6"] is True
+    assert result.fields["spawned_by"] == "TRISSY"
+    assert result.fields["character_name"] == "Han Ah-Reun"
+    assert result.fields["omega_keys"] == [{"gain": 6}]
+    assert result.fields["total_kakera"] == 518
+    assert "perk 6 spawn" in result.summary
+    assert "TRISSY" in result.summary
+    assert "Han Ah-Reun" in result.summary
+    assert "Kakera Buttons" not in result.summary
 
 
 def test_parse_nazuna_perk_8_and_sphere_button():

@@ -1,35 +1,10 @@
-"""Parse Mudae marriage confirmation lines."""
+"""Parse Mudae marriage confirmation lines (delegates to claim parser)."""
 
 from __future__ import annotations
 
-import re
-from typing import Any
-
-from mudae.parsers.utils import strip_markdown
-from mudae.types import MessageKind, ParseResult
+from mudae.parsers.claim import is_marriage_claim, parse_claim
+from mudae.types import ParseResult
 
 
 def parse_marriage(content: str) -> ParseResult:
-    warnings: list[str] = []
-    fields: dict[str, Any] = {"raw_content": content}
-
-    match = re.search(
-        r"(?:💖\s*)?(.*?)\s+and\s+(.*?)\s+are now married",
-        content,
-        re.IGNORECASE,
-    )
-    if match:
-        fields["winner"] = strip_markdown(match.group(1)).strip()
-        fields["character"] = strip_markdown(match.group(2)).strip()
-    else:
-        warnings.append("Could not parse marriage participants")
-
-    winner = fields.get("winner", "?")
-    character = fields.get("character", "?")
-    summary = f"Marriage · {winner} + {character}"
-    return ParseResult(
-        kind=MessageKind.MARRIAGE,
-        summary=summary,
-        fields=fields,
-        warnings=warnings,
-    )
+    return parse_claim(content)

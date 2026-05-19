@@ -8,7 +8,7 @@ MUDAE_BOT_IDS = frozenset({
     432610292342587392,
 })
 
-CLAIM_EMOJIS = frozenset({"💍", "💖", "💝"})
+CLAIM_EMOJIS = frozenset({"💍", "💖", "💝", "\U0001f498"})
 
 # Sphere button emoji names (sp + color letter, e.g. spY).
 SPHERE_EMOJI_PREFIX = "sp"

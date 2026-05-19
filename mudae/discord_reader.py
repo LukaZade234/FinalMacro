@@ -10,13 +10,16 @@ from typing import Any
 import discord
 from discord import Client as DiscordClient
 
+from mudae.claim_context import ClaimContextTracker
 from mudae.command_context import CommandContextTracker
-from mudae.parsers.embed import is_character_embed
+from mudae.parsers.embed import get_character_owner, is_character_embed, is_ownership_footer
 from mudae.parsers.pipeline import format_entry_for_gui, parse_message
 from mudae.serialization import snapshot_from_message
+from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 OnEntryCallback = Callable[[dict[str, Any]], None]
 OnStatusCallback = Callable[[str], None]
+OnParsedCallback = Callable[[MudaeMessageSnapshot, ParseResult], None]
 
 
 class ChannelMonitor:
@@ -28,15 +31,41 @@ class ChannelMonitor:
         channel_id: int,
         on_entry: OnEntryCallback | None = None,
         on_status: OnStatusCallback | None = None,
+        on_parsed: OnParsedCallback | None = None,
     ) -> None:
         self.token = token.strip()
         self.channel_id = channel_id
         self.on_entry = on_entry
         self.on_status = on_status
+        self.on_parsed = on_parsed
         self._client: DiscordClient | None = None
         self._ready = asyncio.Event()
         self._connected = False
         self._commands = CommandContextTracker()
+        self._claims = ClaimContextTracker()
+        self._messages: dict[int, discord.Message] = {}
+        self._pending_macro_command: str | None = None
+        self.macro_active = False
+
+    @property
+    def claims(self) -> ClaimContextTracker:
+        return self._claims
+
+    def get_own_usernames(self) -> list[str]:
+        if not self._client or not self._client.user:
+            return []
+        user = self._client.user
+        names: list[str] = []
+        for attr in ("name", "global_name", "display_name"):
+            value = getattr(user, attr, None)
+            if value and str(value).strip():
+                names.append(str(value).strip())
+        return list(dict.fromkeys(names))
+
+    def get_own_user_id(self) -> int | None:
+        if not self._client or not self._client.user:
+            return None
+        return int(self._client.user.id)
 
     def _emit_status(self, text: str) -> None:
         if self.on_status:
@@ -46,46 +75,113 @@ class ChannelMonitor:
         if self.on_entry:
             self.on_entry(payload)
 
+    def _emit_parsed(self, snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> None:
+        if self.on_parsed:
+            self.on_parsed(snapshot, parsed)
+
+    async def send_command(self, command: str, *, prefix: str | None = None) -> None:
+        channel = await self._get_text_channel()
+        cmd = command.strip().lstrip("$")
+        pre = prefix if prefix is not None else "$"
+        self._pending_macro_command = cmd.lower()
+        await channel.send(f"{pre}{cmd}")
+
+    async def click_button(self, message_id: int, custom_id: str) -> bool:
+        message = self._messages.get(message_id)
+        if message is None:
+            channel = await self._get_text_channel()
+            try:
+                message = await channel.fetch_message(message_id)
+                self._messages[message_id] = message
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+        for row in message.components or []:
+            if not isinstance(row, discord.ActionRow):
+                continue
+            for child in row.children:
+                if not isinstance(child, discord.Button):
+                    continue
+                if child.custom_id != custom_id:
+                    continue
+                try:
+                    child.message = message
+                    await child.click()
+                    return True
+                except Exception:
+                    return False
+        return False
+
+    async def _get_text_channel(self) -> discord.TextChannel:
+        if not self._client:
+            raise RuntimeError("Not connected")
+        channel = self._client.get_channel(self.channel_id)
+        if channel is None:
+            channel = await self._client.fetch_channel(self.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError(f"Channel {self.channel_id} is not a text channel")
+        return channel
+
     async def _handle_message(self, message: discord.Message, *, edited: bool) -> None:
         if message.channel.id != self.channel_id:
             return
+        self._messages[message.id] = message
         snapshot = snapshot_from_message(message, edited=edited)
 
-        # Mudae often edits the roll embed (footer, key icon). Already shown on first message.
-        if (
-            snapshot.is_mudae
-            and snapshot.edited
-            and snapshot.embeds
-            and is_character_embed(snapshot.embeds[0])
-        ):
-            return
+        # Roll embed edits: only show when a claim message was seen and footer matches it.
+        if snapshot.is_mudae and snapshot.edited and snapshot.embeds:
+            embed = snapshot.embeds[0]
+            if is_character_embed(embed):
+                footer = embed.get("footer") or ""
+                owner = get_character_owner(footer)
+                if not owner or not is_ownership_footer(footer):
+                    return
+                confirmed = self._claims.try_confirm_embed(
+                    snapshot.channel_id,
+                    character_name=embed.get("author") or "",
+                    owner=owner,
+                )
+                if confirmed is None:
+                    return
 
         reply_to_command: str | None = None
         reply_part = 1
         reply_parts = 1
         if snapshot.is_mudae:
-            # Edits (e.g. footer → Belongs to …) are not a second command reply.
             if not snapshot.edited:
-                pending = self._commands.consume(snapshot.channel_id)
-                if pending is not None:
-                    reply_to_command = pending.command
-                    reply_part = pending.part
-                    reply_parts = pending.parts
-        else:
+                if self._pending_macro_command:
+                    reply_to_command = self._pending_macro_command
+                    self._pending_macro_command = None
+                elif not self.macro_active:
+                    pending = self._commands.consume(snapshot.channel_id)
+                    if pending is not None:
+                        reply_to_command = pending.command
+                        reply_part = pending.part
+                        reply_parts = pending.parts
+        elif not self.macro_active:
             self._commands.observe(snapshot)
+
         parsed = parse_message(
             snapshot,
             reply_to_command=reply_to_command,
             reply_part=reply_part,
             reply_parts=reply_parts,
         )
+        if snapshot.is_mudae and not snapshot.edited:
+            winner = parsed.fields.get("winner")
+            character = parsed.fields.get("character")
+            if parsed.kind in {MessageKind.CLAIM, MessageKind.MARRIAGE} and winner and character:
+                self._claims.register(
+                    snapshot.channel_id,
+                    winner=str(winner),
+                    character=str(character),
+                )
+        self._emit_parsed(snapshot, parsed)
         self._emit_entry(format_entry_for_gui(snapshot, parsed))
 
     async def connect(self) -> None:
         discord_logger = logging.getLogger("discord")
         discord_logger.setLevel(logging.WARNING)
 
-        # discord.py-self has no Intents API (unlike discord.py bot library).
         self._client = DiscordClient(chunk_guilds_at_startup=False)
 
         @self._client.event

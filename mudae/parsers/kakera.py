@@ -9,6 +9,22 @@ from mudae.constants import KAKERA_INFO
 from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
+_KAKERA_EMOJI_RE = re.compile(
+    r"<:(kakera[A-Z]?|kakeraP|kakeraT|kakeraG|kakeraL|kakeraW|kakeraR|kakeraO|kakeraY):\d+>",
+    re.IGNORECASE,
+)
+# ``**user +5,934** ($k)`` or ``=> **user +5,934** ($k)`` or ``User +546 ($k)``
+_CLAIM_TAIL_PATTERNS = (
+    re.compile(
+        r"(?:=>\s*)?\*\*([^*]+?)\s*\+([\d,]+)\*\*\s*\(\$k\)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:=>\s*)?([^\s+]+)\s*\+([\d,]+)\s*\(\$k\)",
+        re.IGNORECASE,
+    ),
+)
+
 
 def _parse_spheres_from_claim(content: str) -> int | None:
     """Spheres gained on this click, e.g. ``($k) **+46** <:sp:...>``."""
@@ -26,52 +42,64 @@ def _parse_spheres_from_claim(content: str) -> int | None:
     return None
 
 
+def _parse_source_kakera_type(content: str) -> str | None:
+    """Clicked kakera — for white/light, the type before ``breaks down into``."""
+    lower = content.lower()
+    if "breaks down into" in lower:
+        head = re.split(r"breaks down into", content, maxsplit=1, flags=re.IGNORECASE)[0]
+        match = _KAKERA_EMOJI_RE.search(head)
+        if match:
+            return match.group(1)
+    match = _KAKERA_EMOJI_RE.search(content)
+    if match:
+        return match.group(1)
+    for k_type, info in KAKERA_INFO.items():
+        if info["emoji"] in content:
+            return k_type
+    return None
+
+
+def _parse_claim_tail(content: str) -> tuple[str | None, int | None]:
+    """Username and total from the ``user +N ($k)`` tail (after ``=>`` on breakdowns)."""
+    for text in (content, strip_markdown(content)):
+        for pattern in _CLAIM_TAIL_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                user = match.group(1).strip()
+                amount = int(match.group(2).replace(",", ""))
+                return user, amount
+    return None, None
+
+
 def parse_kakera_claim(content: str) -> ParseResult:
     warnings: list[str] = []
-    fields: dict[str, Any] = {"raw_content": content}
+    fields: dict[str, Any] = {}
 
-    type_match = re.search(r":(kakera[A-Z]*):", content, re.IGNORECASE)
-    if type_match:
-        fields["kakera_type"] = type_match.group(1)
-    else:
-        for k_type, info in KAKERA_INFO.items():
-            if info["emoji"] in content:
-                fields["kakera_type"] = k_type
-                break
+    kakera_type = _parse_source_kakera_type(content)
+    if kakera_type:
+        fields["kakera_type"] = kakera_type
 
-    clean = strip_markdown(content)
-    amount_match = re.search(r"\+([\d,]+)\s*\(\$k\)", clean, re.IGNORECASE)
-    if not amount_match:
+    claimed_by, amount = _parse_claim_tail(content)
+    if amount is not None:
+        fields["amount"] = amount
+    if claimed_by:
+        fields["claimed_by"] = claimed_by
+
+    spheres = _parse_spheres_from_claim(content)
+    if spheres is not None:
+        fields["spheres"] = spheres
+
+    if amount is None:
         return ParseResult(
             kind=MessageKind.KAKERA_CLAIM,
             summary="Kakera claim (unparsed)",
             fields=fields,
             warnings=["Could not parse +N ($k) amount"],
         )
-
-    fields["amount"] = int(amount_match.group(1).replace(",", ""))
-    spheres = _parse_spheres_from_claim(content)
-    if spheres is not None:
-        fields["spheres"] = spheres
-
-    pre_match = clean[: amount_match.start()].strip()
-
-    if "breaks down into" in pre_match:
-        pre_match = pre_match.split("breaks down into")[-1].strip()
-
-    pre_match = re.sub(r"^<a?:[\w~]+:\d+>", "", pre_match).strip()
-    pre_match = re.sub(r"^:[\w~]+:", "", pre_match).strip()
-    pre_match = re.sub(r"^=>", "", pre_match).strip()
-    for info in KAKERA_INFO.values():
-        if pre_match.startswith(info["emoji"]):
-            pre_match = pre_match[len(info["emoji"]) :].strip()
-
-    fields["claimed_by"] = pre_match.strip() or None
-    if not fields["claimed_by"]:
+    if not claimed_by:
         warnings.append("Could not extract username from kakera line")
 
-    ktype = fields.get("kakera_type", "kakera")
-    summary = f"Kakera claim · +{fields['amount']} · {fields.get('claimed_by') or '?'}"
+    summary = f"Kakera claim · {kakera_type or 'kakera'} · +{amount} · {claimed_by or '?'}"
     if spheres is not None:
         summary += f" · +{spheres} sp"
     return ParseResult(
@@ -118,4 +146,15 @@ def parse_keys(description: str) -> list[dict[str, Any]]:
     pattern = r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}(\d+)\*{0,2}\)"
     for match in re.finditer(pattern, description, re.IGNORECASE):
         keys.append({"type": match.group(1).lower(), "level": int(match.group(2))})
+    return keys
+
+
+def parse_omega_keys(description: str) -> list[dict[str, Any]]:
+    """Omega keys gained on this roll, e.g. ``<:omegakey:...> **+1**``."""
+    if not description:
+        return []
+    keys: list[dict[str, Any]] = []
+    pattern = r"<:omegakey:\d+>\s*\*{0,2}\+?([\d,]+)\*{0,2}"
+    for match in re.finditer(pattern, description, re.IGNORECASE):
+        keys.append({"gain": int(match.group(1).replace(",", ""))})
     return keys
