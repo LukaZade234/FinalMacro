@@ -14,6 +14,7 @@ Item {
     }
 
     property var stateData: ({})
+    property var ruleTrace: []
 
     function refreshState() {
         try {
@@ -21,6 +22,22 @@ Item {
         } catch (e) {
             stateData = {}
         }
+    }
+
+    function refreshRuleTrace() {
+        try {
+            ruleTrace = JSON.parse(App.ruleTraceJson)
+        } catch (e) {
+            ruleTrace = []
+        }
+    }
+
+    function decisionColor(decision) {
+        if (decision === "claim")
+            return Theme.success
+        if (decision === "click")
+            return Theme.accentPrimary
+        return Theme.fgMuted
     }
 
     function macroIsRunning() {
@@ -67,6 +84,7 @@ Item {
         }
         function onMacroLogChanged() {
             activityLog.text = App.macroActivityLog || "No activity yet."
+            runRoot.refreshRuleTrace()
         }
     }
 
@@ -222,12 +240,73 @@ Item {
                         }
                     }
                 }
+
+                PanelCard {
+                    title: "Rule trace"
+                    Layout.fillWidth: true
+                    Layout.minimumHeight: 140
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Label {
+                            visible: ruleTrace.length === 0
+                            text: "No decisions yet. The macro will log each claim/click reason here."
+                            color: Theme.fgMuted
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Repeater {
+                            model: ruleTrace.slice(-5)
+                            delegate: RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 6; height: 18; radius: 3
+                                    color: runRoot.decisionColor(modelData.decision)
+                                }
+                                Label {
+                                    text: "roll " + modelData.roll_index
+                                    color: Theme.fgMuted
+                                    font.pixelSize: 10
+                                    font.family: "Consolas, monospace"
+                                    Layout.preferredWidth: 50
+                                }
+                                Label {
+                                    text: modelData.block
+                                    color: Theme.fgSecondary
+                                    font.pixelSize: 10
+                                    Layout.preferredWidth: 70
+                                }
+                                Label {
+                                    text: modelData.decision
+                                    color: runRoot.decisionColor(modelData.decision)
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    Layout.preferredWidth: 50
+                                }
+                                Label {
+                                    text: modelData.character + " · " + modelData.reason
+                                    color: Theme.fgPrimary
+                                    font.pixelSize: 10
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     Component.onCompleted: {
         refreshState()
+        refreshRuleTrace()
         controlBar.connected = App.connected
         controlBar.macroRunning = macroIsRunning()
         phaseStepper.currentPhase = App.macroPhase

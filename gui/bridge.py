@@ -57,6 +57,21 @@ def profile_kind_from_parse(parsed: ParseResult) -> str | None:
     return None
 
 
+def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``patch`` into a copy of ``base``.
+
+    Lists and scalars from ``patch`` replace those in ``base``. ``None`` in
+    ``patch`` clears the key.
+    """
+    result = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def profile_fields_from_parse(parsed: ParseResult, kind: str) -> dict[str, Any]:
     if kind == "settings":
         allowed = set(SETTINGS_FIELD_KEYS)
@@ -120,6 +135,10 @@ class AppBridge(QObject):
     @Property(str, constant=False, notify=macroLogChanged)
     def macroActivityLog(self) -> str:
         return "\n".join(self._macro_state.activity_log)
+
+    @Property(str, constant=False, notify=macroLogChanged)
+    def ruleTraceJson(self) -> str:
+        return json.dumps([entry.to_dict() for entry in self._macro_state.rule_trace[-12:]])
 
     @Property(int, constant=False, notify=macroStateChanged)
     def macroRollsLeft(self) -> int:
@@ -437,9 +456,17 @@ class AppBridge(QObject):
         if not preset:
             return ""
         data = preset.to_dict()
+        # Legacy aliases used by MacroConfigForm.qml (read from character_claim).
+        character = data.get("character_claim") or {}
+        if key == "auto_claim_wish":
+            return "true" if character.get("claim_on_wish_ping") else "false"
+        if key in {"claim_best_at_claim_reset", "auto_claim"}:
+            return "true" if character.get("enabled") else "false"
         val = data.get(key, "")
         if isinstance(val, bool):
             return "true" if val else "false"
+        if isinstance(val, (dict, list)):
+            return json.dumps(val)
         return str(val)
 
     @Slot(str, str, str)
@@ -448,14 +475,84 @@ class AppBridge(QObject):
         if not preset:
             return
         data = preset.to_dict()
-        if key in {"auto_claim_wish", "claim_best_at_claim_reset", "auto_claim"}:
-            data[key] = value.lower() in {"1", "true", "yes", "on"}
+        character = data.get("character_claim") or {}
+        if key == "auto_claim_wish":
+            character["claim_on_wish_ping"] = value.lower() in {"1", "true", "yes", "on"}
+            data["character_claim"] = character
+        elif key in {"claim_best_at_claim_reset", "auto_claim"}:
+            character["enabled"] = value.lower() in {"1", "true", "yes", "on"}
+            data["character_claim"] = character
         elif key == "rolls_left_stop":
             data[key] = int(value) if value.strip().isdigit() else data.get(key, 0)
         elif key == "roll_delay_sec":
             data[key] = float(value) if value.strip() else 0.6
         else:
             data[key] = value
+        self._presets.update_preset(preset_id, MacroConfig.from_dict(data))
+        if preset_id == self._presets.active_preset_id:
+            self._apply_active_preset_to_engine()
+        self._notify_config()
+        self._persist()
+
+    @Slot(str, result=str)
+    def getPresetRulesJson(self, preset_id: str) -> str:
+        """Return the full rules tree for a preset (all three blocks)."""
+        preset = self._presets.find_preset(preset_id)
+        if not preset:
+            return ""
+        data = preset.to_dict()
+        return json.dumps(
+            {
+                "preset_id": preset_id,
+                "basic": {
+                    "roll_command": data["roll_command"],
+                    "prefix": data["prefix"],
+                    "roll_delay_sec": data["roll_delay_sec"],
+                    "rolls_left_stop": data["rolls_left_stop"],
+                    "claim_expire_sec": data["claim_expire_sec"],
+                    "claim_reset_margin_minutes": data["claim_reset_margin_minutes"],
+                },
+                "character_claim": data["character_claim"],
+                "kakera_reaction": data["kakera_reaction"],
+                "sphere_reaction": data["sphere_reaction"],
+            }
+        )
+
+    @Slot(str, str)
+    def updatePresetRules(self, preset_id: str, patch_json: str) -> None:
+        """Deep-merge a JSON patch into a preset's rules tree and persist."""
+        preset = self._presets.find_preset(preset_id)
+        if not preset:
+            return
+        try:
+            patch = json.loads(patch_json) if patch_json else {}
+        except json.JSONDecodeError:
+            return
+        if not isinstance(patch, dict):
+            return
+
+        data = preset.to_dict()
+        basic_patch = patch.get("basic")
+        if isinstance(basic_patch, dict):
+            for key in (
+                "roll_command",
+                "prefix",
+                "roll_delay_sec",
+                "rolls_left_stop",
+                "claim_expire_sec",
+                "claim_reset_margin_minutes",
+            ):
+                if key in basic_patch:
+                    data[key] = basic_patch[key]
+
+        for block in ("character_claim", "kakera_reaction", "sphere_reaction"):
+            block_patch = patch.get(block)
+            if isinstance(block_patch, dict):
+                current = data.get(block) or {}
+                if not isinstance(current, dict):
+                    current = {}
+                data[block] = _deep_merge(current, block_patch)
+
         self._presets.update_preset(preset_id, MacroConfig.from_dict(data))
         if preset_id == self._presets.active_preset_id:
             self._apply_active_preset_to_engine()

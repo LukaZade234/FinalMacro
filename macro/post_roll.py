@@ -11,6 +11,7 @@ from mudae.buttons import is_claim_button
 
 from macro.actions import DiscordActions
 from macro.config import MacroConfig
+from macro.rule_eval import passes_character_claim
 from macro.state import AccountState
 
 
@@ -100,8 +101,9 @@ class PostRollHandler:
     async def claim_record(self, record: RollRecord, *, reason: str = "") -> bool:
         """Claim one roll immediately (interrupt path). Returns True if claim attempted."""
         prefix = f"{reason}: " if reason else ""
-        if not self._config.auto_claim_wish:
-            self._log(f"{prefix}wish auto-claim off — skipped")
+        rules = self._config.character_claim
+        if not (rules.enabled or rules.claim_on_wish_ping):
+            self._log(f"{prefix}character claim off — skipped")
             return False
         if self._state.claim_available is False:
             self._log(f"{prefix}claim on cooldown — skipped")
@@ -124,12 +126,18 @@ class PostRollHandler:
         records: list[RollRecord],
         *,
         context: str = "final roll batch",
+        final_hour: bool = True,
     ) -> None:
-        """Claim the best character from this roll session only (buttons expire ~45s)."""
+        """Claim the best character from this roll session only (buttons expire ~45s).
+
+        Eligibility is filtered through ``character_claim`` rules so hard filters
+        (chaos key / sphere count / rank caps / min kakera) apply to the picker.
+        """
         if not records:
             return
-        if not self._config.claim_best_at_claim_reset:
-            self._log(f"{len(records)} roll(s) this session; claim at reset off")
+        rules = self._config.character_claim
+        if not rules.enabled:
+            self._log(f"{len(records)} roll(s) this session; character claim off")
             return
         if self._state.claim_available is False:
             self._log(f"{len(records)} roll(s) this session; claim on cooldown")
@@ -145,16 +153,44 @@ class PostRollHandler:
                 "only this session's fresh rolls count"
             )
 
-        best = pick_best_claimable(live, expire_sec=expire, now=now)
-        if best is None:
-            self._log(f"No claimable rolls left in this batch (within {expire}s)")
+        eligible: list[RollRecord] = []
+        skipped: list[tuple[str, str]] = []
+        for record in live:
+            if not record.fields.get("can_claim") or record.fields.get("claimed"):
+                continue
+            decision = passes_character_claim(
+                record.fields,
+                rules,
+                self._state,
+                final_hour=final_hour,
+                wished_pinged=False,
+            )
+            if decision.should_claim or decision.reason == "eligible at end of batch":
+                eligible.append(record)
+            else:
+                skipped.append((record.character_name or "?", decision.reason))
+
+        if not eligible:
+            if skipped:
+                reason_summary = ", ".join(
+                    f"{name} ({reason})" for name, reason in skipped[:3]
+                )
+                more = f" (+{len(skipped) - 3} more)" if len(skipped) > 3 else ""
+                self._log(
+                    f"No eligible rolls for end-of-batch claim: {reason_summary}{more}"
+                )
+            else:
+                self._log(
+                    f"No claimable rolls left in this batch (within {expire}s)"
+                )
             return
 
+        best = max(eligible, key=lambda r: roll_total_kakera(r.fields))
         value = roll_total_kakera(best.fields)
         name = best.character_name or "?"
         self._log(
             f"Best this batch: {name} ({value} ka) — claiming at {context} "
-            f"({len(live)} eligible)"
+            f"({len(eligible)} eligible)"
         )
         await self._try_claim(best)
 

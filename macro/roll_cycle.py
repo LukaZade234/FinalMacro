@@ -11,10 +11,12 @@ from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
+from macro.kakera_reactor import KakeraReactor
 from macro.post_roll import PostRollHandler, RollRecord
-from macro.roll_interrupts import RollInterruptContext, evaluate_roll_interrupts
+from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
 from macro.roll_stop import RollStopTracker
-from macro.state import AccountState, MacroPhase
+from macro.sphere_reactor import SphereReactor
+from macro.state import AccountState, MacroPhase, RuleTraceEntry
 
 
 class RollCycleEngine:
@@ -61,6 +63,22 @@ class RollCycleEngine:
             self._actions,
             self._config,
             self._state,
+            log=self._log,
+        )
+
+    def _make_kakera_reactor(self) -> KakeraReactor:
+        return KakeraReactor(
+            actions=self._actions,
+            config=self._config,
+            state=self._state,
+            log=self._log,
+        )
+
+    def _make_sphere_reactor(self) -> SphereReactor:
+        return SphereReactor(
+            actions=self._actions,
+            config=self._config,
+            state=self._state,
             log=self._log,
         )
 
@@ -191,14 +209,26 @@ class RollCycleEngine:
                 )
                 session_records.append(record)
 
-                interrupt = evaluate_roll_interrupts(
+                interrupt = evaluate_claim_trigger(
                     RollInterruptContext(
                         fields=fields,
                         own_user_ids=self._state.own_user_ids,
-                    )
+                    ),
+                    self._config.character_claim,
+                    self._state,
+                    final_hour=self._final_roll_session,
                 )
                 if interrupt is not None:
                     self._log(f"{interrupt.reason} — stop rolling, claim now")
+                    self._state.append_rule_trace(
+                        RuleTraceEntry(
+                            block="character",
+                            roll_index=roll_index,
+                            character=name,
+                            decision="claim",
+                            reason=interrupt.reason,
+                        )
+                    )
                     stop_rolling = True
                     self._state.phase = MacroPhase.POST_ROLL
                     self._notify()
@@ -207,6 +237,17 @@ class RollCycleEngine:
                         reason=interrupt.reason,
                     )
                     break
+
+                await self._make_kakera_reactor().react(
+                    message_id=snapshot.message_id,
+                    fields=fields,
+                    roll_index=roll_index,
+                )
+                await self._make_sphere_reactor().react(
+                    message_id=snapshot.message_id,
+                    fields=fields,
+                    roll_index=roll_index,
+                )
 
                 if rl is not None and int(rl) == self._roll_stop.threshold and not self._roll_stop.saw_warning:
                     self._log(
@@ -231,12 +272,23 @@ class RollCycleEngine:
                 await self._make_post_roll_handler().claim_best(
                     session_records,
                     context="final roll hour before claim reset",
+                    final_hour=True,
                 )
             elif session_records and not claimed_via_interrupt and not self._final_roll_session:
-                self._log(
-                    f"Rolled {len(session_records)} this hour — "
-                    "claim best skipped (not final hour; buttons expire)"
-                )
+                rules = self._config.character_claim
+                if rules.enabled and not rules.only_final_hour:
+                    self._state.phase = MacroPhase.POST_ROLL
+                    self._notify()
+                    await self._make_post_roll_handler().claim_best(
+                        session_records,
+                        context="batch end (any hour)",
+                        final_hour=False,
+                    )
+                else:
+                    self._log(
+                        f"Rolled {len(session_records)} this hour — "
+                        "claim best skipped (not final hour; buttons expire)"
+                    )
 
             self._log("Macro finished")
         except asyncio.CancelledError:

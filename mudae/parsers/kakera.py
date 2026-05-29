@@ -9,8 +9,11 @@ from mudae.constants import KAKERA_INFO
 from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
+# kakera[A-Z]? already matches every single-letter variant (kakeraC, kakeraD,
+# kakeraP, kakeraT, kakeraG, kakeraL, kakeraW, kakeraR, kakeraO, kakeraY) plus
+# the bare ``kakera`` (blue / default).
 _KAKERA_EMOJI_RE = re.compile(
-    r"<:(kakera[A-Z]?|kakeraP|kakeraT|kakeraG|kakeraL|kakeraW|kakeraR|kakeraO|kakeraY):\d+>",
+    r"<:(kakera[A-Z]?):\d+>",
     re.IGNORECASE,
 )
 # ``**user +5,934** ($k)`` or ``=> **user +5,934** ($k)`` or ``User +546 ($k)``
@@ -129,7 +132,7 @@ def parse_individual_kakera(description: str) -> dict[str, int]:
     kakera_map: dict[str, int] = {}
     pattern = (
         r"\*{0,2}(\d{1,3}(?:,\d{3})*|\d+)\*{0,2}\s*"
-        r"<:(kakera[A-Z]?|kakeraP|kakeraT|kakeraG|kakeraL|kakeraW|kakeraR|kakeraO|kakeraY):\d+>"
+        r"<:(kakera[A-Z]?):\d+>"
     )
     for match in re.finditer(pattern, description, re.IGNORECASE):
         try:

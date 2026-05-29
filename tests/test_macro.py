@@ -125,14 +125,20 @@ def test_final_roll_session_detection():
 
 
 def test_macro_config_roundtrip():
+    from macro.config import CharacterClaimRules
+
     cfg = MacroConfig(
         roll_command="wa",
         rolls_left_stop=2,
-        auto_claim_wish=True,
-        claim_best_at_claim_reset=False,
+        character_claim=CharacterClaimRules(
+            enabled=False,
+            claim_on_wish_ping=True,
+        ),
     )
     restored = MacroConfig.from_dict(cfg.to_dict())
     assert restored.rolls_left_stop == 2
+    assert restored.character_claim.claim_on_wish_ping is True
+    assert restored.character_claim.enabled is False
     assert restored.auto_claim_wish is True
     assert restored.claim_best_at_claim_reset is False
     assert restored.normalized_roll_command() == "wa"
