@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import gui 1.0
 import "../components"
@@ -31,6 +32,17 @@ Item {
     }
 
     ListModel { id: messageModel }
+
+    FileDialog {
+        id: saveLogDialog
+        title: "Save parse log"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["JSON files (*.json)"]
+        defaultSuffix: "json"
+        onAccepted: {
+            connStatusLabel.text = App.saveParseLabLogToPath(selectedFile.toString())
+        }
+    }
 
     Connections {
         target: App
@@ -134,13 +146,33 @@ Item {
                         onClicked: App.disconnect()
                     }
                     Button {
+                        text: "Save log"
+                        flat: true
+                        contentItem: Label {
+                            text: parent.text
+                            color: Theme.fgSecondary
+                        }
+                        onClicked: {
+                            if (App.parseLabLogCount() === 0) {
+                                connStatusLabel.text = "No messages to save"
+                                return
+                            }
+                            saveLogDialog.currentFolder = App.getDataDirUrl()
+                            saveLogDialog.currentFile = App.getParseLabDefaultSaveUrl()
+                            saveLogDialog.open()
+                        }
+                    }
+                    Button {
                         text: "Clear"
                         flat: true
                         contentItem: Label {
                             text: parent.text
                             color: Theme.fgSecondary
                         }
-                        onClicked: messageModel.clear()
+                        onClicked: {
+                            messageModel.clear()
+                            App.clearParseLabLog()
+                        }
                     }
                 }
 

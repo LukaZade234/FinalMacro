@@ -13,6 +13,23 @@ CLAIM_EMOJIS = frozenset({"💍", "💖", "💝", "\U0001f498"})
 # Sphere button emoji names (sp + color letter, e.g. spY).
 SPHERE_EMOJI_PREFIX = "sp"
 
+# --- $oh sphere minigame ---------------------------------------------------
+# Face-down (not yet revealed) grid button.
+SPHERE_HIDDEN_EMOJI = "spU"
+# Colors whose only role is to unveil more buttons (blue unveils 3, teal 1).
+# Per strategy these are never clicked once revealed — we let them stay so the
+# higher-value spheres they expose can be taken instead.
+SPHERE_REVEAL_EMOJIS = frozenset({"spB", "spT"})
+# Rough payout ranking used to pick between revealed value spheres (higher is
+# better). Unknown revealed colors default to 0 but are still clickable.
+SPHERE_VALUE_RANK = {
+    "spG": 1,  # green
+    "spY": 2,  # yellow
+    "spO": 3,  # orange
+    "spR": 4,  # red
+    "spW": 5,  # rainbow
+}
+
 KAKERA_EMOJIS = frozenset({
     "kakera",   # blue (default)
     "kakeraP",  # purple — free

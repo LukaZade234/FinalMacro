@@ -13,6 +13,7 @@ ColumnLayout {
     signal runTuClicked()
     signal startClicked()
     signal stopClicked()
+    signal playOhClicked()
 
     spacing: 10
 
@@ -121,6 +122,30 @@ ColumnLayout {
                 verticalAlignment: Text.AlignVCenter
             }
             onClicked: bar.stopClicked()
+        }
+    }
+
+    RowLayout {
+        spacing: 8
+        Layout.fillWidth: true
+
+        Button {
+            text: "Play $oh"
+            enabled: bar.connected && !bar.macroRunning
+            Layout.fillWidth: true
+            implicitHeight: 40
+            background: Rectangle {
+                radius: 8
+                color: Theme.bgLight
+                opacity: parent.enabled ? 1 : 0.45
+            }
+            contentItem: Text {
+                text: parent.text
+                color: Theme.fgPrimary
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+            onClicked: bar.playOhClicked()
         }
     }
 }

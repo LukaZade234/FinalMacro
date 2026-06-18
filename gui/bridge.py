@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, QUrl, Signal, Slot
 
 from gui.accounts import AccountStore
 from gui.presets import PresetStore
@@ -16,8 +18,10 @@ from gui.server_profiles import ServerProfileStore
 from gui.settings import load_settings, save_app_settings
 from gui.targets import TargetStore
 from macro.actions import DiscordActions
+from macro.activity_log import ActivityLog
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
+from macro.sphere_game import OhSphereGame
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
@@ -115,6 +119,8 @@ class AppBridge(QObject):
         self._actions: DiscordActions | None = None
         self._engine: RollCycleEngine | None = None
         self._stop_event: asyncio.Event | None = None
+        self._parse_lab_entries: list[dict[str, Any]] = []
+        self._oh_running = False
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -575,7 +581,63 @@ class AppBridge(QObject):
 
     @Slot(str)
     def _deliver_entry_json(self, payload_json: str) -> None:
-        self.entryReceived.emit(json.loads(payload_json))
+        entry = json.loads(payload_json)
+        self._parse_lab_entries.insert(0, entry)
+        if len(self._parse_lab_entries) > 500:
+            del self._parse_lab_entries[500:]
+        self.entryReceived.emit(entry)
+
+    @Slot()
+    def clearParseLabLog(self) -> None:
+        self._parse_lab_entries.clear()
+
+    @Slot(result=int)
+    def parseLabLogCount(self) -> int:
+        return len(self._parse_lab_entries)
+
+    @Slot(result=str)
+    def getDataDirUrl(self) -> str:
+        data_dir = Path(__file__).resolve().parent.parent / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return QUrl.fromLocalFile(str(data_dir)).toString()
+
+    @Slot(result=str)
+    def getParseLabDefaultSaveUrl(self) -> str:
+        data_dir = Path(__file__).resolve().parent.parent / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        default_name = f"parse_lab_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        return QUrl.fromLocalFile(str(data_dir / default_name)).toString()
+
+    def _parse_lab_log_payload(self) -> dict[str, Any]:
+        return {
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "channel_id": self.getChannelId(),
+            "channel_label": self.activeChannelLabel,
+            "status": self._status,
+            "entry_count": len(self._parse_lab_entries),
+            "entries": list(reversed(self._parse_lab_entries)),
+        }
+
+    @Slot(str, result=str)
+    def saveParseLabLogToPath(self, path_or_url: str) -> str:
+        if not self._parse_lab_entries:
+            return "No messages to save"
+
+        path = QUrl(path_or_url).toLocalFile() if path_or_url.startswith("file:") else path_or_url
+        if not path:
+            return "Save cancelled"
+        if not path.lower().endswith(".json"):
+            path += ".json"
+
+        payload = self._parse_lab_log_payload()
+        try:
+            Path(path).write_text(
+                json.dumps(payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return f"Save failed: {exc}"
+        return f"Saved {len(self._parse_lab_entries)} entries to {path}"
 
     @Slot(str)
     def _deliver_status(self, text: str) -> None:
@@ -787,6 +849,32 @@ class AppBridge(QObject):
     def stopMacro(self) -> None:
         if self._engine and self._loop:
             self._loop.call_soon_threadsafe(self._engine.stop)
+
+    @Slot()
+    def playOhSphere(self) -> None:
+        if not self._loop or not self._actions or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._engine and self._engine.is_running:
+            self._set_status("Stop the macro before playing $oh")
+            return
+        if self._oh_running:
+            self._set_status("$oh game already running")
+            return
+
+        activity = ActivityLog(self._macro_state, on_update=self._notify_macro)
+        game = OhSphereGame(self._actions, self._monitor, log=activity.write)
+        self._oh_running = True
+
+        async def _run() -> None:
+            try:
+                await game.play(prefix=self._macro_config.prefix)
+            except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                activity.write(f"$oh error: {exc}")
+            finally:
+                self._oh_running = False
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
 
     @Slot()
     def fetchSettings(self) -> None:

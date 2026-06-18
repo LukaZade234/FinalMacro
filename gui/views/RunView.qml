@@ -177,6 +177,7 @@ Item {
                         onRunTuClicked: App.runTu()
                         onStartClicked: App.startMacro()
                         onStopClicked: App.stopMacro()
+                        onPlayOhClicked: App.playOhSphere()
                     }
                 }
 
