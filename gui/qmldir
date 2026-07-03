@@ -1,2 +1,3 @@
 module gui
 singleton Theme 1.0 Theme.qml
+singleton SphereAssets 1.0 SphereAssets.qml

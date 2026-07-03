@@ -21,6 +21,10 @@ OnEntryCallback = Callable[[dict[str, Any]], None]
 OnStatusCallback = Callable[[str], None]
 OnParsedCallback = Callable[[MudaeMessageSnapshot, ParseResult], None]
 
+# Keep only the most recent messages for button clicks; older ones can be
+# re-fetched on demand. Prevents unbounded memory growth in long sessions.
+_MESSAGE_CACHE_MAX = 300
+
 
 class ChannelMonitor:
     """Connect with a user token and capture every message in a channel."""
@@ -86,13 +90,20 @@ class ChannelMonitor:
         self._pending_macro_command = cmd.lower()
         await channel.send(f"{pre}{cmd}")
 
+    def _remember_message(self, message: discord.Message) -> None:
+        self._messages[message.id] = message
+        if len(self._messages) > _MESSAGE_CACHE_MAX:
+            # dicts preserve insertion order; drop the oldest entries.
+            for stale_id in list(self._messages)[: len(self._messages) - _MESSAGE_CACHE_MAX]:
+                del self._messages[stale_id]
+
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         message = self._messages.get(message_id)
         if message is None:
             channel = await self._get_text_channel()
             try:
                 message = await channel.fetch_message(message_id)
-                self._messages[message_id] = message
+                self._remember_message(message)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 return False
         for row in message.components or []:
@@ -124,7 +135,7 @@ class ChannelMonitor:
     async def _handle_message(self, message: discord.Message, *, edited: bool) -> None:
         if message.channel.id != self.channel_id:
             return
-        self._messages[message.id] = message
+        self._remember_message(message)
         snapshot = snapshot_from_message(message, edited=edited)
 
         # Roll embed edits: only show when a claim message was seen and footer matches it.

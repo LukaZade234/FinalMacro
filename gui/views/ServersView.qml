@@ -16,7 +16,11 @@ Item {
     property var serverData: ({ servers: [] })
     property int selectedServerIndex: 0
     property int selectedChannelIndex: -1
+    property int serverListCount: 0
+    property int channelListCount: 0
     property bool _syncing: false
+    property bool pendingSelectLastServer: false
+    property string pendingChannelSelectId: ""
     property string settingsPreviewText: "No channel selected."
     property string bonusPreviewText: "No channel selected."
 
@@ -43,12 +47,20 @@ Item {
         return chs[selectedChannelIndex]
     }
 
+    function isActiveRunChannel() {
+        var s = currentServer()
+        var c = currentChannel()
+        if (!s || !c)
+            return false
+        return s.id === serverData.active_server_id && c.id === serverData.active_channel_id
+    }
+
     function buildSettingsPreview(ch) {
         if (!ch)
             return "No channel selected."
         var keys = Object.keys(ch.settings || {})
         if (keys.length === 0)
-            return "No $settings yet — connect on Run, select this channel, then Fetch $settings."
+            return "No $settings yet — set this channel on Run, connect, then Fetch $settings."
         var body = JSON.stringify(ch.settings, null, 2)
         if (ch.settings_summary)
             return ch.settings_summary + "\n\n" + body
@@ -73,31 +85,90 @@ Item {
         bonusPreviewText = buildBonusPreview(ch)
     }
 
+    function clampServerIndex() {
+        var list = servers()
+        if (list.length === 0) {
+            selectedServerIndex = -1
+            return
+        }
+        if (selectedServerIndex >= list.length)
+            selectedServerIndex = list.length - 1
+        if (selectedServerIndex < 0)
+            selectedServerIndex = 0
+    }
+
+    function clampChannelIndex() {
+        var chs = channelsForServer()
+        if (chs.length === 0) {
+            selectedChannelIndex = -1
+            return
+        }
+        if (selectedChannelIndex < 0 || selectedChannelIndex >= chs.length)
+            selectedChannelIndex = 0
+    }
+
+    function selectChannelById(channelProfileId) {
+        if (!channelProfileId)
+            return false
+        var chs = channelsForServer()
+        for (var i = 0; i < chs.length; i++) {
+            if (chs[i].id === channelProfileId) {
+                selectedChannelIndex = i
+                return true
+            }
+        }
+        return false
+    }
+
+    function updateListCounts() {
+        serverListCount = servers().length
+        channelListCount = channelsForServer().length
+    }
+
+    function applyListIndices() {
+        if (serverList)
+            serverList.currentIndex = selectedServerIndex >= 0 ? selectedServerIndex : -1
+        if (channelList)
+            channelList.currentIndex = channelListCount > 0 ? selectedChannelIndex : -1
+    }
+
     function syncListIndices() {
         _syncing = true
-        if (serverList)
-            serverList.currentIndex = selectedServerIndex
-        if (channelList)
-            channelList.currentIndex = selectedChannelIndex
+        clampServerIndex()
+        clampChannelIndex()
+        updateListCounts()
+        applyListIndices()
         _syncing = false
     }
 
     function refreshServerData() {
+        _syncing = true
         try {
             serverData = JSON.parse(App.serversJson)
         } catch (e) {
             serverData = { servers: [] }
         }
-        var list = servers()
-        if (selectedServerIndex >= list.length)
-            selectedServerIndex = Math.max(0, list.length - 1)
-        if (selectedChannelIndex >= channelsForServer().length)
-            selectedChannelIndex = channelsForServer().length > 0 ? 0 : -1
-        syncListIndices()
+        if (pendingSelectLastServer) {
+            pendingSelectLastServer = false
+            selectedServerIndex = Math.max(0, servers().length - 1)
+            selectedChannelIndex = -1
+        }
+        clampServerIndex()
+        if (pendingChannelSelectId) {
+            if (!selectChannelById(pendingChannelSelectId))
+                clampChannelIndex()
+            pendingChannelSelectId = ""
+        } else {
+            clampChannelIndex()
+        }
+        updateListCounts()
+        applyListIndices()
+        _syncing = false
         updatePreviewText()
     }
 
     function syncFromActiveRunTarget() {
+        _syncing = true
         try {
             serverData = JSON.parse(App.serversJson)
         } catch (e) {
@@ -117,20 +188,32 @@ Item {
                 break
             }
         }
-        if (selectedServerIndex >= list.length)
-            selectedServerIndex = Math.max(0, list.length - 1)
-        if (selectedChannelIndex >= channelsForServer().length)
-            selectedChannelIndex = channelsForServer().length > 0 ? 0 : -1
-        syncListIndices()
+        clampServerIndex()
+        clampChannelIndex()
+        updateListCounts()
+        applyListIndices()
+        _syncing = false
         updatePreviewText()
     }
 
     function onServerSelectionChanged() {
         if (_syncing)
             return
+        _syncing = true
+        if (servers().length === 0) {
+            selectedServerIndex = -1
+            selectedChannelIndex = -1
+            updateListCounts()
+            applyListIndices()
+            _syncing = false
+            updatePreviewText()
+            return
+        }
         selectedServerIndex = serverList.currentIndex
-        selectedChannelIndex = channelsForServer().length > 0 ? 0 : -1
-        syncListIndices()
+        clampChannelIndex()
+        updateListCounts()
+        applyListIndices()
+        _syncing = false
         updatePreviewText()
     }
 
@@ -148,14 +231,18 @@ Item {
         }
     }
 
-    RowLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 16
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 560
+            spacing: 16
 
         PanelCard {
             Layout.preferredWidth: 240
             Layout.maximumWidth: 280
-            Layout.fillHeight: true
+            Layout.preferredHeight: 560
             title: "Servers"
             titleSize: 14
             fillContentVertically: true
@@ -168,22 +255,19 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
-                    TextField {
+                    ThemedTextField {
                         id: newServerField
                         Layout.fillWidth: true
                         placeholderText: "Server name"
-                        color: Theme.fgPrimary
-                        background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                     }
-                    Button {
+                    ThemedButton {
                         text: "Add"
+                        accent: true
                         enabled: newServerField.text.trim().length > 0
                         onClicked: {
+                            serversRoot.pendingSelectLastServer = true
                             App.addServer(newServerField.text.trim())
                             newServerField.text = ""
-                            refreshServerData()
-                            selectedServerIndex = servers().length - 1
-                            syncListIndices()
                         }
                     }
                 }
@@ -191,21 +275,25 @@ Item {
                 ListView {
                     id: serverList
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 380
                     clip: true
-                    model: servers().length
+                    model: serversRoot.serverListCount
                     onCurrentIndexChanged: serversRoot.onServerSelectionChanged()
-                    delegate: ItemDelegate {
+                    delegate: ThemedListDelegate {
                         width: serverList.width
-                        text: servers()[index].name
+                        text: {
+                            var list = servers()
+                            return index >= 0 && index < list.length ? list[index].name : ""
+                        }
                         highlighted: ListView.isCurrentItem
                         onClicked: serverList.currentIndex = index
                     }
                 }
 
-                Button {
+                ThemedButton {
                     Layout.fillWidth: true
                     text: "Remove server"
+                    danger: true
                     enabled: servers().length > 0
                     onClicked: {
                         var s = currentServer()
@@ -219,7 +307,7 @@ Item {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 560
             spacing: 12
 
             PanelCard {
@@ -237,28 +325,33 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 6
-                        TextField {
+                        ThemedTextField {
                             id: chNameField
                             Layout.preferredWidth: 120
                             placeholderText: "Label"
-                            color: Theme.fgPrimary
-                            background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                         }
-                        TextField {
+                        ThemedTextField {
                             id: chIdField
                             Layout.fillWidth: true
                             placeholderText: "Discord channel ID"
-                            color: Theme.fgPrimary
-                            background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                         }
-                        Button {
+                        ThemedButton {
                             text: "Add channel"
+                            accent: true
                             enabled: currentServer() && chNameField.text.trim() && chIdField.text.trim()
                             onClicked: {
-                                var sid = currentServer().id
-                                App.addChannel(sid, chNameField.text.trim(), chIdField.text.trim())
+                                var server = currentServer()
+                                if (!server)
+                                    return
+                                var newChannelId = App.addChannel(
+                                    server.id,
+                                    chNameField.text.trim(),
+                                    chIdField.text.trim()
+                                )
                                 chNameField.text = ""
                                 chIdField.text = ""
+                                if (newChannelId)
+                                    serversRoot.pendingChannelSelectId = newChannelId
                             }
                         }
                     }
@@ -268,11 +361,14 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 100
                         clip: true
-                        model: channelsForServer().length
+                        model: serversRoot.channelListCount
                         onCurrentIndexChanged: serversRoot.onChannelSelectionChanged()
-                        delegate: ItemDelegate {
+                        delegate: ThemedListDelegate {
                             width: channelList.width
-                            property var channelItem: channelsForServer()[index]
+                            property var channelItem: {
+                                var chs = channelsForServer()
+                                return index >= 0 && index < chs.length ? chs[index] : null
+                            }
                             text: channelItem ? ("#" + channelItem.name + "  (" + channelItem.channel_id + ")") : ""
                             highlighted: ListView.isCurrentItem
                             onClicked: channelList.currentIndex = index
@@ -282,40 +378,19 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
-                        Button {
-                            text: "Use on Run"
-                            enabled: currentChannel() !== null
-                            onClicked: {
-                                var s = currentServer()
-                                var c = currentChannel()
-                                if (s && c)
-                                    App.setActiveServerChannel(s.id, c.id)
-                            }
-                        }
-                        Button {
+                        ThemedButton {
                             text: "Fetch $settings"
-                            enabled: App.connected && currentChannel() !== null
-                            onClicked: {
-                                var s = currentServer()
-                                var c = currentChannel()
-                                if (s && c)
-                                    App.setActiveServerChannel(s.id, c.id)
-                                App.fetchSettings()
-                            }
+                            enabled: App.connected && serversRoot.isActiveRunChannel()
+                            onClicked: App.fetchSettings()
                         }
-                        Button {
+                        ThemedButton {
                             text: "Fetch $bonus"
-                            enabled: App.connected && currentChannel() !== null
-                            onClicked: {
-                                var s = currentServer()
-                                var c = currentChannel()
-                                if (s && c)
-                                    App.setActiveServerChannel(s.id, c.id)
-                                App.fetchBonus()
-                            }
+                            enabled: App.connected && serversRoot.isActiveRunChannel()
+                            onClicked: App.fetchBonus()
                         }
-                        Button {
+                        ThemedButton {
                             text: "Remove channel"
+                            danger: true
                             enabled: currentChannel() !== null
                             onClicked: {
                                 var s = currentServer()
@@ -329,7 +404,9 @@ Item {
 
                     Label {
                         Layout.fillWidth: true
-                        text: "Parsed data fills in when Mudae replies to $settings / $bonus on the connected channel. Add channels by name + snowflake ID."
+                        text: serversRoot.isActiveRunChannel()
+                            ? "This channel is the active Run target. Fetch works while connected."
+                            : "Fetch is only available for the channel selected on Run → Run target."
                         color: Theme.fgMuted
                         font.pixelSize: 10
                         wrapMode: Text.WordWrap
@@ -339,21 +416,26 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.preferredHeight: 220
                 spacing: 12
 
                 PanelCard {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 220
+                    Layout.preferredWidth: 100
                     title: "$settings"
                     titleSize: 13
                     fillContentVertically: true
 
                     ScrollView {
+                        id: settingsScroll
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
+                        contentWidth: availableWidth
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                         TextArea {
+                            width: settingsScroll.availableWidth
                             readOnly: true
                             wrapMode: TextArea.Wrap
                             font.family: "Consolas, monospace"
@@ -367,16 +449,21 @@ Item {
 
                 PanelCard {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 220
+                    Layout.preferredWidth: 100
                     title: "$bonus"
                     titleSize: 13
                     fillContentVertically: true
 
                     ScrollView {
+                        id: bonusScroll
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
+                        contentWidth: availableWidth
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                         TextArea {
+                            width: bonusScroll.availableWidth
                             readOnly: true
                             wrapMode: TextArea.Wrap
                             font.family: "Consolas, monospace"
@@ -388,6 +475,7 @@ Item {
                     }
                 }
             }
+        }
         }
     }
 

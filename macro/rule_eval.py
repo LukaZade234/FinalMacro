@@ -16,7 +16,19 @@ from macro.config import (
     KakeraReactionRules,
     SphereReactionRules,
 )
+from macro.perk8_daily import Perk8PriorityMode, perk8_budget_applies, perk8_requirements_relaxed
+from macro.reaction_power import (
+    can_afford_reaction,
+    display_reaction_power,
+    reaction_power_cost,
+    refresh_reaction_power,
+)
 from macro.state import AccountState
+from mudae.constants import (
+    SPHERE_ROLL_DEFAULT_EMOJI,
+    SPHERE_ROLL_DEFAULT_FILTER_IDS,
+    SPHERE_ROLL_FREE_EMOJIS,
+)
 
 
 @dataclass
@@ -74,9 +86,21 @@ def _kakera_emoji(button: dict[str, Any]) -> str:
 
 def _sphere_emoji(button: dict[str, Any]) -> str:
     emoji = _kakera_emoji(button)
+    if emoji == SPHERE_ROLL_DEFAULT_EMOJI:
+        return emoji
     if emoji.startswith("sp") and len(emoji) >= 3:
         return emoji
     return ""
+
+
+def _sphere_matches_filter(emoji: str, types_allowed: list[str]) -> bool:
+    if not types_allowed:
+        return True
+    if emoji in types_allowed:
+        return True
+    if emoji == SPHERE_ROLL_DEFAULT_EMOJI:
+        return bool(SPHERE_ROLL_DEFAULT_FILTER_IDS & set(types_allowed))
+    return False
 
 
 def _ranked_within(rank: Any, limit: int | None) -> bool:
@@ -197,10 +221,19 @@ def passes_kakera_reaction(
 
     if rules.require_chaos_key and not _has_chaos_key(fields):
         return ReactionDecision(reason="needs chaos key")
-    if rules.require_perk_8 and not fields.get("perk_8"):
+    if (
+        rules.require_perk_8
+        and not fields.get("perk_8")
+        and not perk8_requirements_relaxed(perk8_mode_from_state(state))
+    ):
         return ReactionDecision(reason="needs perk 8")
     if not _spheres_meets(fields.get("spheres"), rules.min_spheres):
         return ReactionDecision(reason=f"needs ≥{rules.min_spheres} spheres")
+
+    refresh_reaction_power(state)
+    has_chaos = _has_chaos_key(fields)
+    has_perk_8 = bool(fields.get("perk_8"))
+    power_display = display_reaction_power(state.power_percent)
 
     # Determine which color filter applies. low_power override wins below threshold.
     types_allowed = list(rules.types_allowed)
@@ -223,26 +256,59 @@ def passes_kakera_reaction(
         filter_label = ",".join(types_allowed) if types_allowed else "any"
         return ReactionDecision(reason=f"no kakera button matched filter [{filter_label}]")
 
-    # Perk-8 budget mode: don't click when over budget unless this is a perk-8 character.
-    if rules.perk_8_budget_mode and not fields.get("perk_8"):
-        remaining = state.remaining_kakera_budget(rules.daily_click_budget)
-        if remaining <= 0:
+    affordable: list[dict[str, Any]] = []
+    for button in selected:
+        cost = reaction_power_cost(
+            kakera_emoji=_kakera_emoji(button),
+            has_chaos_key=has_chaos,
+            has_perk_8=has_perk_8,
+        )
+        if can_afford_reaction(state, cost):
+            affordable.append(button)
+    if not affordable:
+        if state.power_percent is None:
+            return ReactionDecision(reason="reaction power unknown")
+        return ReactionDecision(
+            reason=f"insufficient reaction power ({power_display}%)"
+        )
+    selected = affordable
+
+    # Perk-8 budget mode: while active, skip non-perk-8 rolls to save clicks.
+    if rules.perk_8_budget_mode and perk8_budget_applies(perk8_mode_from_state(state)):
+        remaining = state.remaining_kakera_budget(perk8_click_budget(state, rules))
+        if not fields.get("perk_8"):
+            if remaining > 0:
+                return ReactionDecision(reason="saving perk-8 kakera budget")
             return ReactionDecision(reason="daily kakera budget exhausted (perk-8 only)")
 
     choices = [_make_button_choice(message_id, b) for b in selected]
     reason_parts = [f"{len(choices)} kakera"]
     if using_low_power:
         reason_parts.append(
-            f"low-power [{','.join(types_allowed) or 'all'}] @ {state.power_percent}%"
+            f"low-power [{','.join(types_allowed) or 'all'}] @ {power_display}%"
         )
     elif types_allowed:
         reason_parts.append(f"filter [{','.join(types_allowed)}]")
-    if rules.perk_8_budget_mode:
+    if rules.perk_8_budget_mode and perk8_budget_applies(perk8_mode_from_state(state)):
         reason_parts.append(
-            f"budget {state.kakera_clicks_today}/{rules.daily_click_budget}"
+            f"budget {state.kakera_clicks_today}/{perk8_click_budget(state, rules)}"
         )
 
     return ReactionDecision(buttons=choices, reason=" · ".join(reason_parts))
+
+
+def perk8_mode_from_state(state: AccountState) -> Perk8PriorityMode:
+    try:
+        return Perk8PriorityMode(state.perk8_priority_mode)
+    except ValueError:
+        return Perk8PriorityMode.INACTIVE
+
+
+def perk8_click_budget(state: AccountState, rules: KakeraReactionRules) -> int:
+    """Daily click cap: the $ohu8-reported max wins over the preset value."""
+    if state.perk8_click_max is not None:
+        return max(1, int(state.perk8_click_max))
+    return max(1, int(rules.daily_click_budget))
 
 
 # ---------------------------------------------------------------------------
@@ -271,9 +337,10 @@ def passes_sphere_reaction(
         return ReactionDecision(reason="no sphere buttons")
 
     def matches_filter(button: dict[str, Any]) -> bool:
-        if not rules.types_allowed:
+        emoji = _sphere_emoji(button)
+        if emoji in SPHERE_ROLL_FREE_EMOJIS:
             return True
-        return _sphere_emoji(button) in rules.types_allowed
+        return _sphere_matches_filter(emoji, rules.types_allowed)
 
     selected = [b for b in sphere_buttons if matches_filter(b)]
     if not selected:

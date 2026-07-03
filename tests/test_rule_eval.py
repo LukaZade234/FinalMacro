@@ -239,12 +239,13 @@ def test_kakera_perk_8_required():
 
 def test_kakera_low_power_override_replaces_filter():
     fields = _kakera_fields(_kakera_buttons("kakeraR", "kakeraW"))
+    fields["keys"] = [{"type": "chaos", "level": 1}]
     rules = KakeraReactionRules(
         enabled=True,
         types_allowed=["kakeraR", "kakeraW"],
         low_power=LowPowerOverride(below_percent=30, types_allowed=["kakeraW"]),
     )
-    state = AccountState(power_percent=20)
+    state = AccountState(power_percent=20.0, power_tracked_at=0.0)
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
     assert decision.buttons[0].emoji == "kakeraW"
@@ -268,7 +269,7 @@ def test_kakera_perk_8_budget_blocks_when_exhausted_and_not_perk_8():
     rules = KakeraReactionRules(
         enabled=True, perk_8_budget_mode=True, daily_click_budget=2
     )
-    state = AccountState()
+    state = AccountState(perk8_priority_mode="active")
     state.rollover_kakera_budget_if_needed()
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
@@ -281,7 +282,7 @@ def test_kakera_perk_8_budget_allows_perk_8_when_exhausted():
     rules = KakeraReactionRules(
         enabled=True, perk_8_budget_mode=True, daily_click_budget=2
     )
-    state = AccountState()
+    state = AccountState(perk8_priority_mode="active")
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
@@ -339,3 +340,28 @@ def test_sphere_reaction_no_filter_matches_any():
     rules = SphereReactionRules(enabled=True, types_allowed=[])
     decision = passes_sphere_reaction(fields, rules, AccountState())
     assert len(decision.buttons) == 2
+
+
+def test_sphere_reaction_default_sp_matches_red_filter():
+    fields = {"buttons": _sphere_buttons("sp"), "keys": []}
+    rules = SphereReactionRules(enabled=True, types_allowed=["spR"])
+    decision = passes_sphere_reaction(fields, rules, AccountState())
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "sp"
+
+
+def test_sphere_reaction_default_sp_matches_sp_filter():
+    fields = {"buttons": _sphere_buttons("sp"), "keys": []}
+    rules = SphereReactionRules(enabled=True, types_allowed=["sp"])
+    decision = passes_sphere_reaction(fields, rules, AccountState())
+    assert len(decision.buttons) == 1
+
+
+def test_sphere_reaction_always_clicks_megasphere():
+    fields = {"buttons": _sphere_buttons("spM", "spY"), "keys": []}
+    rules = SphereReactionRules(enabled=True, types_allowed=["spY"])
+    decision = passes_sphere_reaction(fields, rules, AccountState())
+    assert len(decision.buttons) == 2
+    emojis = {choice.emoji for choice in decision.buttons}
+    assert emojis == {"spM", "spY"}
+

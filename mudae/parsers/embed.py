@@ -15,6 +15,17 @@ def is_ownership_footer(footer: str) -> bool:
     return "belongs to" in lower or "pertence a" in lower
 
 
+def is_ownership_update_footer(footer: str) -> bool:
+    """True when the footer is *only* the ownership line (claim-confirmation edit).
+
+    Roll embeds of already-owned characters prefix the footer with key/sphere
+    counts, e.g. ``(🔑27) · Belongs to X`` — those edits are still rolls, not
+    ownership updates.
+    """
+    lower = footer.strip().lower()
+    return lower.startswith("belongs to") or lower.startswith("pertence a")
+
+
 def get_character_owner(footer: str) -> str | None:
     if not footer:
         return None

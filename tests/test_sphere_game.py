@@ -12,9 +12,15 @@ from types import SimpleNamespace
 from macro.sphere_game import (
     OhSphereGame,
     choose_oh_click,
+    grid_signature,
+    is_free_oh_click,
+    is_oh_game_over,
     is_oh_grid_message,
     is_oh_reward_message,
+    new_reward_line_types,
     parse_clicks_allowed,
+    reward_has_entries,
+    reward_line_types,
     total_reward_from_content,
 )
 
@@ -82,6 +88,20 @@ def test_is_oh_reward_message():
     assert is_oh_reward_message(_reward_snapshot("plain text")) is False
 
 
+def test_is_free_oh_click():
+    assert is_free_oh_click(_btn(0, "spP")) is True
+    assert is_free_oh_click(_btn(0, "spY")) is False
+
+
+def test_choose_prefers_free_purple_over_value_sphere():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[2]["emoji"] = "spR"
+    buttons[5]["emoji"] = "spP"
+    choice = choose_oh_click(buttons, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spP"
+
+
 def test_choose_prefers_value_sphere_over_hidden():
     buttons = [_btn(i, "spU") for i in range(25)]
     buttons[10]["emoji"] = "spY"  # yellow, clickable
@@ -105,11 +125,68 @@ def test_choose_skips_blue_and_teal_clicks_hidden():
 
 def test_choose_picks_highest_value_rank():
     buttons = [_btn(i, "spU") for i in range(25)]
-    buttons[1]["emoji"] = "spG"  # green, rank 1
-    buttons[2]["emoji"] = "spR"  # red, rank 4 (best)
+    buttons[1]["emoji"] = "spG"  # green, rank 3
+    buttons[2]["emoji"] = "spR"  # red, rank 8
     choice = choose_oh_click(buttons, rng=random.Random(0))
     assert choice is not None
     assert choice["emoji"] == "spR"
+
+
+def test_choose_prefers_rainbow_over_red():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[1]["emoji"] = "spR"
+    buttons[2]["emoji"] = "spW"
+    choice = choose_oh_click(buttons, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spW"
+
+
+def test_choose_prefers_value_over_blue_when_both_revealed():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[3]["emoji"] = "spB"  # skip
+    buttons[7]["emoji"] = "spY"
+    choice = choose_oh_click(buttons, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spY"
+
+
+def test_choose_respects_click_budget():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[1]["emoji"] = "spY"
+    assert choose_oh_click(buttons, clicks_spent=5, clicks_budget=5) is None
+    buttons[4]["emoji"] = "spP"
+    choice = choose_oh_click(buttons, clicks_spent=5, clicks_budget=5, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spP"
+
+
+def test_reward_line_parsing():
+    content = (
+        "<:spY:1> **+59**\n"
+        "<:spY:1> **+59**\n"
+        "<:spP:2> **+42**"
+    )
+    assert reward_line_types(content) == ["spY", "spY", "spP"]
+    assert reward_has_entries(content) is True
+    assert reward_has_entries("(Rewards appear here)") is False
+    before = "<:spY:1> **+59**"
+    assert new_reward_line_types(before, content) == ["spY", "spP"]
+
+
+def test_grid_signature_detects_disabled_change():
+    before = [_btn(0, "spD")]
+    after = [_btn(0, "spD", disabled=True)]
+    assert grid_signature(before) != grid_signature(after)
+
+
+def test_is_oh_game_over_when_all_disabled():
+    buttons = [_btn(i, "spU", disabled=True) for i in range(25)]
+    assert is_oh_game_over(buttons) is True
+
+
+def test_is_oh_game_over_false_while_clickable_remain():
+    buttons = [_btn(i, "spU", disabled=(i == 0)) for i in range(25)]
+    assert is_oh_game_over(buttons) is False
 
 
 def test_choose_returns_none_when_all_disabled():
@@ -160,11 +237,11 @@ def test_oh_game_plays_until_clicks_exhausted():
         content="You can click **2** times on the buttons below.",
     )
     grid1 = _grid_snapshot(
-        [_btn(i, "spY" if i in (10, 19) else "spU", disabled=(i == 0)) for i in range(25)],
+        [_btn(i, "spY" if i in (10, 19) else "spU", disabled=(i == 10)) for i in range(25)],
         content="You can click **2** times on the buttons below.",
     )
     grid2 = _grid_snapshot(
-        [_btn(i, "spY" if i in (10, 19) else "spU", disabled=(i in (0, 1))) for i in range(25)],
+        [_btn(i, "spY" if i in (10, 19) else "spU", disabled=(i in (10, 19))) for i in range(25)],
         content="You can click **2** times on the buttons below.",
     )
     scripted = [
@@ -190,8 +267,93 @@ def test_oh_game_plays_until_clicks_exhausted():
     assert actions.sent == [("oh", "$")]
     assert len(actions.clicks) == 2
     assert result["clicks"] == 2
+    assert result.get("free_clicks", 0) == 0
     assert result["reward"] == 59 + 14
     assert monitor.macro_active is False  # restored after play
+
+
+def test_oh_game_free_purple_does_not_consume_budget():
+    grid0 = _grid_snapshot(
+        [_btn(i, "spP" if i == 3 else ("spY" if i == 10 else "spU")) for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    grid1 = _grid_snapshot(
+        [
+            _btn(i, "spP" if i == 3 else ("spY" if i == 10 else "spU"), disabled=(i == 3))
+            for i in range(25)
+        ],
+        content="You can click **1** times on the buttons below.",
+    )
+    grid2 = _grid_snapshot(
+        [
+            _btn(
+                i,
+                "spP" if i in (3, 7) else ("spY" if i == 10 else "spU"),
+                disabled=(i in (3, 10)),
+            )
+            for i in range(25)
+        ],
+        content="You can click **1** times on the buttons below.",
+    )
+    grid3 = _grid_snapshot(
+        [
+            _btn(
+                i,
+                "spP" if i in (3, 7) else ("spY" if i == 10 else "spU"),
+                disabled=(i in (3, 7, 10)),
+            )
+            for i in range(25)
+        ],
+        content="You can click **1** times on the buttons below.",
+    )
+    scripted = [
+        grid0,
+        grid1,
+        _reward_snapshot("<:spP:1> **+10**"),
+        grid2,
+        _reward_snapshot("<:spY:1> **+59**"),
+        grid3,
+        _reward_snapshot("<:spP:1> **+12**"),
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert len(actions.clicks) == 3
+    assert result["clicks"] == 1
+    assert result["free_clicks"] == 2
+
+
+def test_oh_game_dark_purple_bonus_from_reward_tracker():
+    grid0 = _grid_snapshot(
+        [_btn(i, "spD" if i == 5 else "spU") for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    scripted = [
+        grid0,
+        _reward_snapshot("<:spP:1> **+42**"),
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert len(actions.clicks) == 1
+    assert result["clicks"] == 1
+    assert result["free_clicks"] == 1
 
 
 def test_oh_game_handles_missing_grid():

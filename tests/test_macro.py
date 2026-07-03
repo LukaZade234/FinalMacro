@@ -46,8 +46,18 @@ def test_activity_log_writes_once_per_line():
     log.write("first")
     log.write("second")
 
-    assert state.activity_log == ["first", "second"]
+    assert [entry.text for entry in state.activity_log] == ["first", "second"]
     assert len(updates) == 2
+
+
+def test_classify_activity_line():
+    from macro.activity_log import classify_activity_line
+
+    assert classify_activity_line("Claimed Rem (you)") == "claim"
+    assert classify_activity_line("kakera click ×2 Maki: matched") == "click"
+    assert classify_activity_line("sphere skip Rem: no button") == "skip"
+    assert classify_activity_line("Roll embed timeout") == "error"
+    assert classify_activity_line("Sent $tu") == "info"
 
 
 def test_roll_stop_tracker_warning_then_tail():

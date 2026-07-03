@@ -77,7 +77,7 @@ RowLayout {
         font.pixelSize: 11
     }
 
-    ComboBox {
+    ThemedComboBox {
         id: serverCombo
         Layout.preferredWidth: 180
         Layout.fillWidth: true
@@ -98,7 +98,7 @@ RowLayout {
         font.pixelSize: 11
     }
 
-    ComboBox {
+    ThemedComboBox {
         id: channelCombo
         Layout.preferredWidth: 160
         Layout.fillWidth: true

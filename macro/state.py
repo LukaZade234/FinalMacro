@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from macro.reaction_power import display_reaction_power
+
 
 class MacroPhase(str, Enum):
     IDLE = "Idle"
@@ -39,34 +41,49 @@ class RuleTraceEntry:
 @dataclass
 class AccountState:
     rolls_left: int | None = None
+    rolls_us_bonus: int | None = None  # stacked rolls added via $us, usable now
     claim_available: bool | None = None
     claim_cooldown_minutes: int | None = None
-    power_percent: int | None = None
+    power_percent: float | None = None
+    power_max_percent: float = 155.0
+    power_tracked_at: float = 0.0  # ``time.monotonic()`` when ``power_percent`` was anchored
+    dk_stock: int | None = None
+    dk_next_minutes: int | None = None
     rolls_reset_minutes: int | None = None
     next_claim_reset_minutes: int | None = None
     claim_expire_sec: int | None = None
     phase: MacroPhase = MacroPhase.IDLE
     own_usernames: list[str] = field(default_factory=list)
     own_user_ids: list[int] = field(default_factory=list)
-    activity_log: list[str] = field(default_factory=list)
+    activity_log: list["ActivityLogEntry"] = field(default_factory=list)
     kakera_clicks_today: int = 0
     kakera_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
+    perk8_priority_mode: str = "inactive"
+    perk8_click_max: int | None = None
     rule_trace: list[RuleTraceEntry] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "rolls_left": self.rolls_left,
+            "rolls_us_bonus": self.rolls_us_bonus,
             "claim_available": self.claim_available,
             "claim_cooldown_minutes": self.claim_cooldown_minutes,
-            "power_percent": self.power_percent,
+            "power_percent": display_reaction_power(self.power_percent)
+            if self.power_percent is not None
+            else None,
+            "power_max_percent": self.power_max_percent,
+            "dk_stock": self.dk_stock,
+            "dk_next_minutes": self.dk_next_minutes,
             "rolls_reset_minutes": self.rolls_reset_minutes,
             "next_claim_reset_minutes": self.next_claim_reset_minutes,
             "claim_expire_sec": self.claim_expire_sec,
             "phase": self.phase.value,
             "own_usernames": list(self.own_usernames),
             "own_user_ids": list(self.own_user_ids),
-            "activity_log": list(self.activity_log[-20:]),
+            "activity_log": [entry.to_dict() for entry in self.activity_log[-200:]],
             "kakera_clicks_today": self.kakera_clicks_today,
+            "perk8_priority_mode": self.perk8_priority_mode,
+            "perk8_click_max": self.perk8_click_max,
             "rule_trace": [entry.to_dict() for entry in self.rule_trace[-12:]],
         }
 

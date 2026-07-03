@@ -22,6 +22,9 @@ class ChannelProfile:
     bonus: dict[str, Any] = field(default_factory=dict)
     settings_summary: str = ""
     bonus_summary: str = ""
+    daily_resets: dict[str, Any] = field(default_factory=dict)
+    # ``daily_resets`` is keyed by account id; each value holds per-account
+    # daily/cooldown blobs (e.g. ``perk8``). See ``macro.daily_store``.
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChannelProfile:
@@ -35,6 +38,7 @@ class ChannelProfile:
             bonus=dict(data.get("bonus") or {}),
             settings_summary=str(data.get("settings_summary") or ""),
             bonus_summary=str(data.get("bonus_summary") or ""),
+            daily_resets=dict(data.get("daily_resets") or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:

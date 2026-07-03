@@ -14,6 +14,7 @@ ColumnLayout {
     signal startClicked()
     signal stopClicked()
     signal playOhClicked()
+    signal playUsClicked()
 
     spacing: 10
 
@@ -21,42 +22,24 @@ ColumnLayout {
         spacing: 8
         Layout.fillWidth: true
 
-        Button {
+        ActionButton {
             text: "Connect"
-            enabled: !bar.connected
+            loading: App.connecting
+            enabled: !bar.connected && !App.connecting
             Layout.fillWidth: true
-            implicitHeight: 40
-            background: Rectangle {
-                radius: 8
-                color: parent.enabled ? Theme.accentPrimary : Theme.bgLight
-                opacity: parent.enabled ? 1 : 0.5
-            }
-            contentItem: Text {
-                text: parent.text
-                color: Theme.bgDark
-                font.weight: Font.DemiBold
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            fillColor: Theme.accentPrimary
+            textColor: Theme.bgDark
+            labelWeight: Font.DemiBold
             onClicked: bar.connectClicked()
         }
 
-        Button {
+        ActionButton {
             text: "Disconnect"
-            enabled: bar.connected
+            loading: App.disconnecting
+            enabled: bar.connected && !App.disconnecting
             Layout.fillWidth: true
-            implicitHeight: 40
-            background: Rectangle {
-                radius: 8
-                color: Theme.bgLight
-                opacity: parent.enabled ? 1 : 0.5
-            }
-            contentItem: Text {
-                text: parent.text
-                color: Theme.fgPrimary
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
             onClicked: bar.disconnectClicked()
         }
     }
@@ -65,62 +48,35 @@ ColumnLayout {
         spacing: 8
         Layout.fillWidth: true
 
-        Button {
+        ActionButton {
             text: "Run $tu"
-            enabled: bar.connected && !bar.macroRunning
+            loading: App.runActionPending === "tu"
+            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "tu"
             Layout.fillWidth: true
-            implicitHeight: 40
-            background: Rectangle {
-                radius: 8
-                color: Theme.bgLight
-                opacity: parent.enabled ? 1 : 0.45
-            }
-            contentItem: Text {
-                text: parent.text
-                color: Theme.fgPrimary
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
             onClicked: bar.runTuClicked()
         }
 
-        Button {
+        ActionButton {
             text: "Start macro"
-            enabled: bar.connected && !bar.macroRunning
+            loading: App.runActionPending === "start"
+            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "start"
             Layout.fillWidth: true
-            implicitHeight: 40
-            background: Rectangle {
-                radius: 8
-                color: Theme.success
-                opacity: parent.enabled ? 1 : 0.45
-            }
-            contentItem: Text {
-                text: parent.text
-                color: Theme.bgDark
-                font.weight: Font.Bold
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            fillColor: Theme.success
+            textColor: Theme.bgDark
+            labelWeight: Font.Bold
             onClicked: bar.startClicked()
         }
 
-        Button {
+        ActionButton {
             text: "Stop"
-            enabled: bar.connected && bar.macroRunning
+            loading: App.runActionPending === "stop"
+            enabled: bar.connected && bar.macroRunning && App.runActionPending !== "stop"
             Layout.fillWidth: true
-            implicitHeight: 40
-            background: Rectangle {
-                radius: 8
-                color: Theme.error
-                opacity: parent.enabled ? 1 : 0.45
-            }
-            contentItem: Text {
-                text: parent.text
-                color: "#ffffff"
-                font.weight: Font.Bold
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            fillColor: Theme.error
+            textColor: "#ffffff"
+            labelWeight: Font.Bold
             onClicked: bar.stopClicked()
         }
     }
@@ -129,23 +85,24 @@ ColumnLayout {
         spacing: 8
         Layout.fillWidth: true
 
-        Button {
+        ActionButton {
             text: "Play $oh"
-            enabled: bar.connected && !bar.macroRunning
+            loading: App.runActionPending === "oh"
+            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "oh"
             Layout.fillWidth: true
-            implicitHeight: 40
-            background: Rectangle {
-                radius: 8
-                color: Theme.bgLight
-                opacity: parent.enabled ? 1 : 0.45
-            }
-            contentItem: Text {
-                text: parent.text
-                color: Theme.fgPrimary
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
             onClicked: bar.playOhClicked()
+        }
+
+        ActionButton {
+            text: "Roll $us"
+            loading: App.runActionPending === "us"
+            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "us"
+            Layout.fillWidth: true
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
+            onClicked: bar.playUsClicked()
         }
     }
 }

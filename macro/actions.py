@@ -23,6 +23,8 @@ def is_roll_parse_result(parsed: ParseResult, *, roll_command: str) -> bool:
     if parsed.kind in {
         MessageKind.TU,
         MessageKind.KAKERA_CLAIM,
+        MessageKind.KAKERA_REACT_DENIED,
+        MessageKind.DK_CLAIM,
         MessageKind.SPHERE_CLICK,
         MessageKind.CLAIM,
         MessageKind.MARRIAGE,
@@ -45,13 +47,63 @@ def is_roll_parse_result(parsed: ParseResult, *, roll_command: str) -> bool:
     return False
 
 
+def is_perk6_spawn_parse_result(
+    parsed: ParseResult,
+    *,
+    parent_character: str,
+) -> bool:
+    """True for the perk-6 follow-up embed spawned by ``parent_character``."""
+    from mudae.parsers.roll import perk6_spawner_matches
+
+    if parsed.kind not in {
+        MessageKind.ROLL,
+        MessageKind.CHARACTER_EMBED,
+        MessageKind.KAKERA_BUTTONS,
+        MessageKind.CLAIM_BUTTONS,
+    }:
+        return False
+    if not parsed.fields.get("perk_6"):
+        return False
+    return perk6_spawner_matches(parsed.fields.get("spawned_by"), parent_character)
+
+
 def is_tu_parse_result(parsed: ParseResult) -> bool:
     if parsed.kind == MessageKind.TU:
         return True
     if parsed.kind == MessageKind.COMMAND_RESPONSE:
         cmd = (parsed.fields.get("parser_command") or parsed.fields.get("command") or "").lower()
-        return cmd == "tu"
+        return cmd in {"tu", "ku"}
     return False
+
+
+_DK_SETTLE_SEC = 2.5
+
+
+def is_dk_use_parse_result(snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> bool:
+    if parsed.kind == MessageKind.DK_CLAIM:
+        return True
+    if parsed.kind == MessageKind.TU:
+        content = getattr(snapshot, "content", "") or ""
+        from mudae.parsers.dk import is_dk_claim
+
+        return is_dk_claim(content)
+    return False
+
+
+from mudae.parsers.ohu8 import is_ohu8_response
+
+
+def is_ohu8_parse_result(parsed: ParseResult) -> bool:
+    if parsed.kind == MessageKind.COMMAND_RESPONSE:
+        cmd = (
+            parsed.fields.get("parser_command")
+            or parsed.fields.get("command")
+            or ""
+        ).lower()
+        if cmd == "ohu8":
+            return True
+    content = parsed.fields.get("content") or parsed.summary or ""
+    return is_ohu8_response(content)
 
 
 class DiscordActions:
@@ -100,6 +152,14 @@ class DiscordActions:
         )
         return result[1] if result else None
 
+    async def wait_for_ohu8(self, *, timeout: float = 12.0) -> ParseResult | None:
+        result = await self.wait_for(
+            lambda snapshot, parsed: is_ohu8_parse_result(parsed)
+            or is_ohu8_response(getattr(snapshot, "content", "") or ""),
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
     async def wait_for_roll(
         self,
         *,
@@ -108,6 +168,24 @@ class DiscordActions:
     ) -> tuple[MudaeMessageSnapshot, ParseResult] | None:
         return await self.wait_for(
             lambda s, p: not s.edited and is_roll_parse_result(p, roll_command=roll_command),
+            timeout=timeout,
+        )
+
+    async def wait_for_perk6_spawn(
+        self,
+        *,
+        parent_character: str,
+        timeout: float = 5.0,
+    ) -> tuple[MudaeMessageSnapshot, ParseResult] | None:
+        """Wait for a perk-6 spawn embed whose ``[SPAWNED BY …]`` matches ``parent_character``."""
+        return await self.wait_for(
+            lambda s, p: (
+                not s.edited
+                and is_perk6_spawn_parse_result(
+                    p,
+                    parent_character=parent_character,
+                )
+            ),
             timeout=timeout,
         )
 
@@ -142,6 +220,23 @@ class DiscordActions:
             lambda _s, p: p.kind == MessageKind.KAKERA_CLAIM,
             timeout=timeout,
         )
+        return result[1] if result else None
+
+    async def wait_for_kakera_outcome(
+        self,
+        *,
+        timeout: float = 8.0,
+    ) -> ParseResult | None:
+        """Wait for a successful kakera claim or an insufficient-power denial."""
+        result = await self.wait_for(
+            lambda _s, p: p.kind
+            in {MessageKind.KAKERA_CLAIM, MessageKind.KAKERA_REACT_DENIED},
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
+    async def wait_for_dk_use(self, *, timeout: float = 12.0) -> ParseResult | None:
+        result = await self.wait_for(is_dk_use_parse_result, timeout=timeout)
         return result[1] if result else None
 
     def drain_queue(self) -> None:

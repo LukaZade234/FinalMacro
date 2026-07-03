@@ -23,16 +23,17 @@ KAKERA_TYPES: tuple[str, ...] = (
 
 # Sphere identifiers in value order (no chaos sphere).
 SPHERE_COLORS: tuple[str, ...] = (
-    "spP",  # purple
-    "sp",   # blue (default)
+    "spM",  # megasphere — free roll bonus
+    "spP",  # purple — free in $oh
+    "spB",  # blue
     "spT",  # teal
     "spG",  # green
     "spY",  # yellow
-    "spO",  # orange
-    "spR",  # red
-    "spW",  # rainbow
-    "spL",  # light
     "spD",  # dark
+    "spL",  # light
+    "spO",  # orange
+    "spR",  # red (also matches bare ``:sp:`` roll buttons)
+    "spW",  # rainbow
 )
 
 
@@ -118,6 +119,7 @@ class KakeraReactionRules:
     low_power: LowPowerOverride | None = None
     perk_8_budget_mode: bool = False
     daily_click_budget: int = 40
+    auto_use_dk: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> KakeraReactionRules:
@@ -136,6 +138,7 @@ class KakeraReactionRules:
             low_power=low_power,
             perk_8_budget_mode=bool(data.get("perk_8_budget_mode", False)),
             daily_click_budget=int(data.get("daily_click_budget", 40)),
+            auto_use_dk=bool(data.get("auto_use_dk", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,6 +151,36 @@ class KakeraReactionRules:
             "low_power": self.low_power.to_dict() if self.low_power else None,
             "perk_8_budget_mode": self.perk_8_budget_mode,
             "daily_click_budget": self.daily_click_budget,
+            "auto_use_dk": self.auto_use_dk,
+        }
+
+
+@dataclass
+class UsRollKakeraRules:
+    """Kakera clicking policy for rolls added via ``$us`` (not normal hourly rolls)."""
+
+    # ``normal`` — same rules as :attr:`MacroConfig.kakera_reaction`
+    # ``none`` — skip kakera on $us rolls (spheres still use sphere_reaction)
+    # ``selected`` — only ``types_allowed`` below (other kakera filters still apply)
+    mode: str = "normal"
+    types_allowed: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> UsRollKakeraRules:
+        if not data:
+            return cls()
+        mode = str(data.get("mode", "normal")).strip().lower()
+        if mode not in ("normal", "none", "selected"):
+            mode = "normal"
+        return cls(
+            mode=mode,
+            types_allowed=_coerce_str_list(data.get("types_allowed")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "types_allowed": list(self.types_allowed),
         }
 
 
@@ -182,12 +215,60 @@ class MacroConfig:
     rolls_left_stop: int = 2
     claim_reset_margin_minutes: int = 20
     claim_expire_sec: int = 45
+    # $us mass-roll mode: rolls Mudae adds per "$us N" (capped at 20 by Mudae),
+    # and how close to the hourly rolls reset (minutes) we refuse to add more
+    # $us rolls since a reset would clear them. us_add_delay_sec is how long to
+    # wait after sending "$us N" before re-checking $tu, so Mudae has time to
+    # register the command (sending follow-ups too fast makes it ignore them).
+    us_batch_size: int = 20
+    us_reset_margin_minutes: int = 2
+    # Seconds to wait after a bare "$us" stack read before sending "$us N".
+    us_read_before_add_delay_sec: float = 2.0
+    # Seconds to wait after "$us N" before re-checking $tu.
+    us_add_delay_sec: float = 5.0
+    # Seconds to wait after a roll timeout before resuming $us mode.
+    us_roll_timeout_retry_sec: float = 5.0
+    us_roll_kakera: UsRollKakeraRules = field(default_factory=UsRollKakeraRules)
     character_claim: CharacterClaimRules = field(default_factory=CharacterClaimRules)
     kakera_reaction: KakeraReactionRules = field(default_factory=KakeraReactionRules)
     sphere_reaction: SphereReactionRules = field(default_factory=SphereReactionRules)
 
     def normalized_roll_command(self) -> str:
         return self.roll_command.strip().lstrip("$").lower() or "wa"
+
+    def us_batch(self) -> int:
+        return max(1, min(20, int(self.us_batch_size)))
+
+    def us_add_delay(self) -> float:
+        return max(2.0, float(self.us_add_delay_sec))
+
+    def us_read_before_add_delay(self) -> float:
+        return max(2.0, float(self.us_read_before_add_delay_sec))
+
+    def us_roll_timeout_retry_delay(self) -> float:
+        return max(2.0, float(self.us_roll_timeout_retry_sec))
+
+    def kakera_rules_for_roll(self, *, us_roll: bool) -> KakeraReactionRules:
+        """Effective kakera rules for a roll (normal hourly vs ``$us``-added)."""
+        base = self.kakera_reaction
+        if not us_roll:
+            return base
+        policy = self.us_roll_kakera
+        if policy.mode == "none":
+            return KakeraReactionRules(enabled=False)
+        if policy.mode == "selected":
+            return KakeraReactionRules(
+                enabled=True,
+                types_allowed=list(policy.types_allowed),
+                require_chaos_key=base.require_chaos_key,
+                require_perk_8=base.require_perk_8,
+                min_spheres=base.min_spheres,
+                low_power=base.low_power,
+                perk_8_budget_mode=base.perk_8_budget_mode,
+                daily_click_budget=base.daily_click_budget,
+                auto_use_dk=base.auto_use_dk,
+            )
+        return base
 
     def roll_delay(self) -> float:
         return max(self.roll_delay_sec, 0.6)
@@ -209,6 +290,7 @@ class MacroConfig:
         character_raw = data.get("character_claim")
         kakera_raw = data.get("kakera_reaction")
         sphere_raw = data.get("sphere_reaction")
+        us_kakera_raw = data.get("us_roll_kakera")
 
         character_claim = CharacterClaimRules.from_dict(
             character_raw if isinstance(character_raw, dict) else None
@@ -218,6 +300,9 @@ class MacroConfig:
         )
         sphere_reaction = SphereReactionRules.from_dict(
             sphere_raw if isinstance(sphere_raw, dict) else None
+        )
+        us_roll_kakera = UsRollKakeraRules.from_dict(
+            us_kakera_raw if isinstance(us_kakera_raw, dict) else None
         )
 
         # Legacy migration: flat booleans → CharacterClaimRules.
@@ -240,6 +325,12 @@ class MacroConfig:
             rolls_left_stop=int(data.get("rolls_left_stop", 2)),
             claim_reset_margin_minutes=int(data.get("claim_reset_margin_minutes", 20)),
             claim_expire_sec=int(data.get("claim_expire_sec", 45)),
+            us_batch_size=int(data.get("us_batch_size", 20)),
+            us_reset_margin_minutes=int(data.get("us_reset_margin_minutes", 2)),
+            us_read_before_add_delay_sec=float(data.get("us_read_before_add_delay_sec", 2.0)),
+            us_add_delay_sec=float(data.get("us_add_delay_sec", 5.0)),
+            us_roll_timeout_retry_sec=float(data.get("us_roll_timeout_retry_sec", 5.0)),
+            us_roll_kakera=us_roll_kakera,
             character_claim=character_claim,
             kakera_reaction=kakera_reaction,
             sphere_reaction=sphere_reaction,
@@ -253,6 +344,12 @@ class MacroConfig:
             "rolls_left_stop": self.rolls_left_stop,
             "claim_reset_margin_minutes": self.claim_reset_margin_minutes,
             "claim_expire_sec": self.claim_expire_sec,
+            "us_batch_size": self.us_batch_size,
+            "us_reset_margin_minutes": self.us_reset_margin_minutes,
+            "us_read_before_add_delay_sec": self.us_read_before_add_delay_sec,
+            "us_add_delay_sec": self.us_add_delay_sec,
+            "us_roll_timeout_retry_sec": self.us_roll_timeout_retry_sec,
+            "us_roll_kakera": self.us_roll_kakera.to_dict(),
             "character_claim": self.character_claim.to_dict(),
             "kakera_reaction": self.kakera_reaction.to_dict(),
             "sphere_reaction": self.sphere_reaction.to_dict(),

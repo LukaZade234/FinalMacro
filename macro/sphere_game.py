@@ -7,10 +7,17 @@ buttons (3 and 1 respectively). The grid lives in a single message that Mudae
 *edits* after every click, so the engine must wait for each edit to land before
 deciding its next move.
 
+Purple spheres (``spP``) are **free**: they do not consume the click allowance.
+Dark spheres (``spD``) use a paid click; if they resolve to purple, that outcome
+appears only in the **reward tracker message** below the grid (the grid button
+emoji does not flip to ``spP``). Those purple payout lines are free as well.
+
 Strategy (per the user's spec):
-    * never click an already-revealed blue (``spB``) or teal (``spT``) sphere;
-    * otherwise click the best revealed value sphere available;
-    * if no value sphere is revealed, click a random face-down button.
+    * always take free purple (``spP``) when available;
+    * never click an already-revealed blue (``spB``) or teal (``spT``) — they
+      are worth so little that a face-down click is preferable;
+    * otherwise click the highest-value revealed paid sphere available;
+    * if no worthwhile revealed sphere remains, click a random face-down button.
 """
 
 from __future__ import annotations
@@ -22,15 +29,29 @@ from collections.abc import Callable
 from typing import Any
 
 from mudae.constants import (
+    SPHERE_FREE_EMOJIS,
     SPHERE_HIDDEN_EMOJI,
     SPHERE_REVEAL_EMOJIS,
     SPHERE_VALUE_RANK,
 )
 
+def sphere_value_rank(emoji: str) -> int:
+    """Paid-click value for a revealed sphere emoji (higher = click first)."""
+    return SPHERE_VALUE_RANK.get(emoji.strip(), 0)
+
+
+def _button_sort_key(buttons: list[dict[str, Any]], button: dict[str, Any]) -> tuple[int, int]:
+    rank = sphere_value_rank(_emoji(button))
+    for index, candidate in enumerate(buttons):
+        if candidate.get("custom_id") == button.get("custom_id"):
+            return rank, -index
+    return rank, 0
+
 # "You can click **5** times on the buttons below ..."
 _CLICKS_ALLOWED_RE = re.compile(r"click\s*\*{0,2}(\d+)\*{0,2}\s*times", re.IGNORECASE)
-# Reward lines look like "<:spY:123> **+59**" or "<:spU:123> **+1 $oc**".
+# Reward lines look like "<:spY:123> **+59**" or "<:spP:123> **+42**".
 _REWARD_AMOUNT_RE = re.compile(r"\*\*\+\s*([\d,]+)")
+_REWARD_LINE_EMOJI_RE = re.compile(r"<:([^:>]+):\d+>\s*\*\*\+")
 _DEFAULT_CLICKS_ALLOWED = 5
 # Minimum sphere buttons that distinguishes the $oh grid from a roll's lone
 # sphere react button.
@@ -43,6 +64,10 @@ def _emoji(button: dict[str, Any]) -> str:
 
 def _sphere_buttons(buttons: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [b for b in buttons if (b.get("kind") == "sphere") or _emoji(b).startswith("sp")]
+
+
+def _is_clickable(button: dict[str, Any]) -> bool:
+    return bool(button.get("custom_id")) and not button.get("disabled")
 
 
 def is_oh_grid_message(snapshot: Any) -> bool:
@@ -80,42 +105,106 @@ def total_reward_from_content(content: str) -> int:
     return total
 
 
+def reward_line_types(content: str) -> list[str]:
+    """Emoji names from each payout line in the reward tracker message."""
+    return _REWARD_LINE_EMOJI_RE.findall(content or "")
+
+
+def new_reward_line_types(before: str, after: str) -> list[str]:
+    """Emoji names added to the reward tracker since ``before``."""
+    prev = reward_line_types(before)
+    curr = reward_line_types(after)
+    if len(curr) <= len(prev):
+        return []
+    return curr[len(prev):]
+
+
+def reward_has_entries(content: str) -> bool:
+    if not content or "rewards appear here" in content.lower():
+        return False
+    return bool(reward_line_types(content))
+
+
 def disabled_count(buttons: list[dict[str, Any]]) -> int:
     return sum(1 for b in buttons if b.get("disabled"))
+
+
+def grid_signature(buttons: list[dict[str, Any]]) -> tuple[tuple[str, str, bool], ...]:
+    """Stable fingerprint of the grid for detecting Mudae edits."""
+    sig: list[tuple[str, str, bool]] = []
+    for button in _sphere_buttons(buttons):
+        sig.append((
+            str(button.get("custom_id") or ""),
+            _emoji(button),
+            bool(button.get("disabled")),
+        ))
+    return tuple(sig)
+
+
+def is_oh_game_over(buttons: list[dict[str, Any]]) -> bool:
+    """True when Mudae has ended the session (no sphere buttons left to press)."""
+    spheres = _sphere_buttons(buttons)
+    if len(spheres) < _MIN_GRID_BUTTONS:
+        return True
+    return not any(_is_clickable(button) for button in spheres)
+
+
+def _disable_button(buttons: list[dict[str, Any]], custom_id: str) -> list[dict[str, Any]]:
+    """Optimistic grid state when Mudae updates the reward tracker first."""
+    out: list[dict[str, Any]] = []
+    for button in buttons:
+        copy = dict(button)
+        if copy.get("custom_id") == custom_id:
+            copy["disabled"] = True
+        out.append(copy)
+    return out
+
+
+def is_free_oh_click(button: dict[str, Any]) -> bool:
+    return _emoji(button) in SPHERE_FREE_EMOJIS
 
 
 def choose_oh_click(
     buttons: list[dict[str, Any]],
     *,
+    clicks_spent: int = 0,
+    clicks_budget: int = _DEFAULT_CLICKS_ALLOWED,
     rng: random.Random | None = None,
 ) -> dict[str, Any] | None:
     """Pick the next button to click, or ``None`` when no legal move remains.
 
     Preference order:
-        1. highest-value revealed sphere that is not blue/teal;
-        2. a random face-down (``spU``) button.
+        1. any revealed free purple (``spP``);
+        2. highest-value revealed paid sphere (never blue/teal — prefer ``spU``);
+        3. a random face-down (``spU``) button — only while budget remains.
     """
     chooser = rng or random
+    budget_left = clicks_spent < clicks_budget
+
+    free_purples: list[dict[str, Any]] = []
     value_spheres: list[dict[str, Any]] = []
     hidden: list[dict[str, Any]] = []
 
     for button in buttons:
-        if button.get("disabled") or not button.get("custom_id"):
+        if not _is_clickable(button):
             continue
         emoji = _emoji(button)
         if not emoji.startswith("sp"):
             continue
-        if emoji == SPHERE_HIDDEN_EMOJI:
-            hidden.append(button)
+        if emoji in SPHERE_FREE_EMOJIS:
+            free_purples.append(button)
+        elif emoji == SPHERE_HIDDEN_EMOJI:
+            if budget_left:
+                hidden.append(button)
         elif emoji in SPHERE_REVEAL_EMOJIS:
-            continue  # blue / teal: never click once revealed
-        else:
+            continue  # blue / teal: too low value — prefer face-down spU
+        elif budget_left:
             value_spheres.append(button)
 
+    if free_purples:
+        return max(free_purples, key=lambda b: _button_sort_key(buttons, b))
     if value_spheres:
-        best_rank = max(SPHERE_VALUE_RANK.get(_emoji(b), 0) for b in value_spheres)
-        best = [b for b in value_spheres if SPHERE_VALUE_RANK.get(_emoji(b), 0) == best_rank]
-        return chooser.choice(best)
+        return max(value_spheres, key=lambda b: _button_sort_key(buttons, b))
     if hidden:
         return chooser.choice(hidden)
     return None
@@ -147,7 +236,8 @@ class OhSphereGame:
     async def play(self, *, prefix: str = "$") -> dict[str, Any]:
         previously_active = getattr(self._monitor, "macro_active", False)
         self._monitor.macro_active = True
-        clicks_done = 0
+        clicks_spent = 0
+        free_clicks = 0
         try:
             self._actions.drain_queue()
             self._log("$oh: starting sphere game")
@@ -156,42 +246,89 @@ class OhSphereGame:
             grid = await self._wait_for_grid()
             if grid is None:
                 self._log("$oh: grid did not appear (timeout)")
-                return {"clicks": 0, "reward": 0, "reason": "no grid"}
+                return {"clicks": 0, "free_clicks": 0, "reward": 0, "reason": "no grid"}
 
             grid_id = grid.message_id
             buttons = list(grid.buttons)
-            clicks_allowed = parse_clicks_allowed(grid.content)
-            self._log(f"$oh: grid ready · {clicks_allowed} clicks allowed")
+            clicks_budget = parse_clicks_allowed(grid.content)
+            self._log(f"$oh: grid ready · {clicks_budget} paid clicks allowed")
 
-            while clicks_done < clicks_allowed:
-                choice = choose_oh_click(buttons, rng=self._rng)
+            while not is_oh_game_over(buttons):
+                choice = choose_oh_click(
+                    buttons,
+                    clicks_spent=clicks_spent,
+                    clicks_budget=clicks_budget,
+                    rng=self._rng,
+                )
                 if choice is None:
-                    self._log("$oh: no clickable sphere left — stopping")
+                    if clicks_spent < clicks_budget:
+                        self._log("$oh: no clickable sphere left — stopping")
+                    else:
+                        self._log("$oh: paid clicks used · no free purples left")
                     break
 
                 custom_id = choice["custom_id"]
                 emoji = _emoji(choice)
-                kind = "hidden" if emoji == SPHERE_HIDDEN_EMOJI else emoji
-                before = disabled_count(buttons)
+                free = is_free_oh_click(choice)
+                kind = "free purple" if free else (
+                    "hidden" if emoji == SPHERE_HIDDEN_EMOJI else emoji
+                )
+                before_sig = grid_signature(buttons)
+                before_reward = self._reward_content
 
                 ok = await self._actions.click_button(grid_id, custom_id)
                 if not ok:
                     self._log(f"$oh: click failed ({kind}) — stopping")
                     break
-                clicks_done += 1
-                self._log(f"$oh: click {clicks_done}/{clicks_allowed} → {kind}")
 
-                updated = await self._wait_for_grid_update(grid_id, before)
-                if updated is None:
-                    self._log("$oh: grid edit timeout — stopping")
+                if free:
+                    free_clicks += 1
+                    self._log(f"$oh: free click → {kind} ({free_clicks} free)")
+                else:
+                    clicks_spent += 1
+                    self._log(
+                        f"$oh: click {clicks_spent}/{clicks_budget} → {kind}"
+                    )
+
+                updated, reward_content = await self._wait_for_click_resolution(
+                    grid_id,
+                    before_sig,
+                    before_reward,
+                )
+                if updated is None and reward_content == before_reward:
+                    self._log("$oh: click ack timeout — stopping")
                     break
-                buttons = list(updated.buttons)
+
+                self._reward_content = reward_content
+                for outcome in new_reward_line_types(before_reward, reward_content):
+                    if outcome == "spP" and not free:
+                        free_clicks += 1
+                        self._log(
+                            f"$oh: reward → purple (free bonus, {free_clicks} free)"
+                        )
+
+                if updated is not None:
+                    buttons = list(updated.buttons)
+                else:
+                    buttons = _disable_button(buttons, custom_id)
                 await asyncio.sleep(self._click_delay)
+
+            if is_oh_game_over(buttons):
+                self._log("$oh: grid locked — minigame finished")
 
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
-            self._log(f"$oh: finished after {clicks_done} click(s){reward_note}")
-            return {"clicks": clicks_done, "reward": reward, "reason": "done"}
+            self._log(
+                f"$oh: finished · {clicks_spent} paid"
+                + (f", {free_clicks} free" if free_clicks else "")
+                + reward_note
+            )
+            return {
+                "clicks": clicks_spent,
+                "free_clicks": free_clicks,
+                "reward": reward,
+                "reason": "done",
+            }
         finally:
             self._monitor.macro_active = previously_active
 
@@ -202,28 +339,69 @@ class OhSphereGame:
         )
         return result[0] if result else None
 
-    async def _wait_for_grid_update(self, grid_id: int, before: int) -> Any | None:
+    async def _wait_for_click_resolution(
+        self,
+        grid_id: int,
+        before_sig: tuple,
+        before_reward: str,
+    ) -> tuple[Any | None, str]:
+        """Wait for Mudae to acknowledge a click via grid edit and/or reward line."""
+        latest_grid: Any | None = None
+        latest_reward = before_reward
+
         def matches(snapshot: Any) -> bool:
-            return (
+            nonlocal latest_grid, latest_reward
+            if is_oh_reward_message(snapshot):
+                content = getattr(snapshot, "content", "") or ""
+                if reward_has_entries(content) and content != before_reward:
+                    latest_reward = content
+                    self._reward_content = content
+                    return True
+            if (
                 snapshot.message_id == grid_id
                 and is_oh_grid_message(snapshot)
-                and disabled_count(snapshot.buttons) > before
-            )
+                and grid_signature(snapshot.buttons) != before_sig
+            ):
+                latest_grid = snapshot
+                latest_reward = self._reward_content
+                return True
+            return False
 
         result = await self._actions.wait_for(
             self._make_predicate(matches),
             timeout=self._edit_timeout,
         )
-        return result[0] if result else None
+        if not result:
+            return None, before_reward
+
+        if latest_grid is not None and latest_reward == before_reward:
+            bonus = await self._actions.wait_for(
+                self._make_predicate(
+                    lambda snapshot: (
+                        is_oh_reward_message(snapshot)
+                        and reward_has_entries(getattr(snapshot, "content", "") or "")
+                        and (getattr(snapshot, "content", "") or "") != before_reward
+                    )
+                ),
+                timeout=2.0,
+            )
+            if bonus:
+                latest_reward = self._reward_content
+
+        if latest_grid is not None:
+            return latest_grid, latest_reward
+        return None, latest_reward
 
     def _make_predicate(
         self, matches: Callable[[Any], bool]
     ) -> Callable[[Any, Any], bool]:
-        """Wrap a snapshot predicate, capturing reward messages as a side effect."""
+        """Wrap a snapshot predicate, keeping reward message content in sync."""
 
         def predicate(snapshot: Any, _parsed: Any) -> bool:
             if is_oh_reward_message(snapshot):
-                self._reward_content = snapshot.content
+                content = getattr(snapshot, "content", "") or ""
+                if reward_has_entries(content):
+                    self._reward_content = content
             return matches(snapshot)
 
         return predicate

@@ -36,20 +36,8 @@ Item {
         { id: "kakeraC", label: "Chaos",   color: "#ff5fa2", icon: "../assets/kakera/KakeraC.webp" }
     ]
 
-    // Spheres share the kakera palette minus chaos; icons fall back to color dots
-    // since no sphere-specific PNGs are shipped.
-    readonly property var sphereOptions: [
-        { id: "spP", label: "Purple",  color: "#9d7cd8" },
-        { id: "sp",  label: "Blue",    color: "#7aa2f7" },
-        { id: "spT", label: "Teal",    color: "#2ac3de" },
-        { id: "spG", label: "Green",   color: "#9ece6a" },
-        { id: "spY", label: "Yellow",  color: "#e0af68" },
-        { id: "spO", label: "Orange",  color: "#ff9e64" },
-        { id: "spR", label: "Red",     color: "#f7768e" },
-        { id: "spW", label: "Rainbow", color: "#c0caf5" },
-        { id: "spL", label: "Light",   color: "#bb9af7" },
-        { id: "spD", label: "Dark",    color: "#3b4252" }
-    ]
+    // Sphere react buttons — PNG/WebP under gui/assets/kakera/ (Sp*.webp).
+    readonly property var sphereOptions: SphereAssets.options
 
     function reload() {
         _ready = false
@@ -147,36 +135,38 @@ Item {
         }
     }
 
-    RowLayout {
+    ScrollablePage {
         anchors.fill: parent
-        anchors.margins: 8
-        spacing: 12
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 560
+            spacing: 12
 
         // ----- Left sidebar: preset list -----
         PanelCard {
             Layout.preferredWidth: 200
             Layout.maximumWidth: 240
-            Layout.fillHeight: true
+            Layout.preferredHeight: 560
             title: "Presets"
             titleSize: 14
             fillContentVertically: true
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.preferredHeight: 520
                 spacing: 8
 
                 RowLayout {
                     Layout.fillWidth: true
-                    TextField {
+                    ThemedTextField {
                         id: newPresetField
                         Layout.fillWidth: true
                         placeholderText: "Preset name"
-                        color: Theme.fgPrimary
-                        background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                     }
-                    Button {
+                    ThemedButton {
                         text: "Add"
+                        accent: true
                         enabled: newPresetField.text.trim().length > 0
                         onClicked: {
                             var newId = App.addPreset(newPresetField.text.trim())
@@ -200,7 +190,7 @@ Item {
                 ListView {
                     id: presetList
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 380
                     clip: true
                     model: presets().length
                     currentIndex: selectedIndex
@@ -212,7 +202,7 @@ Item {
                         editingPresetId = p ? p.id : ""
                         loadRules()
                     }
-                    delegate: ItemDelegate {
+                    delegate: ThemedListDelegate {
                         width: presetList.width
                         text: presets()[index] ? presets()[index].id : ""
                         highlighted: presetList.currentIndex === index
@@ -220,7 +210,7 @@ Item {
                     }
                 }
 
-                Button {
+                ThemedButton {
                     Layout.fillWidth: true
                     text: "Duplicate"
                     enabled: currentPreset() !== null
@@ -233,9 +223,10 @@ Item {
                     }
                 }
 
-                Button {
+                ThemedButton {
                     Layout.fillWidth: true
                     text: "Remove"
+                    danger: true
                     enabled: presets().length > 1 && currentPreset() !== null
                     onClicked: {
                         var p = currentPreset()
@@ -246,11 +237,12 @@ Item {
                     }
                 }
 
-                Button {
+                Label {
                     Layout.fillWidth: true
-                    text: "Use on Run"
-                    enabled: editingPresetId.length > 0
-                    onClicked: App.setActivePreset(editingPresetId)
+                    text: "Set the active preset on Run → Run target."
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
                 }
             }
         }
@@ -258,7 +250,7 @@ Item {
         // ----- Right pane: details -----
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 560
             spacing: 12
 
             RowLayout {
@@ -273,7 +265,7 @@ Item {
                     elide: Text.ElideRight
                 }
 
-                Button {
+                ThemedButton {
                     text: "Wizard"
                     enabled: editingPresetId.length > 0
                     onClicked: {
@@ -286,7 +278,7 @@ Item {
             ScrollView {
                 id: scroller
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.preferredHeight: 480
                 clip: true
                 ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -310,41 +302,34 @@ Item {
                             Layout.fillWidth: true
 
                             Label { text: "Prefix"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
-                            TextField {
+                            ThemedTextField {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 maximumLength: 4
-                                color: Theme.fgPrimary
-                                background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                                 text: (rules.basic && rules.basic.prefix) ? rules.basic.prefix : "$"
                                 onEditingFinished: patchBasic("prefix", text)
                             }
 
                             Label { text: "Roll command"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
-                            TextField {
+                            ThemedTextField {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
-                                color: Theme.fgPrimary
-                                background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                                 text: (rules.basic && rules.basic.roll_command) ? rules.basic.roll_command : "wa"
                                 onEditingFinished: patchBasic("roll_command", text)
                             }
 
                             Label { text: "Delay between rolls (s)"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
-                            TextField {
+                            ThemedTextField {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
-                                color: Theme.fgPrimary
-                                background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                                 text: (rules.basic && rules.basic.roll_delay_sec !== undefined) ? rules.basic.roll_delay_sec.toString() : "0.6"
                                 onEditingFinished: patchBasic("roll_delay_sec", parseFloat(text) || 0.6)
                             }
 
                             Label { text: "Stop at N rolls left"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
-                            SpinBox {
+                            ThemedSpinBox {
                                 from: 0
                                 to: 20
-                                editable: true
                                 Layout.fillWidth: true
                                 value: (rules.basic && rules.basic.rolls_left_stop !== undefined) ? rules.basic.rolls_left_stop : 2
                                 onValueModified: patchBasic("rolls_left_stop", value)
@@ -363,27 +348,17 @@ Item {
                         enabled_: rules.character_claim ? rules.character_claim.enabled : true
                         onEnabledToggled: function(value) { patch("character_claim", "enabled", value) }
 
-                        CheckBox {
+                        ThemedCheckBox {
                             Layout.fillWidth: true
                             text: "Claim immediately when a wish pings you"
                             checked: rules.character_claim ? rules.character_claim.claim_on_wish_ping : true
-                            contentItem: Text {
-                                text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12
-                                leftPadding: parent.indicator.width + parent.spacing
-                                verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap
-                            }
                             onToggled: patch("character_claim", "claim_on_wish_ping", checked)
                         }
 
-                        CheckBox {
+                        ThemedCheckBox {
                             Layout.fillWidth: true
                             text: "Only claim during the final roll hour"
                             checked: rules.character_claim ? rules.character_claim.only_final_hour : true
-                            contentItem: Text {
-                                text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12
-                                leftPadding: parent.indicator.width + parent.spacing
-                                verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap
-                            }
                             onToggled: patch("character_claim", "only_final_hour", checked)
                         }
 
@@ -394,12 +369,10 @@ Item {
                             rowSpacing: 8
 
                             Label { text: "Instant claim min kakera"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
-                            TextField {
+                            ThemedTextField {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 placeholderText: "off (leave blank)"
-                                color: Theme.fgPrimary
-                                background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                                 text: getInt("character_claim", "min_kakera")
                                 onEditingFinished: patch("character_claim", "min_kakera", parseIntOrNull(text))
                             }
@@ -411,12 +384,10 @@ Item {
                                 Layout.preferredWidth: 180
                                 wrapMode: Text.WordWrap
                             }
-                            TextField {
+                            ThemedTextField {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 placeholderText: "e.g. 200 = ranks 1–200"
-                                color: Theme.fgPrimary
-                                background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                                 text: getInt("character_claim", "max_claim_rank")
                                 onEditingFinished: patch("character_claim", "max_claim_rank", parseIntOrNull(text))
                             }
@@ -444,20 +415,24 @@ Item {
                             }
                         }
 
+                        ThemedCheckBox {
+                            text: "Use $dk when reaction power runs out"
+                            checked: rules.kakera_reaction ? !!rules.kakera_reaction.auto_use_dk : false
+                            onToggled: patch("kakera_reaction", "auto_use_dk", checked)
+                        }
+
                         Flow {
                             Layout.fillWidth: true
                             spacing: 12
 
-                            CheckBox {
+                            ThemedCheckBox {
                                 text: "Require chaos key"
                                 checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_chaos_key : false
-                                contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter }
                                 onToggled: patch("kakera_reaction", "require_chaos_key", checked)
                             }
-                            CheckBox {
+                            ThemedCheckBox {
                                 text: "Require perk 8 character"
                                 checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_perk_8 : false
-                                contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter }
                                 onToggled: patch("kakera_reaction", "require_perk_8", checked)
                             }
                         }
@@ -469,37 +444,28 @@ Item {
                             rowSpacing: 8
 
                             Label { text: "Min spheres on roll"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
-                            TextField {
+                            ThemedTextField {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 placeholderText: "off"
-                                color: Theme.fgPrimary
-                                background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                                 text: getInt("kakera_reaction", "min_spheres")
                                 onEditingFinished: patch("kakera_reaction", "min_spheres", parseIntOrNull(text))
                             }
 
                             Label { text: "Daily click budget"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
-                            SpinBox {
+                            ThemedSpinBox {
                                 from: 0
                                 to: 500
-                                editable: true
                                 Layout.fillWidth: true
                                 value: rules.kakera_reaction ? (rules.kakera_reaction.daily_click_budget || 40) : 40
                                 onValueModified: patch("kakera_reaction", "daily_click_budget", value)
                             }
                         }
 
-                        CheckBox {
+                        ThemedCheckBox {
                             Layout.fillWidth: true
                             text: "Perk-8 priority: skip non-perk-8 once the daily budget is hit"
                             checked: rules.kakera_reaction ? !!rules.kakera_reaction.perk_8_budget_mode : false
-                            contentItem: Text {
-                                text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12
-                                leftPadding: parent.indicator.width + parent.spacing
-                                verticalAlignment: Text.AlignVCenter
-                                wrapMode: Text.WordWrap
-                            }
                             onToggled: patch("kakera_reaction", "perk_8_budget_mode", checked)
                         }
 
@@ -527,7 +493,7 @@ Item {
                                         font.pixelSize: 12
                                         Layout.fillWidth: true
                                     }
-                                    Switch {
+                                    ThemedSwitch {
                                         checked: rules.kakera_reaction && rules.kakera_reaction.low_power !== null && rules.kakera_reaction.low_power !== undefined
                                         onToggled: setLowPowerEnabled(checked)
                                     }
@@ -544,10 +510,9 @@ Item {
                                     visible: rules.kakera_reaction && rules.kakera_reaction.low_power
                                     Layout.fillWidth: true
                                     Label { text: "Below power %"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                                    SpinBox {
+                                    ThemedSpinBox {
                                         from: 0
                                         to: 100
-                                        editable: true
                                         value: (rules.kakera_reaction && rules.kakera_reaction.low_power) ? (rules.kakera_reaction.low_power.below_percent || 30) : 30
                                         onValueModified: patchLowPower("below_percent", value)
                                     }
@@ -590,8 +555,66 @@ Item {
                             }
                         }
                     }
+
+                    // -- $us roll kakera --
+                    RuleBlockCard {
+                        Layout.fillWidth: true
+                        title: "$us roll kakera"
+                        subtitle: {
+                            var mode = (rules.us_roll_kakera && rules.us_roll_kakera.mode) || "normal"
+                            if (mode === "none")
+                                return "Skip kakera on $us-added rolls (spheres unchanged)."
+                            if (mode === "selected")
+                                return "Only selected kakera types on $us-added rolls."
+                            return "Same kakera rules as normal rolls."
+                        }
+                        enabled_: true
+                        showEnableToggle: false
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Normal hourly rolls always use the kakera reaction rules above."
+                            color: Theme.fgMuted
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Label { text: "Kakera on $us rolls"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
+                        ThemedComboBox {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 200
+                            model: [
+                                { label: "Same as normal rolls", value: "normal" },
+                                { label: "Don't claim kakera", value: "none" },
+                                { label: "Selected types only", value: "selected" }
+                            ]
+                            textRole: "label"
+                            currentIndex: {
+                                var mode = (rules.us_roll_kakera && rules.us_roll_kakera.mode) || "normal"
+                                if (mode === "none") return 1
+                                if (mode === "selected") return 2
+                                return 0
+                            }
+                            onActivated: function(index) {
+                                var values = ["normal", "none", "selected"]
+                                patch("us_roll_kakera", "mode", values[index])
+                            }
+                        }
+
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            visible: rules.us_roll_kakera && rules.us_roll_kakera.mode === "selected"
+                            title: "Kakera types on $us rolls"
+                            options: kakeraOptions
+                            selected: rules.us_roll_kakera ? (rules.us_roll_kakera.types_allowed || []) : []
+                            onSelectionChanged: function(ids) {
+                                patch("us_roll_kakera", "types_allowed", ids)
+                            }
+                        }
+                    }
                 }
             }
+        }
         }
     }
 

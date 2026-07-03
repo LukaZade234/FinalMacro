@@ -61,10 +61,8 @@ Item {
         }
     }
 
-    ColumnLayout {
+    ScrollablePage {
         anchors.fill: parent
-        anchors.margins: 0
-        spacing: 12
 
         Label {
             text: "Parser debugger — uses the Run target (account token + channel from Run)."
@@ -86,15 +84,13 @@ Item {
                 Layout.fillWidth: true
 
                 Label { text: "Token"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                TextField {
+                ThemedTextField {
                     id: tokenField
                     Layout.columnSpan: 3
                     Layout.fillWidth: true
                     placeholderText: "User token"
                     echoMode: TextInput.Password
-                    color: Theme.fgPrimary
                     onTextChanged: App.setToken(text)
-                    background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                 }
 
                 Label { text: "Channel"; color: Theme.fgSecondary; font.pixelSize: 11 }
@@ -189,7 +185,7 @@ Item {
 
         SplitView {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 420
             orientation: Qt.Horizontal
 
             PanelCard {

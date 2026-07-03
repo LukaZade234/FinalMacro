@@ -25,6 +25,8 @@ def classify_button_kind(
         return "claim"
     if cid and _SPHERE_CUSTOM_ID_RE.search(cid):
         return "sphere"
+    if emoji_key == SPHERE_EMOJI_PREFIX:
+        return "sphere"
     if (
         emoji_key.startswith(SPHERE_EMOJI_PREFIX)
         and len(emoji_key) >= 3

@@ -1,0 +1,318 @@
+"""Tests for the $us mass-roll mode loop in RollCycleEngine."""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from macro.config import CharacterClaimRules, KakeraReactionRules, MacroConfig, UsRollKakeraRules
+from macro.roll_cycle import RollCycleEngine
+from macro.state import AccountState
+from mudae.types import MessageKind, ParseResult
+
+
+def _tu(rolls_left: int, reset_minutes: int, us_bonus: int | None = None) -> ParseResult:
+    fields = {
+        "rolls_left": rolls_left,
+        "rolls_reset_minutes": reset_minutes,
+        "claim_available": False,
+    }
+    if us_bonus is not None:
+        fields["rolls_us_bonus"] = us_bonus
+    return ParseResult(kind=MessageKind.TU, summary="$tu", fields=fields)
+
+
+def _us_stack(stacked: float):
+    """A bare $us response snapshot reporting the stacked pool size."""
+    content = (
+        f"<:rollstack:1> You have **{stacked:,}** rolls stacked.\n"
+        "Syntax: **$us <number of stacked rolls to use>**"
+    )
+    return SimpleNamespace(message_id=900, content=content), ParseResult(
+        kind=MessageKind.COMMAND_RESPONSE,
+        summary="$us",
+        fields={"us_stacked": stacked},
+    )
+
+
+def _roll(message_id: int, rolls_left: int | None = None) -> tuple[SimpleNamespace, ParseResult]:
+    snapshot = SimpleNamespace(message_id=message_id)
+    fields: dict = {"character_name": f"Char{message_id}", "wished_by": None}
+    if rolls_left is not None:
+        fields["rolls_left"] = rolls_left
+    parsed = ParseResult(
+        kind=MessageKind.ROLL,
+        summary="$roll",
+        fields=fields,
+    )
+    return snapshot, parsed
+
+
+class _FakeActions:
+    def __init__(self, tu_script: list, roll_script: list, stack_script: list | None = None) -> None:
+        self._tu = deque(tu_script)
+        self._rolls = deque(roll_script)
+        self._stack = deque(stack_script or [])
+        self.sent: list[tuple[str, str | None]] = []
+
+    def drain_queue(self) -> None:
+        pass
+
+    async def send_command(self, command: str, *, prefix: str | None = None) -> None:
+        self.sent.append((command, prefix))
+
+    async def wait_for_tu(self, *, timeout: float = 12.0):
+        return self._tu.popleft() if self._tu else None
+
+    async def wait_for_roll(self, *, roll_command: str, timeout: float = 20.0):
+        return self._rolls.popleft() if self._rolls else None
+
+    async def wait_for_perk6_spawn(self, *, parent_character: str, timeout: float = 5.0):
+        return None
+
+    async def wait_for(self, predicate, *, timeout: float = 15.0):
+        while self._stack:
+            snapshot, parsed = self._stack.popleft()
+            if predicate(snapshot, parsed):
+                return snapshot, parsed
+        return None
+
+    async def click_button(self, message_id: int, custom_id: str) -> bool:
+        return True
+
+    def us_reads(self) -> list[str]:
+        return [c for c, _ in self.sent if c == "us"]
+
+    def us_adds(self) -> list[str]:
+        return [c for c, _ in self.sent if c.startswith("us ")]
+
+    def roll_commands(self) -> list[str]:
+        return [c for c, _ in self.sent if c == "wa"]
+
+
+def _make_engine(actions: _FakeActions) -> tuple[RollCycleEngine, AccountState]:
+    # Disable claiming/reactions so the loop is isolated from action side effects.
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.6,
+        us_reset_margin_minutes=2,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    state = AccountState()
+    monitor = SimpleNamespace(macro_active=False)
+    engine = RollCycleEngine(actions, config, state, monitor)
+    return engine, state
+
+
+async def _fast_sleep(*_a, **_k) -> None:
+    return None
+
+
+def _run_us(engine: RollCycleEngine) -> None:
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._run_us_cycle())
+
+
+def test_us_mode_adds_from_stack_until_exhausted():
+    # Reads the stack once (35), then tracks it locally: add 20 -> roll 20 ->
+    # add 15 -> roll 15 -> local stack hits 0 -> stop. No bare "$us" between adds.
+    actions = _FakeActions(
+        tu_script=[
+            _tu(0, 30),
+            _tu(0, 30, us_bonus=20),
+            _tu(0, 30),
+            _tu(0, 30, us_bonus=15),
+            _tu(0, 30),
+        ],
+        roll_script=[_roll(i) for i in range(1, 36)],
+        stack_script=[_us_stack(35)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 20", "us 15"]
+    assert actions.us_reads() == ["us"]  # stack read once, then tracked locally
+    assert len(actions.roll_commands()) == 35
+
+
+def test_us_mode_counts_us_bonus_as_usable():
+    # The $tu (+20 $us) bonus must be rolled, not treated as "0 rolls".
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30, us_bonus=20), _tu(0, 30)],
+        roll_script=[_roll(i) for i in range(1, 21)],
+        stack_script=[_us_stack(0)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 20  # rolled the +20 $us bonus
+    assert actions.us_adds() == []  # already had usable rolls; no add needed
+
+
+def test_us_mode_requests_floored_to_stack_when_below_20():
+    # Only 7 stacked -> request "$us 7" (capped at 20, floored to the stack).
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=7), _tu(0, 30)],
+        roll_script=[_roll(i) for i in range(1, 8)],
+        stack_script=[_us_stack(7)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 7"]
+    assert len(actions.roll_commands()) == 7
+
+
+def test_us_mode_stops_when_adds_not_registering():
+    # Mudae ignores every "$us 20" (usable stays 0) -> stop after the cap instead
+    # of looping forever re-adding against the same stack.
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30), _tu(0, 30), _tu(0, 30)],
+        roll_script=[],
+        stack_script=[_us_stack(50), _us_stack(50), _us_stack(50), _us_stack(50)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 20", "us 20", "us 20"]  # stopped at the cap (3)
+    assert len(actions.roll_commands()) == 0
+
+
+class _TimeoutOnceActions(_FakeActions):
+    """Returns None once mid-batch, then serves the remaining roll script."""
+
+    def __init__(
+        self,
+        tu_script: list,
+        rolls_before_timeout: list,
+        rolls_after_timeout: list,
+        stack_script: list | None = None,
+    ) -> None:
+        super().__init__(tu_script, [], stack_script)
+        self._rolls_before = deque(rolls_before_timeout)
+        self._rolls_after = deque(rolls_after_timeout)
+        self._after_timeout = False
+
+    async def wait_for_roll(self, *, roll_command: str, timeout: float = 20.0):
+        if not self._after_timeout and self._rolls_before:
+            item = self._rolls_before.popleft()
+            if item is None:
+                self._after_timeout = True
+                return None
+            return item
+        if self._after_timeout and self._rolls_after:
+            return self._rolls_after.popleft()
+        return None
+
+
+def test_us_mode_retries_after_roll_timeout():
+    # Two rolls succeed, third times out; after wait, $tu shows 3 left and they roll out.
+    actions = _TimeoutOnceActions(
+        tu_script=[_tu(0, 30, us_bonus=5), _tu(0, 30, us_bonus=3), _tu(0, 30)],
+        rolls_before_timeout=[_roll(1), _roll(2), None],
+        rolls_after_timeout=[_roll(3), _roll(4), _roll(5)],
+        stack_script=[_us_stack(0)],
+    )
+    engine, state = _make_engine(actions)
+
+    _run_us(engine)
+
+    # Six $wa sends: roll 3 in the first batch times out after the command is sent.
+    assert len(actions.roll_commands()) == 6
+    assert any("resuming" in entry.text for entry in state.activity_log)
+    assert any("finished (5 roll(s))" in entry.text for entry in state.activity_log)
+
+
+def test_us_mode_consumes_normal_rolls_first():
+    # Start with 5 normal rolls -> roll them (stop-at-2 tail); then stack empty -> stop.
+    actions = _FakeActions(
+        tu_script=[_tu(5, 30), _tu(2, 30)],
+        roll_script=[
+            _roll(1, 4),
+            _roll(2, 3),
+            _roll(3, 2),
+            _roll(4, 1),
+            _roll(5, 0),
+        ],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 5
+    assert actions.us_adds() == []  # normal rolls used before any $us add
+
+
+def test_us_mode_does_not_add_when_reset_imminent():
+    # Rolls reset in 2 min (== margin): roll out the 3 remaining, wait, resume.
+    actions = _FakeActions(
+        tu_script=[_tu(3, 2), _tu(0, 58), _tu(0, 58)],
+        roll_script=[_roll(i) for i in range(1, 4)],
+        stack_script=[_us_stack(0)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert actions.us_adds() == []  # no $us adds while reset was imminent
+    assert len(actions.roll_commands()) == 3
+
+
+def test_us_mode_waits_and_resumes_after_reset():
+    # Near reset with 0 usable -> wait -> normal rolls refresh -> roll them out.
+    actions = _FakeActions(
+        tu_script=[_tu(0, 1), _tu(5, 55), _tu(5, 55), _tu(2, 55), _tu(0, 55)],
+        roll_script=[
+            _roll(1, 4),
+            _roll(2, 3),
+            _roll(3, 2),
+            _roll(4, 1),
+            _roll(5, 0),
+        ],
+        stack_script=[_us_stack(0)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 5  # rolled after reset, not stopped early
+    assert actions.us_adds() == []
+
+
+def test_us_mode_stops_immediately_when_reset_imminent_and_no_rolls():
+    # Near reset, nothing to roll, wait until reset passes, then stack is empty.
+    actions = _FakeActions(
+        tu_script=[_tu(0, 1), _tu(0, 58), _tu(0, 58)],
+        roll_script=[],
+        stack_script=[_us_stack(0)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert actions.us_adds() == []
+    assert len(actions.roll_commands()) == 0
+
+
+def test_us_kakera_rules_for_us_rolls():
+    cfg = MacroConfig(
+        kakera_reaction=KakeraReactionRules(enabled=True, types_allowed=["kakeraR"]),
+        us_roll_kakera=UsRollKakeraRules(mode="none"),
+    )
+    assert cfg.kakera_rules_for_roll(us_roll=False).enabled is True
+    assert cfg.kakera_rules_for_roll(us_roll=True).enabled is False
+
+    cfg2 = MacroConfig(
+        us_roll_kakera=UsRollKakeraRules(mode="selected", types_allowed=["kakeraP"]),
+    )
+    selected = cfg2.kakera_rules_for_roll(us_roll=True)
+    assert selected.enabled is True
+    assert selected.types_allowed == ["kakeraP"]

@@ -21,7 +21,7 @@ Item {
                            min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
                            require_perk_8: false, min_spheres: null, low_power: null,
-                           perk_8_budget_mode: false, daily_click_budget: 40 },
+                           perk_8_budget_mode: false, daily_click_budget: 40, auto_use_dk: false },
         sphere_reaction: { enabled: false, types_allowed: [] }
     })
 
@@ -172,25 +172,22 @@ Item {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Claim characters (master switch)"
                         checked: draft.character_claim.enabled
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setDraftField("character_claim", "enabled", checked)
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Always claim if a wish pings you"
                         checked: draft.character_claim.claim_on_wish_ping
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setDraftField("character_claim", "claim_on_wish_ping", checked)
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Only claim during the final roll hour"
                         checked: draft.character_claim.only_final_hour
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setDraftField("character_claim", "only_final_hour", checked)
                     }
                     Label {
@@ -217,12 +214,10 @@ Item {
                         Layout.fillWidth: true
 
                         Label { text: "Instant claim min kakera"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 200 }
-                        TextField {
+                        ThemedTextField {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 32
                             placeholderText: "blank = off"
-                            color: Theme.fgPrimary
-                            background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                             text: draft.character_claim.min_kakera === null ? "" : draft.character_claim.min_kakera.toString()
                             onEditingFinished: setDraftField("character_claim", "min_kakera", parseIntOrNull(text))
                         }
@@ -234,12 +229,10 @@ Item {
                             Layout.preferredWidth: 200
                             wrapMode: Text.WordWrap
                         }
-                        TextField {
+                        ThemedTextField {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 32
                             placeholderText: "e.g. 200 = ranks 1–200"
-                            color: Theme.fgPrimary
-                            background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                             text: draft.character_claim.max_claim_rank === null ? "" : draft.character_claim.max_claim_rank.toString()
                             onEditingFinished: setDraftField("character_claim", "max_claim_rank", parseIntOrNull(text))
                         }
@@ -254,11 +247,10 @@ Item {
                         text: "Pick which kakera colors the macro should click. Leave all unselected to allow every color."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Enable kakera reactions"
                         checked: draft.kakera_reaction.enabled
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setDraftField("kakera_reaction", "enabled", checked)
                     }
                     ColorChipPicker {
@@ -273,29 +265,31 @@ Item {
                     Flow {
                         Layout.fillWidth: true
                         spacing: 12
-                        CheckBox {
+                        ThemedCheckBox {
                             text: "Require chaos key"
                             checked: !!draft.kakera_reaction.require_chaos_key
-                            contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter }
                             onToggled: setDraftField("kakera_reaction", "require_chaos_key", checked)
                         }
-                        CheckBox {
+                        ThemedCheckBox {
                             text: "Require perk 8"
                             checked: !!draft.kakera_reaction.require_perk_8
-                            contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter }
                             onToggled: setDraftField("kakera_reaction", "require_perk_8", checked)
                         }
+                    }
+                    ThemedCheckBox {
+                        Layout.fillWidth: true
+                        text: "Use $dk when reaction power runs out (refills power to max)"
+                        checked: !!draft.kakera_reaction.auto_use_dk
+                        onToggled: setDraftField("kakera_reaction", "auto_use_dk", checked)
                     }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
                         Label { text: "Min spheres on roll"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 160 }
-                        TextField {
+                        ThemedTextField {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 32
                             placeholderText: "off"
-                            color: Theme.fgPrimary
-                            background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                             text: draft.kakera_reaction.min_spheres === null ? "" : draft.kakera_reaction.min_spheres.toString()
                             onEditingFinished: setDraftField("kakera_reaction", "min_spheres", parseIntOrNull(text))
                         }
@@ -310,22 +304,20 @@ Item {
                         text: "Use a daily click cap so common kakera characters don't burn power; once exhausted only perk-8 (half-power) rolls remain clickable."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Skip non-perk-8 rolls once the daily budget is hit"
                         checked: !!draft.kakera_reaction.perk_8_budget_mode
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setDraftField("kakera_reaction", "perk_8_budget_mode", checked)
                     }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
                         Label { text: "Daily click budget"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 160 }
-                        SpinBox {
+                        ThemedSpinBox {
                             Layout.fillWidth: true
                             from: 0
                             to: 500
-                            editable: true
                             value: draft.kakera_reaction.daily_click_budget || 40
                             onValueModified: setDraftField("kakera_reaction", "daily_click_budget", value)
                         }
@@ -340,11 +332,10 @@ Item {
                         text: "Lock the kakera filter to a smaller set once your power drops below a threshold."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Enable low-power override"
                         checked: draft.kakera_reaction.low_power !== null && draft.kakera_reaction.low_power !== undefined
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setLowPowerEnabled(checked)
                     }
                     RowLayout {
@@ -352,11 +343,10 @@ Item {
                         Layout.fillWidth: true
                         spacing: 12
                         Label { text: "Below power %"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 160 }
-                        SpinBox {
+                        ThemedSpinBox {
                             Layout.fillWidth: true
                             from: 0
                             to: 100
-                            editable: true
                             value: (draft.kakera_reaction.low_power && draft.kakera_reaction.low_power.below_percent) || 30
                             onValueModified: setLowPowerField("below_percent", value)
                         }
@@ -383,11 +373,10 @@ Item {
                         text: "Perk 9 lets you grab spheres on roll. Pick which colors to click — leaving all unselected accepts any color."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
-                    CheckBox {
+                    ThemedCheckBox {
                         Layout.fillWidth: true
                         text: "Enable sphere reactions"
                         checked: draft.sphere_reaction.enabled
-                        contentItem: Text { text: parent.text; color: Theme.fgPrimary; font.pixelSize: 12; leftPadding: parent.indicator.width + parent.spacing; verticalAlignment: Text.AlignVCenter; wrapMode: Text.WordWrap }
                         onToggled: setDraftField("sphere_reaction", "enabled", checked)
                     }
                     ColorChipPicker {
@@ -407,7 +396,7 @@ Item {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Button {
+                ThemedButton {
                     text: "Back"
                     enabled: activeStep > 0
                     onClicked: activeStep = Math.max(0, activeStep - 1)
@@ -415,15 +404,15 @@ Item {
 
                 Item { Layout.fillWidth: true }
 
-                Button {
+                ThemedButton {
                     text: "Skip"
                     visible: activeStep < 5
                     onClicked: activeStep = Math.min(5, activeStep + 1)
                 }
 
-                Button {
+                ThemedButton {
                     text: activeStep < 5 ? "Next" : "Save preset"
-                    highlighted: true
+                    accent: true
                     onClicked: {
                         if (activeStep < 5) {
                             activeStep += 1

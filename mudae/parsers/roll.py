@@ -97,6 +97,20 @@ def _parse_perk_6_spawn(description: str) -> tuple[bool, str | None]:
     return True, spawner or None
 
 
+def normalize_character_name(name: str | None) -> str:
+    """Case-insensitive compare helper for roll / spawn names."""
+    if not name:
+        return ""
+    return strip_markdown(str(name)).strip().lower()
+
+
+def perk6_spawner_matches(spawned_by: str | None, parent_name: str | None) -> bool:
+    """True when ``spawned_by`` refers to the character that was just rolled."""
+    spawned = normalize_character_name(spawned_by)
+    parent = normalize_character_name(parent_name)
+    return bool(spawned and parent and spawned == parent)
+
+
 def _has_perk_8(footer: str) -> bool:
     """Perk 8: half-power kakera — footer shows ``💎/2`` before belongs."""
     if not footer:
@@ -316,6 +330,7 @@ def parse_roll(
         summary += " · perk 6 spawn"
         if spawned_by:
             summary += f" by {spawned_by}"
+        fields["is_perk_6_spawn"] = True
     if rolls_left is not None:
         summary += f" · {rolls_left} rolls left"
     if fields["series"]:

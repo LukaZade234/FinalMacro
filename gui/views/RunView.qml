@@ -15,12 +15,36 @@ Item {
 
     property var stateData: ({})
     property var ruleTrace: []
+    property var activeRules: ({})
+    property var activityEntries: []
+
+    function refreshActiveRules() {
+        try {
+            var presetData = JSON.parse(App.presetsJson)
+            var id = presetData.active_preset_id
+            activeRules = id ? (JSON.parse(App.getPresetRulesJson(id)) || {}) : {}
+        } catch (e) {
+            activeRules = {}
+        }
+    }
+
+    function blockEnabled(block) {
+        return !!(activeRules[block] && activeRules[block].enabled)
+    }
 
     function refreshState() {
         try {
             stateData = JSON.parse(App.macroStateJson)
         } catch (e) {
             stateData = {}
+        }
+    }
+
+    function refreshActivityLog() {
+        try {
+            activityEntries = JSON.parse(App.macroActivityLogJson)
+        } catch (e) {
+            activityEntries = []
         }
     }
 
@@ -46,9 +70,11 @@ Item {
     }
 
     function rollsLeftText() {
-        if (App.macroRollsLeft >= 0)
-            return App.macroRollsLeft.toString()
-        return "—"
+        var base = App.macroRollsLeft >= 0 ? App.macroRollsLeft.toString() : "—"
+        var us = stateData.rolls_us_bonus
+        if (us !== undefined && us !== null && us > 0)
+            base += " (+" + us + " $us)"
+        return base
     }
 
     function powerText() {
@@ -69,10 +95,11 @@ Item {
         function onConnectedChanged() {
             controlBar.connected = App.connected
         }
+        function onConfigChanged() {
+            runRoot.refreshActiveRules()
+        }
         function onMacroPhaseChanged() {
             controlBar.macroRunning = runRoot.macroIsRunning()
-            phaseChip.value = App.macroPhase
-            phaseChip.highlighted = runRoot.macroIsRunning()
             phaseStepper.currentPhase = App.macroPhase
         }
         function onMacroStateChanged() {
@@ -83,15 +110,13 @@ Item {
             resetChip.value = runRoot.resetText()
         }
         function onMacroLogChanged() {
-            activityLog.text = App.macroActivityLog || "No activity yet."
+            runRoot.refreshActivityLog()
             runRoot.refreshRuleTrace()
         }
     }
 
-    ColumnLayout {
+    ScrollablePage {
         anchors.fill: parent
-        anchors.margins: 0
-        spacing: 12
 
         PanelCard {
             Layout.fillWidth: true
@@ -123,12 +148,6 @@ Item {
             spacing: 8
 
             StatusChip {
-                id: phaseChip
-                label: "Phase"
-                value: App.macroPhase
-                highlighted: runRoot.macroIsRunning()
-            }
-            StatusChip {
                 id: rollsChip
                 label: "Rolls"
                 value: runRoot.rollsLeftText()
@@ -153,7 +172,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 460
             spacing: 16
 
             ColumnLayout {
@@ -178,6 +197,7 @@ Item {
                         onStartClicked: App.startMacro()
                         onStopClicked: App.stopMacro()
                         onPlayOhClicked: App.playOhSphere()
+                        onPlayUsClicked: App.startUsMode()
                     }
                 }
 
@@ -186,12 +206,46 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
-                    Label {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: "Roll/claim options are edited under Presets. The active preset is selected above."
-                        color: Theme.fgMuted
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
+                        spacing: 6
+
+                        Repeater {
+                            model: [
+                                { label: "Character claim", block: "character_claim" },
+                                { label: "Kakera reaction", block: "kakera_reaction" },
+                                { label: "Sphere reaction", block: "sphere_reaction" }
+                            ]
+                            delegate: RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    color: runRoot.blockEnabled(modelData.block) ? Theme.success : Theme.bgHover
+                                }
+                                Label {
+                                    text: modelData.label
+                                    color: Theme.fgSecondary
+                                    font.pixelSize: 11
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    text: runRoot.blockEnabled(modelData.block) ? "On" : "Off"
+                                    color: runRoot.blockEnabled(modelData.block) ? Theme.success : Theme.fgMuted
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Edit these under Presets. The active preset is selected above."
+                            color: Theme.fgMuted
+                            font.pixelSize: 10
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
             }
@@ -217,28 +271,11 @@ Item {
                     fillContentVertically: true
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.preferredHeight: 200
                     Layout.minimumHeight: 160
 
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-                        TextArea {
-                            id: activityLog
-                            readOnly: true
-                            wrapMode: TextArea.Wrap
-                            color: Theme.fgSecondary
-                            font.family: "Consolas, monospace"
-                            font.pixelSize: 11
-                            text: App.macroActivityLog || "No activity yet."
-                            background: Rectangle {
-                                radius: 6
-                                color: Theme.bgDark
-                                border.color: Theme.border
-                            }
-                        }
+                    ActivityLogPanel {
+                        entries: runRoot.activityEntries
                     }
                 }
 
@@ -308,9 +345,10 @@ Item {
     Component.onCompleted: {
         refreshState()
         refreshRuleTrace()
+        refreshActivityLog()
+        refreshActiveRules()
         controlBar.connected = App.connected
         controlBar.macroRunning = macroIsRunning()
         phaseStepper.currentPhase = App.macroPhase
-        activityLog.text = App.macroActivityLog || "No activity yet."
     }
 }

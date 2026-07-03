@@ -16,6 +16,8 @@ class MessageKind(str, Enum):
     ROLL_OWNERSHIP = "roll_ownership"
     TU = "tu"
     KAKERA_CLAIM = "kakera_claim"
+    DK_CLAIM = "dk_claim"
+    KAKERA_REACT_DENIED = "kakera_react_denied"
     SPHERE_CLICK = "sphere_click"
     MARRIAGE = "marriage"
     CLAIM = "claim"

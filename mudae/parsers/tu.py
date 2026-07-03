@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mudae.parsers.dk import extract_dk_fields
+from mudae.parsers.reaction_power import parse_reaction_power_fields
 from mudae.parsers.utils import extract_bold_minutes, parse_hours_minutes
+from mudae.parsers.ohu8 import parse_refill_minutes
 from mudae.types import MessageKind, ParseResult
 
 
@@ -48,17 +51,25 @@ def parse_tu(content: str) -> ParseResult:
     if claim_reset is not None:
         fields["next_claim_reset_minutes"] = claim_reset
 
-    # 3. Rolls (+ optional $mk / $smk bonus)
+    # 3. Rolls (+ optional bonus pool: $mk / $smk monthly, or $us / $ru stacked).
+    # Bonus rolls are usable immediately; "$us"/"$ru" come from the $us stack and
+    # are wiped on the next rolls reset.
     rolls_match = re.search(
         r"(?:you have|você tem)\s*\*{0,2}([\d,.]+)\*{0,2}\s*rolls?"
-        r"(?:\s*\(\+\*{0,2}([\d,.]+)\*{0,2}\s*\$(?:mk|smk)\))?"
-        r"\s*(?:left|restantes)",
+        r"(?:\s*\(\+\*{0,2}([\d,.]+)\*{0,2}\s*\$(mk|smk|us|ru)\))?"
+        r"\s*(?:left|restantes)?",
         lower,
     )
     if rolls_match:
         fields["rolls_left"] = int(re.sub(r"[^\d]", "", rolls_match.group(1)))
-        if rolls_match.group(2):
-            fields["rolls_mk_bonus"] = int(re.sub(r"[^\d]", "", rolls_match.group(2)))
+        bonus_raw = rolls_match.group(2)
+        currency = rolls_match.group(3)
+        if bonus_raw and currency:
+            bonus = int(re.sub(r"[^\d]", "", bonus_raw))
+            if currency in {"us", "ru"}:
+                fields["rolls_us_bonus"] = bonus
+            else:
+                fields["rolls_mk_bonus"] = bonus
     else:
         warnings.append("Could not parse rolls left")
 
@@ -69,37 +80,17 @@ def parse_tu(content: str) -> ParseResult:
     if roll_reset is not None:
         fields["rolls_reset_minutes"] = roll_reset
 
-    # 5. Power — "Power: **88%**"
-    power_match = re.search(r"power:\s*\*\*(\d+)%\*\*", lower)
-    if power_match:
-        fields["power_percent"] = int(power_match.group(1))
+    refill = parse_refill_minutes(content)
+    if refill is not None:
+        fields["perk8_refill_minutes"] = refill
 
-    consumption_match = re.search(
-        r"(?:each kakera reaction consumes|cada reação de kakera consume)\s*(\d+)%",
-        lower,
-    )
-    if consumption_match:
-        fields["power_consumption_percent"] = int(consumption_match.group(1))
+    fields.update(parse_reaction_power_fields(content))
 
     # 6. $rt — only set when explicitly mentioned
     if "$rt is available" in lower or "$rt está pronto" in lower:
         fields["rt_available"] = True
 
-    # Kakera react (keep existing behaviour)
-    if "you __can__ react to kakera" in lower or (
-        "você __pode__" in lower and "kakera" in lower
-    ):
-        fields["kakera_react_available"] = True
-    else:
-        kakera_wait = re.search(
-            r"can't react to kakera.*\*\*(\d+h)?\s*(\d+)\*\* min", lower
-        )
-        if kakera_wait:
-            h, m = parse_hours_minutes(kakera_wait)
-            fields["kakera_react_available"] = False
-            fields["kakera_cooldown_minutes"] = h * 60 + m
-
-    # 7. $dk — "**1** $dk available. Next in **8h 37** min."
+    # 7. $dk stock / recharge timer
     dk_count = re.search(r"\*\*(\d+)\*\*\s*\$dk\s*(?:available|dispon)", lower)
     if dk_count:
         fields["dk_stock"] = int(dk_count.group(1))
@@ -108,13 +99,22 @@ def parse_tu(content: str) -> ParseResult:
     ):
         fields["dk_stock"] = 1
 
-    dk_idx = lower.find("$dk")
-    if dk_idx >= 0:
-        next_idx = lower.find("next in", dk_idx)
-        if next_idx > dk_idx:
-            dk_next = extract_bold_minutes(content, start=next_idx, window=72)
-            if dk_next is not None:
-                fields["dk_next_minutes"] = dk_next
+    next_dk = _minutes_after_phrase(content, "next $dk in")
+    if next_dk is not None:
+        fields["dk_next_minutes"] = next_dk
+        if "dk_stock" not in fields:
+            fields["dk_stock"] = 0
+    else:
+        dk_idx = lower.find("$dk")
+        if dk_idx >= 0:
+            next_idx = lower.find("next in", dk_idx)
+            if next_idx > dk_idx and "dk_stock" in fields:
+                dk_next = extract_bold_minutes(content, start=next_idx, window=72)
+                if dk_next is not None:
+                    fields["dk_next_minutes"] = dk_next
+
+    # Embedded ``$dk`` payout line (Mudae sometimes combines with ``$tu``).
+    fields.update(extract_dk_fields(content))
 
     summary = _build_summary(fields)
     return ParseResult(kind=MessageKind.TU, summary=summary, fields=fields, warnings=warnings)
@@ -157,5 +157,8 @@ def _build_summary(fields: dict[str, Any]) -> str:
             h, m = divmod(dk_next, 60)
             dk_txt += f" (next {h}h {m}m)" if h else f" (next {m}m)"
         parts.append(dk_txt)
+    elif (dk_next := fields.get("dk_next_minutes")) is not None:
+        h, m = divmod(dk_next, 60)
+        parts.append(f"dk next {h}h {m}m" if h else f"dk next {m}m")
 
     return " · ".join(parts)

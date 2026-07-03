@@ -116,14 +116,18 @@ Item {
         }
     }
 
-    RowLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 16
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 520
+            spacing: 16
 
         PanelCard {
             Layout.preferredWidth: 220
             Layout.maximumWidth: 260
-            Layout.fillHeight: true
+            Layout.preferredHeight: 520
             title: "Accounts"
             titleSize: 14
             fillContentVertically: true
@@ -135,15 +139,14 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    TextField {
+                    ThemedTextField {
                         id: newAccountField
                         Layout.fillWidth: true
                         placeholderText: "Account name"
-                        color: Theme.fgPrimary
-                        background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                     }
-                    Button {
+                    ThemedButton {
                         text: "Add"
+                        accent: true
                         enabled: newAccountField.text.trim().length > 0
                         onClicked: {
                             App.addAccount(newAccountField.text.trim(), "Main")
@@ -158,7 +161,7 @@ Item {
                 ListView {
                     id: accountList
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 360
                     clip: true
                     model: accounts().length
                     currentIndex: selectedIndex
@@ -166,7 +169,7 @@ Item {
                         selectedIndex = currentIndex
                         loadEditor()
                     }
-                    delegate: ItemDelegate {
+                    delegate: ThemedListDelegate {
                         width: accountList.width
                         text: accounts()[index].name + " (" + accounts()[index].type + ")"
                         highlighted: accountList.currentIndex === index
@@ -174,9 +177,10 @@ Item {
                     }
                 }
 
-                Button {
+                ThemedButton {
                     Layout.fillWidth: true
                     text: "Remove account"
+                    danger: true
                     enabled: accounts().length > 0
                     onClicked: {
                         var acc = currentAccount()
@@ -191,7 +195,7 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 520
             title: currentAccount() ? currentAccount().name : "Account details"
             titleSize: 14
             fillContentVertically: true
@@ -207,29 +211,25 @@ Item {
                     rowSpacing: 8
 
                     Label { text: "Name"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                    TextField {
+                    ThemedTextField {
                         id: nameField
                         Layout.columnSpan: 3
                         Layout.fillWidth: true
-                        color: Theme.fgPrimary
-                        background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                     }
 
                     Label { text: "Type"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                    ComboBox {
+                    ThemedComboBox {
                         id: typeCombo
                         Layout.columnSpan: 3
                         model: ["Main", "Alt"]
                     }
 
                     Label { text: "Token"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                    TextField {
+                    ThemedTextField {
                         id: tokenField
                         Layout.columnSpan: 3
                         Layout.fillWidth: true
                         echoMode: TextInput.Password
-                        color: Theme.fgPrimary
-                        background: Rectangle { radius: 6; color: Theme.inputBg; border.color: Theme.border }
                     }
                 }
 
@@ -246,38 +246,33 @@ Item {
                     Layout.preferredHeight: Math.min(200, Math.max(60, channelModel.count * 32))
                     clip: true
                     model: channelModel
-                    delegate: CheckBox {
+                    delegate: ThemedCheckBox {
                         width: parent.width
                         text: model.label
+                        textSize: 11
                         checked: model.enabled
                         onToggled: channelModel.setProperty(index, "enabled", checked)
-                        contentItem: Text {
-                            text: parent.text
-                            color: Theme.fgPrimary
-                            font.pixelSize: 11
-                            leftPadding: parent.indicator.width + parent.spacing
-                            verticalAlignment: Text.AlignVCenter
-                        }
                     }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Active run target is chosen on the Run tab."
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Button {
+                    ThemedButton {
                         text: "Save"
+                        accent: true
                         onClicked: saveCurrent()
-                    }
-                    Button {
-                        text: "Use on Run"
-                        enabled: currentAccount() !== null
-                        onClicked: {
-                            var acc = currentAccount()
-                            if (acc)
-                                App.setActiveAccount(acc.id)
-                        }
                     }
                 }
             }
+        }
         }
     }
 

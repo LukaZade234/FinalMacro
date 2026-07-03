@@ -19,18 +19,27 @@ from mudae.parsers.marriage import parse_marriage
 from mudae.parsers.settings import parse_settings
 from mudae.parsers.sphere import parse_sphere_click
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
+from mudae.parsers.ohu8 import parse_ohu8
+from mudae.parsers.dk import parse_dk
+from mudae.parsers.reaction_power import parse_kakera_react_denied, parse_ku
 from mudae.parsers.tu import parse_tu
+from mudae.parsers.us import parse_us
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "tu": parse_tu,
+    "ku": parse_ku,
     "settings": parse_settings,
+    "us": parse_us,
+    "ohu8": parse_ohu8,
 }
 _KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll"})
 
 # GUI kind column — human-readable names for non-command message types.
 _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.KAKERA_CLAIM: "kakera claim",
+    MessageKind.DK_CLAIM: "daily kakera ($dk)",
+    MessageKind.KAKERA_REACT_DENIED: "kakera react denied",
     MessageKind.SPHERE_CLICK: "sphere click",
     MessageKind.CLAIM: "claim",
     MessageKind.CLAIM_INTERVAL: "claim interval",
@@ -137,6 +146,10 @@ def parse_mudae_message(
         return result
     if kind == MessageKind.TU:
         return parse_tu(snapshot.content)
+    if kind == MessageKind.KAKERA_REACT_DENIED:
+        return parse_kakera_react_denied(snapshot.content)
+    if kind == MessageKind.DK_CLAIM:
+        return parse_dk(snapshot.content)
     if kind == MessageKind.KAKERA_CLAIM:
         return parse_kakera_claim(snapshot.content)
     if kind == MessageKind.SPHERE_CLICK:

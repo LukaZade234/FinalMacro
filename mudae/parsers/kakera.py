@@ -78,6 +78,8 @@ def parse_kakera_claim(content: str) -> ParseResult:
     warnings: list[str] = []
     fields: dict[str, Any] = {}
 
+    fields["earn_method"] = "kakera_click"
+
     kakera_type = _parse_source_kakera_type(content)
     if kakera_type:
         fields["kakera_type"] = kakera_type

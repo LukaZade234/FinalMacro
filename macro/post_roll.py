@@ -217,4 +217,8 @@ class PostRollHandler:
             return
         winner = parsed.fields.get("winner") or "?"
         character = parsed.fields.get("character") or record.character_name or "?"
+        # The claim slot is now spent — stop further claim attempts this session
+        # (next $tu refreshes the real cooldown).
+        self._state.claim_available = False
+        record.fields["claimed"] = True
         self._log(f"Claimed {character} ({winner})")

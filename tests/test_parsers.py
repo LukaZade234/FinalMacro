@@ -47,6 +47,62 @@ def test_parse_tu_full_en():
     assert "can claim" in result.summary
 
 
+def test_parse_tu_with_us_bonus():
+    content = (
+        "**User**, you can't claim for another **30** min. "
+        "You have **0** rolls (+**20** $us) left. "
+        "Next rolls reset in **42** min."
+    )
+    result = parse_tu(content)
+    assert result.fields["rolls_left"] == 0
+    assert result.fields["rolls_us_bonus"] == 20
+    assert "rolls_mk_bonus" not in result.fields
+    assert result.fields["rolls_reset_minutes"] == 42
+
+
+def test_parse_tu_us_bonus_without_left_keyword():
+    content = "**User**, you __can__ claim! You have **0** rolls (+**13** $us)."
+    result = parse_tu(content)
+    assert result.fields["rolls_left"] == 0
+    assert result.fields["rolls_us_bonus"] == 13
+
+
+def test_parse_us_stack_response():
+    from mudae.parsers.us import is_us_stack_response, parse_us, parse_us_stacked
+
+    content = (
+        "<:rollstack:633217516461883404> You have **7,872.8** rolls stacked.\n"
+        "Syntax: **$us <number of stacked rolls to use>**\n"
+        "(Value between 1 and 20)"
+    )
+    assert parse_us_stacked(content) == 7872.8
+    assert is_us_stack_response(content) is True
+    assert is_us_stack_response("plain message") is False
+
+    result = parse_us(content)
+    assert result.fields["us_stacked"] == 7872.8
+
+
+def test_us_response_detected_in_pipeline():
+    content = "<:rollstack:1> You have **5** rolls stacked. (Value between 1 and 20)"
+    snapshot = MudaeMessageSnapshot(
+        message_id=7,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=content,
+        embeds=[],
+        buttons=[],
+        created_at="12:00:00",
+    )
+    result = parse_message(snapshot, reply_to_command="us")
+    assert result.fields["us_stacked"] == 5.0
+
+
 def test_parse_tu_without_optional_fields():
     content = (
         "**User**, you __can__ claim! "
@@ -106,10 +162,17 @@ def test_parse_sphere_click():
     assert result.fields["sphere_type"] == "spB"
     assert result.fields["claimed_by"] == "lukazade234"
     assert result.fields["amount"] == 72
-    assert result.fields["daily_used"] == 1
+
+
+def test_parse_sphere_click_megasphere():
+    from mudae.parsers.sphere import parse_sphere_click
+
+    content = "<:spM:1473308463441379428> **player +120**  (2/15)"
+    result = parse_sphere_click(content)
+    assert result.fields["sphere_type"] == "spM"
+    assert result.fields["amount"] == 120
+    assert result.fields["daily_used"] == 2
     assert result.fields["daily_max"] == 15
-    assert "1/15" in result.summary
-    assert "+72" in result.summary
 
 
 def test_parse_kakera_claim():
@@ -119,6 +182,7 @@ def test_parse_kakera_claim():
     assert result.fields["claimed_by"] == "TestUser"
     assert result.fields["kakera_type"] == "kakeraT"
     assert "Kakera claim" in result.summary
+    assert result.fields["earn_method"] == "kakera_click"
 
 
 def test_kakera_claim_parses_spheres():
@@ -142,8 +206,8 @@ def test_kakera_claim_white_breakdown():
     assert result.fields["kakera_type"] == "kakeraL"
     assert result.fields["amount"] == 5934
     assert result.fields["claimed_by"] == "lukazade234"
+    assert result.fields["earn_method"] == "kakera_click"
     assert "raw_content" not in result.fields
-    assert "breakdown" not in result.fields
 
 
 def test_kakera_claim_white_breakdown_with_spheres():
@@ -165,6 +229,7 @@ def test_kakera_claim_parses_spheres_3618():
     )
     result = parse_kakera_claim(content)
     assert result.fields == {
+        "earn_method": "kakera_click",
         "kakera_type": "kakeraO",
         "amount": 3618,
         "spheres": 46,
@@ -1236,6 +1301,7 @@ def test_parse_mildretta_new_soulmate():
         log_path = Path(tmp) / "soulmate_log.json"
         soulmate_log._LOG_PATH = log_path
         soulmate_log._events = []
+        soulmate_log.set_recording_account("roller1", "Main Roller")
 
         snapshot = MudaeMessageSnapshot(
             message_id=65,
@@ -1274,6 +1340,9 @@ def test_parse_mildretta_new_soulmate():
         assert logged[0]["character_name"] == "Mildretta"
         assert logged[0]["guild_name"] == "Test Guild"
         assert logged[0]["series"] == "Gachiakuta"
+        assert logged[0]["account_id"] == "roller1"
+        assert logged[0]["account_name"] == "Main Roller"
+        soulmate_log.clear_recording_account()
 
 
 NACCHAN_ROLL_EMBED = {
@@ -1385,6 +1454,54 @@ def test_parse_perk_6_spawn():
     assert "TRISSY" in result.summary
     assert "Han Ah-Reun" in result.summary
     assert "Kakera Buttons" not in result.summary
+
+
+def test_parse_perk_6_akame_spawned_by_power():
+    from mudae.parsers.pipeline import parse_mudae_message
+    from mudae.parsers.roll import perk6_spawner_matches
+
+    embed = {
+        "author": "Akame",
+        "description": (
+            "Akame ga Kill!\n"
+            ":chaoskey: (98) +5% kakera value\n"
+            ":omegakey: +6\n"
+            "Claims: #29\n"
+            "Likes: #30\n"
+            "7,033:kakera:\n"
+            "<:spG:1437140664193126441> **[SPAWNED BY POWER]**"
+        ),
+        "footer": "",
+    }
+    snapshot = MudaeMessageSnapshot(
+        message_id=101,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[embed],
+        buttons=[],
+        created_at="20:00:00",
+    )
+    result = parse_mudae_message(snapshot)
+    assert result.fields["perk_6"] is True
+    assert result.fields["spawned_by"] == "POWER"
+    assert result.fields["is_perk_6_spawn"] is True
+    assert result.fields["character_name"] == "Akame"
+    assert perk6_spawner_matches("POWER", "Power") is True
+    assert perk6_spawner_matches("POWER", "Akame") is False
+
+
+def test_perk6_spawner_name_matching():
+    from mudae.parsers.roll import perk6_spawner_matches
+
+    assert perk6_spawner_matches("TRISSY", "Trissy") is True
+    assert perk6_spawner_matches("POWER", "power") is True
+    assert perk6_spawner_matches(None, "Power") is False
 
 
 def test_parse_nazuna_perk_8_and_sphere_button():

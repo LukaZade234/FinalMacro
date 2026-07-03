@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, QTimer, QUrl, Signal, Slot
 
 from gui.accounts import AccountStore
 from gui.presets import PresetStore
@@ -18,7 +18,7 @@ from gui.server_profiles import ServerProfileStore
 from gui.settings import load_settings, save_app_settings
 from gui.targets import TargetStore
 from macro.actions import DiscordActions
-from macro.activity_log import ActivityLog
+from macro.activity_log import ActivityLog, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
 from macro.sphere_game import OhSphereGame
@@ -91,11 +91,17 @@ class AppBridge(QObject):
     entryReceived = Signal(dict)
     statusChanged = Signal(str)
     connectedChanged = Signal(bool)
+    connectingChanged = Signal()
+    disconnectingChanged = Signal()
+    runActionPendingChanged = Signal()
     macroPhaseChanged = Signal(str)
     macroStateChanged = Signal()
     macroLogChanged = Signal()
     serversChanged = Signal()
     configChanged = Signal()
+    soulmatesChanged = Signal()
+    kakeraChanged = Signal()
+    spheresChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -111,8 +117,15 @@ class AppBridge(QObject):
         self._sync_initial_target()
         self._macro_config = self._presets.active_preset()
         self._macro_state = AccountState()
-        self._status = "Idle"
+        self._status = "Disconnected"
         self._connected = False
+        self._connecting = False
+        self._disconnecting = False
+        self._run_action_pending = ""
+        self._tu_pending_active = False
+        self._action_timer = QTimer(self)
+        self._action_timer.setSingleShot(True)
+        self._action_timer.timeout.connect(self._on_run_action_timeout)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._monitor: ChannelMonitor | None = None
@@ -121,6 +134,11 @@ class AppBridge(QObject):
         self._stop_event: asyncio.Event | None = None
         self._parse_lab_entries: list[dict[str, Any]] = []
         self._oh_running = False
+        self._servers_emit_pending = False
+        self._config_emit_pending = False
+        self._run_guild_id: int | None = None
+        self._run_guild_name: str | None = None
+        self._run_channel_name: str | None = None
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -129,6 +147,18 @@ class AppBridge(QObject):
     @Property(bool, constant=False, notify=connectedChanged)
     def connected(self) -> bool:
         return self._connected
+
+    @Property(bool, constant=False, notify=connectingChanged)
+    def connecting(self) -> bool:
+        return self._connecting
+
+    @Property(bool, constant=False, notify=disconnectingChanged)
+    def disconnecting(self) -> bool:
+        return self._disconnecting
+
+    @Property(str, constant=False, notify=runActionPendingChanged)
+    def runActionPending(self) -> str:
+        return self._run_action_pending
 
     @Property(str, constant=False, notify=macroPhaseChanged)
     def macroPhase(self) -> str:
@@ -140,7 +170,11 @@ class AppBridge(QObject):
 
     @Property(str, constant=False, notify=macroLogChanged)
     def macroActivityLog(self) -> str:
-        return "\n".join(self._macro_state.activity_log)
+        return activity_log_text(self._macro_state.activity_log)
+
+    @Property(str, constant=False, notify=macroLogChanged)
+    def macroActivityLogJson(self) -> str:
+        return json.dumps([entry.to_dict() for entry in self._macro_state.activity_log])
 
     @Property(str, constant=False, notify=macroLogChanged)
     def ruleTraceJson(self) -> str:
@@ -156,7 +190,9 @@ class AppBridge(QObject):
 
     @Property(int, constant=False, notify=macroStateChanged)
     def macroPowerPercent(self) -> int:
-        return self._macro_state.power_percent if self._macro_state.power_percent is not None else -1
+        from macro.reaction_power import display_reaction_power
+
+        return display_reaction_power(self._macro_state.power_percent)
 
     @Property(str, constant=False, notify=serversChanged)
     def serversJson(self) -> str:
@@ -181,6 +217,24 @@ class AppBridge(QObject):
         )
         return resolved.label if resolved else ""
 
+    @Property(str, constant=False, notify=soulmatesChanged)
+    def soulmatesJson(self) -> str:
+        from mudae.soulmate_log import events_for_client
+
+        return json.dumps(events_for_client(self._accounts))
+
+    @Property(str, constant=False, notify=kakeraChanged)
+    def kakeraJson(self) -> str:
+        from mudae.kakera_log import client_payload
+
+        return json.dumps(client_payload(self._accounts))
+
+    @Property(str, constant=False, notify=spheresChanged)
+    def spheresJson(self) -> str:
+        from mudae.sphere_log import client_payload
+
+        return json.dumps(client_payload(self._accounts))
+
     def _sync_initial_target(self) -> None:
         account = self._accounts.active_account()
         channel = self._profiles.active_channel()
@@ -192,9 +246,27 @@ class AppBridge(QObject):
             )
 
     def _notify_servers(self) -> None:
+        # Defer to the next event-loop tick so a value-returning Slot (e.g.
+        # addChannel/addServer) fully returns to QML before the QML
+        # Connections handlers re-enter the engine. Synchronous re-entry while
+        # a slot is still on the call stack can hang the UI thread.
+        if self._servers_emit_pending:
+            return
+        self._servers_emit_pending = True
+        QTimer.singleShot(0, self._emit_servers_changed)
+
+    def _emit_servers_changed(self) -> None:
+        self._servers_emit_pending = False
         self.serversChanged.emit()
 
     def _notify_config(self) -> None:
+        if self._config_emit_pending:
+            return
+        self._config_emit_pending = True
+        QTimer.singleShot(0, self._emit_config_changed)
+
+    def _emit_config_changed(self) -> None:
+        self._config_emit_pending = False
         self.configChanged.emit()
         self.serversChanged.emit()
 
@@ -221,8 +293,60 @@ class AppBridge(QObject):
         if self._connected != value:
             self._connected = value
             self.connectedChanged.emit(value)
+        self._set_connecting(False)
+        self._set_disconnecting(False)
+
+    def _set_connecting(self, value: bool) -> None:
+        if self._connecting == value:
+            return
+        self._connecting = value
+        self.connectingChanged.emit()
+
+    def _set_disconnecting(self, value: bool) -> None:
+        if self._disconnecting == value:
+            return
+        self._disconnecting = value
+        self.disconnectingChanged.emit()
+
+    def _set_run_action_pending(self, action: str) -> None:
+        action = str(action or "").strip()
+        if self._run_action_pending == action:
+            return
+        self._run_action_pending = action
+        self.runActionPendingChanged.emit()
+        self._action_timer.stop()
+        if action:
+            self._action_timer.start(20_000)
+        else:
+            self._tu_pending_active = False
+
+    def _on_run_action_timeout(self) -> None:
+        if self._run_action_pending:
+            self._set_run_action_pending("")
+
+    def _sync_run_action_pending(self) -> None:
+        pending = self._run_action_pending
+        if not pending:
+            return
+        phase = self._macro_state.phase
+        running = bool(self._engine and self._engine.is_running)
+
+        if pending in {"start", "us"}:
+            if running or phase != MacroPhase.IDLE:
+                self._set_run_action_pending("")
+        elif pending == "stop":
+            if not running and phase == MacroPhase.IDLE:
+                self._set_run_action_pending("")
+        elif pending == "tu":
+            if phase == MacroPhase.CHECKING_TU:
+                self._tu_pending_active = True
+            elif phase == MacroPhase.IDLE and self._tu_pending_active:
+                self._set_run_action_pending("")
+        elif pending == "oh" and not self._oh_running:
+            self._set_run_action_pending("")
 
     def _notify_macro(self) -> None:
+        self._sync_run_action_pending()
         self.macroPhaseChanged.emit(self._macro_state.phase.value)
         self.macroStateChanged.emit()
         self.macroLogChanged.emit()
@@ -521,6 +645,7 @@ class AppBridge(QObject):
                 "character_claim": data["character_claim"],
                 "kakera_reaction": data["kakera_reaction"],
                 "sphere_reaction": data["sphere_reaction"],
+                "us_roll_kakera": data["us_roll_kakera"],
             }
         )
 
@@ -551,7 +676,7 @@ class AppBridge(QObject):
                 if key in basic_patch:
                     data[key] = basic_patch[key]
 
-        for block in ("character_claim", "kakera_reaction", "sphere_reaction"):
+        for block in ("character_claim", "kakera_reaction", "sphere_reaction", "us_roll_kakera"):
             block_patch = patch.get(block)
             if isinstance(block_patch, dict):
                 current = data.get(block) or {}
@@ -572,6 +697,53 @@ class AppBridge(QObject):
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
         )
+
+    def _get_daily_resets_for(
+        self,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> dict[str, Any]:
+        from macro.daily_store import get_account_daily_slice
+
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        if not found:
+            return {}
+        return get_account_daily_slice(found[1].daily_resets, account_id)
+
+    def _save_daily_resets_for(
+        self,
+        account_id: str,
+        channel_profile_id: str,
+        account_daily: dict[str, Any],
+    ) -> None:
+        """Store daily reset data for one account on one channel.
+
+        Safe to call from the reader thread: the dict swap is atomic and the
+        settings write is marshalled to the GUI thread.
+        """
+        from macro.daily_store import set_account_daily_slice
+
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        if not found or not account_id:
+            return
+        channel = found[1]
+        channel.daily_resets = set_account_daily_slice(
+            channel.daily_resets,
+            account_id,
+            account_daily,
+        )
+        self._request_persist()
+
+    def _request_persist(self) -> None:
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_persist",
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+    @Slot()
+    def _deliver_persist(self) -> None:
+        self._persist()
 
     def _parse_int(self, value: str, label: str) -> int:
         try:
@@ -646,6 +818,12 @@ class AppBridge(QObject):
     @Slot(bool)
     def _deliver_connected(self, value: bool) -> None:
         self._set_connected(value)
+        if not value and self._status.startswith("Connected"):
+            self._set_status("Disconnected")
+
+    @Slot()
+    def _clear_run_action_pending(self) -> None:
+        self._set_run_action_pending("")
 
     @Slot()
     def _deliver_macro_notify(self) -> None:
@@ -706,6 +884,130 @@ class AppBridge(QObject):
             )
         if self._engine and parsed.fields.get("settimer") is not None:
             self._engine.apply_settings_fields(parsed.fields)
+        if parsed.fields.get("new_soulmate"):
+            QMetaObject.invokeMethod(
+                self,
+                "_deliver_soulmates_notify",
+                Qt.ConnectionType.QueuedConnection,
+            )
+        if self._try_record_kakera_earning(snapshot, parsed):
+            QMetaObject.invokeMethod(
+                self,
+                "_deliver_kakera_notify",
+                Qt.ConnectionType.QueuedConnection,
+            )
+            if parsed.fields.get("spheres"):
+                QMetaObject.invokeMethod(
+                    self,
+                    "_deliver_spheres_notify",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+        elif self._try_record_sphere_earning(snapshot, parsed):
+            QMetaObject.invokeMethod(
+                self,
+                "_deliver_spheres_notify",
+                Qt.ConnectionType.QueuedConnection,
+            )
+
+    @Slot()
+    def _deliver_soulmates_notify(self) -> None:
+        self.soulmatesChanged.emit()
+
+    @Slot()
+    def _deliver_kakera_notify(self) -> None:
+        self.kakeraChanged.emit()
+
+    @Slot()
+    def _deliver_spheres_notify(self) -> None:
+        self.spheresChanged.emit()
+
+    def _try_record_kakera_earning(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+    ) -> bool:
+        from mudae.kakera_log import (
+            earn_method_from_parse,
+            record_kakera_earning,
+            record_roll_bku_earning,
+            should_record_earning,
+            should_record_roll_bku,
+        )
+
+        if parsed.fields.get("bku") is not None:
+            if not should_record_roll_bku(
+                parsed.fields,
+                self._macro_state.own_usernames,
+                self._macro_state.phase,
+            ):
+                return False
+            record_roll_bku_earning(snapshot, parsed.fields)
+            return True
+
+        if not should_record_earning(
+            parsed.kind,
+            parsed.fields,
+            self._macro_state.own_usernames,
+        ):
+            return False
+        method = earn_method_from_parse(parsed.kind, parsed.fields)
+        if not method:
+            return False
+        record_kakera_earning(snapshot, parsed.fields, earn_method=method)
+        spheres = parsed.fields.get("spheres")
+        if spheres is not None:
+            try:
+                bonus = int(spheres)
+            except (TypeError, ValueError):
+                bonus = 0
+            if bonus > 0:
+                from mudae.sphere_log import record_sphere_earning
+
+                record_sphere_earning(
+                    snapshot,
+                    parsed.fields,
+                    source="kakera_bonus",
+                    amount=bonus,
+                )
+        return True
+
+    def _try_record_sphere_earning(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+    ) -> bool:
+        from mudae.sphere_log import record_sphere_earning, should_record_sphere_click
+
+        if parsed.kind != MessageKind.SPHERE_CLICK:
+            return False
+        if not should_record_sphere_click(
+            parsed.kind,
+            parsed.fields,
+            self._macro_state.own_usernames,
+        ):
+            return False
+        record_sphere_earning(snapshot, parsed.fields, source="sphere_click")
+        return True
+
+    def _record_minigame_spheres(self, game: str, amount: int, *, clicks: int = 0) -> None:
+        if amount <= 0 or not self._monitor:
+            return
+        from mudae.sphere_log import record_minigame_earning
+
+        record_minigame_earning(
+            game=game,
+            amount=amount,
+            clicks=clicks or None,
+            channel_id=self._monitor.channel_id,
+            channel_name=self._run_channel_name,
+            guild_id=self._run_guild_id,
+            guild_name=self._run_guild_name,
+        )
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_spheres_notify",
+            Qt.ConnectionType.QueuedConnection,
+        )
 
     @Slot(str)
     def _deliver_profile_update(self, payload_json: str) -> None:
@@ -735,6 +1037,35 @@ class AppBridge(QObject):
             raise ValueError("Select account, server, channel, and preset on Run")
         self._macro_config = resolved.macro_config
         channel_id = self._parse_int(resolved.discord_channel_id, "channel ID")
+        run_account_id = resolved.account_id
+        run_channel_profile_id = resolved.channel_profile_id
+
+        from mudae.kakera_log import set_recording_account as set_kakera_account
+        from mudae.soulmate_log import set_recording_account
+        from mudae.sphere_log import set_recording_account as set_sphere_account
+
+        account = self._accounts.find_account(run_account_id)
+        account_name = account.name if account else "Main"
+        set_recording_account(run_account_id, account_name)
+        set_kakera_account(run_account_id, account_name)
+        set_sphere_account(run_account_id, account_name)
+
+        channel_profile = self._profiles.active_channel()
+        server = self._profiles.find_server(self._profiles.active_server_id)
+        self._run_channel_name = channel_profile.name if channel_profile else None
+        self._run_guild_name = (
+            (channel_profile.guild_name if channel_profile else None)
+            or (server.name if server else None)
+        )
+        guild_raw = None
+        if channel_profile and channel_profile.guild_id:
+            guild_raw = channel_profile.guild_id
+        elif server and server.guild_id:
+            guild_raw = server.guild_id
+        try:
+            self._run_guild_id = int(guild_raw) if guild_raw else None
+        except (TypeError, ValueError):
+            self._run_guild_id = None
 
         self._monitor = ChannelMonitor(
             token=resolved.token,
@@ -750,7 +1081,16 @@ class AppBridge(QObject):
             self._macro_state,
             self._monitor,
             on_state=self._on_macro_state,
-            on_persist=self._persist,
+            on_persist=self._request_persist,
+            daily_resets_get=lambda: self._get_daily_resets_for(
+                run_account_id,
+                run_channel_profile_id,
+            ),
+            daily_resets_save=lambda daily: self._save_daily_resets_for(
+                run_account_id,
+                run_channel_profile_id,
+                daily,
+            ),
         )
 
         async def runner() -> None:
@@ -768,6 +1108,7 @@ class AppBridge(QObject):
                 self._on_macro_state()
             else:
                 self._on_status("Connection timed out")
+                self._on_connected(False)
             await self._stop_event.wait()
             if self._engine and self._engine.is_running:
                 self._engine.stop()
@@ -785,6 +1126,16 @@ class AppBridge(QObject):
             self._on_status(f"Error: {exc}")
             self._on_connected(False)
         finally:
+            from mudae.kakera_log import clear_recording_account
+            from mudae.soulmate_log import clear_recording_account as clear_soulmate_account
+            from mudae.sphere_log import clear_recording_account as clear_sphere_account
+
+            clear_recording_account()
+            clear_soulmate_account()
+            clear_sphere_account()
+            self._run_guild_id = None
+            self._run_guild_name = None
+            self._run_channel_name = None
             loop.close()
             self._loop = None
 
@@ -807,6 +1158,8 @@ class AppBridge(QObject):
         self._macro_config = resolved.macro_config
         self._persist()
         self._macro_state = AccountState()
+        self._set_connecting(True)
+        self._set_status("Connecting…")
         self._thread = threading.Thread(
             target=self._reader_thread_main,
             name="channel-monitor",
@@ -817,8 +1170,11 @@ class AppBridge(QObject):
     @Slot()
     def disconnect(self) -> None:
         if self._loop and self._stop_event:
+            self._set_disconnecting(True)
+            self._set_status("Disconnecting…")
             self._loop.call_soon_threadsafe(self._stop_event.set)
-        self._set_status("Disconnecting…")
+        else:
+            self._set_status("Not connected")
 
     @Slot()
     def runTu(self) -> None:
@@ -827,6 +1183,7 @@ class AppBridge(QObject):
             return
         self._persist()
         self._engine.update_config(self._macro_config)
+        self._set_run_action_pending("tu")
 
         async def _run() -> None:
             await self._engine.run_tu()
@@ -843,11 +1200,29 @@ class AppBridge(QObject):
             return
         self._persist()
         self._engine.update_config(self._macro_config)
+        self._set_run_action_pending("start")
         self._loop.call_soon_threadsafe(self._engine.start)
+
+    @Slot()
+    def startUsMode(self) -> None:
+        if not self._loop or not self._engine:
+            self._set_status("Connect first")
+            return
+        if self._engine.is_running:
+            self._set_status("Macro already running")
+            return
+        if self._oh_running:
+            self._set_status("Stop the $oh game before rolling $us")
+            return
+        self._persist()
+        self._engine.update_config(self._macro_config)
+        self._set_run_action_pending("us")
+        self._loop.call_soon_threadsafe(self._engine.start_us_mode)
 
     @Slot()
     def stopMacro(self) -> None:
         if self._engine and self._loop:
+            self._set_run_action_pending("stop")
             self._loop.call_soon_threadsafe(self._engine.stop)
 
     @Slot()
@@ -865,14 +1240,24 @@ class AppBridge(QObject):
         activity = ActivityLog(self._macro_state, on_update=self._notify_macro)
         game = OhSphereGame(self._actions, self._monitor, log=activity.write)
         self._oh_running = True
+        self._set_run_action_pending("oh")
 
         async def _run() -> None:
             try:
-                await game.play(prefix=self._macro_config.prefix)
+                result = await game.play(prefix=self._macro_config.prefix)
+                reward = int(result.get("reward") or 0)
+                clicks = int(result.get("clicks") or 0)
+                if reward > 0:
+                    self._record_minigame_spheres("oh", reward, clicks=clicks)
             except Exception as exc:  # noqa: BLE001 - surface to the activity log
                 activity.write(f"$oh error: {exc}")
             finally:
                 self._oh_running = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
 

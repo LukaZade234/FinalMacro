@@ -7,10 +7,10 @@ import "views"
 
 ApplicationWindow {
     id: win
-    width: 1100
-    height: 750
-    minimumWidth: 900
-    minimumHeight: 600
+    width: 1000
+    height: 680
+    minimumWidth: 760
+    minimumHeight: 480
     visible: true
     title: "FinalMacro"
     color: Theme.bgDark
@@ -22,6 +22,7 @@ ApplicationWindow {
         { label: "Accounts", title: "Accounts" },
         { label: "Servers", title: "Servers" },
         { label: "Presets", title: "Presets" },
+        { label: "Statistics", title: "Statistics" },
         { label: "Debug", title: "Debug" },
         { label: "Settings", title: "Settings" }
     ]
@@ -39,9 +40,6 @@ ApplicationWindow {
         }
         function onStatusChanged(text) {
             topBar.statusText = text
-        }
-        function onMacroPhaseChanged() {
-            topBar.macroPhaseText = App.macroPhase
         }
     }
 
@@ -76,8 +74,6 @@ ApplicationWindow {
                 pageTitle: win.pageTitleAt(win.currentPage)
                 statusText: App.statusText
                 statusOnline: App.connected
-                showMacroPhase: win.currentPage === 0
-                macroPhaseText: App.macroPhase
             }
 
             Loader {
@@ -96,8 +92,9 @@ ApplicationWindow {
                     case 1: return accountsPage
                     case 2: return serversPage
                     case 3: return presetsPage
-                    case 4: return debugPage
-                    case 5: return settingsPage
+                    case 4: return statisticsPage
+                    case 5: return debugPage
+                    case 6: return settingsPage
                     default: return runPage
                     }
                 }
@@ -117,6 +114,10 @@ ApplicationWindow {
                 Component {
                     id: presetsPage
                     PresetsView { anchors.fill: parent }
+                }
+                Component {
+                    id: statisticsPage
+                    StatisticsView { anchors.fill: parent }
                 }
                 Component {
                     id: debugPage

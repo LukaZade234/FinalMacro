@@ -35,7 +35,7 @@ ColumnLayout {
             serverData = { servers: [], active_server_id: "", active_channel_id: "" }
         }
         syncIndices()
-        updating = false
+        Qt.callLater(function() { root.updating = false })
     }
 
     function accounts() {
@@ -143,13 +143,15 @@ ColumnLayout {
         spacing: 10
 
         Label { text: "Account"; color: Theme.fgSecondary; font.pixelSize: 11 }
-        ComboBox {
+        ThemedComboBox {
             id: accountCombo
             Layout.preferredWidth: 140
             Layout.fillWidth: true
             model: root.accounts().map(function(a) { return a.name + " (" + a.type + ")" })
             enabled: model.length > 0
             onActivated: function(index) {
+                if (root.updating)
+                    return
                 root.accountIndex = index
                 root.applyRunTarget()
             }
@@ -161,13 +163,15 @@ ColumnLayout {
         spacing: 10
 
         Label { text: "Server"; color: Theme.fgSecondary; font.pixelSize: 11 }
-        ComboBox {
+        ThemedComboBox {
             id: serverCombo
             Layout.preferredWidth: 120
             Layout.fillWidth: true
             model: root.servers().map(function(s) { return s.name })
             enabled: model.length > 0
             onActivated: function(index) {
+                if (root.updating)
+                    return
                 root.serverIndex = index
                 root.syncChannelIndex()
                 channelCombo.currentIndex = root.channelIndex
@@ -176,7 +180,7 @@ ColumnLayout {
         }
 
         Label { text: "Channel"; color: Theme.fgSecondary; font.pixelSize: 11 }
-        ComboBox {
+        ThemedComboBox {
             id: channelCombo
             Layout.preferredWidth: 120
             Layout.fillWidth: true
@@ -187,6 +191,8 @@ ColumnLayout {
             model: channelList
             enabled: channelList.length > 0
             onActivated: function(index) {
+                if (root.updating)
+                    return
                 root.channelIndex = index
                 root.applyRunTarget()
             }
@@ -198,13 +204,15 @@ ColumnLayout {
         spacing: 10
 
         Label { text: "Preset"; color: Theme.fgSecondary; font.pixelSize: 11 }
-        ComboBox {
+        ThemedComboBox {
             id: presetCombo
             Layout.preferredWidth: 160
             Layout.fillWidth: true
             model: root.presets().map(function(p) { return p.id })
             enabled: model.length > 0
             onActivated: function(index) {
+                if (root.updating)
+                    return
                 root.presetIndex = index
                 root.applyRunTarget()
             }
