@@ -67,6 +67,7 @@ def test_round_trip_preserves_all_blocks():
     assert restored.kakera_reaction.low_power.types_allowed == ["kakeraR"]
     assert restored.kakera_reaction.perk_8_budget_mode is True
     assert restored.kakera_reaction.daily_click_budget == 20
+    assert restored.kakera_reaction.perk_8_budget_bypass_types == ["kakeraP"]
     assert restored.sphere_reaction.types_allowed == ["spY", "spB"]
 
 
@@ -286,6 +287,21 @@ def test_kakera_perk_8_budget_allows_perk_8_when_exhausted():
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
+
+
+def test_kakera_perk_8_budget_allows_purple_when_exhausted():
+    fields = _kakera_fields(_kakera_buttons("kakeraP", "kakeraR"), perk_8=False)
+    rules = KakeraReactionRules(
+        enabled=True,
+        types_allowed=["kakeraP", "kakeraR"],
+        perk_8_budget_mode=True,
+        daily_click_budget=2,
+    )
+    state = AccountState(perk8_priority_mode="active")
+    state.kakera_clicks_today = 2
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraP"
 
 
 def test_account_state_daily_budget_rollover():

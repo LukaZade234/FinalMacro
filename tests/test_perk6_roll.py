@@ -109,6 +109,32 @@ async def _fast_sleep(_delay: float) -> None:
     return None
 
 
+def test_perk6_spawn_wait_is_short_when_no_spawn():
+    config = MacroConfig(
+        roll_command="wa",
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    state = AccountState()
+    actions = _Perk6Actions()
+    actions._spawns.clear()
+    timeouts: list[float] = []
+
+    async def fake_wait(*, parent_character: str, timeout: float = 0.8):
+        timeouts.append(timeout)
+        return None
+
+    actions.wait_for_perk6_spawn = fake_wait  # type: ignore[method-assign]
+    engine = RollCycleEngine(actions, config, state, SimpleNamespace(macro_active=False))
+
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        outcome = asyncio.run(
+            engine._perform_roll("wa", 1, [], us_roll=False, stop_on_interrupt=True)
+        )
+
+    assert outcome.ok is True
+    assert timeouts == [0.8]
+
+
 def test_perk6_spawn_is_processed_after_parent_roll():
     config = MacroConfig(
         roll_command="wa",

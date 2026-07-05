@@ -26,6 +26,7 @@ from macro.reaction_power import (
 from macro.rule_eval import (
     _has_chaos_key,
     passes_kakera_reaction,
+    perk8_budget_bypass_types,
     perk8_click_budget,
     perk8_mode_from_state,
 )
@@ -74,9 +75,18 @@ class KakeraReactor:
         candidates = decision.buttons
         mode = perk8_mode_from_state(self.state)
         budget = perk8_click_budget(self.state, rules)
+        bypass = perk8_budget_bypass_types(rules)
         if rules.perk_8_budget_mode and perk8_budget_applies(mode):
             remaining = self.state.remaining_kakera_budget(budget)
-            if remaining <= 0:
+            bypass_candidates = [
+                c for c in candidates if (c.emoji or "") in bypass
+            ]
+            paid_candidates = [
+                c for c in candidates if (c.emoji or "") not in bypass
+            ]
+            if remaining <= 0 and not paid_candidates:
+                candidates = bypass_candidates
+            elif remaining <= 0:
                 self._trace(
                     "skip",
                     character,
@@ -88,11 +98,26 @@ class KakeraReactor:
                     f"{self.state.kakera_clicks_today}/{budget} reached"
                 )
                 return 0
-            candidates = candidates[:remaining]
+            else:
+                candidates = bypass_candidates + paid_candidates[:remaining]
+
+            if not candidates:
+                self._trace(
+                    "skip",
+                    character,
+                    roll_index,
+                    f"budget {self.state.kakera_clicks_today}/{budget}",
+                )
+                self.log(
+                    f"kakera skip {character}: daily budget "
+                    f"{self.state.kakera_clicks_today}/{budget} reached"
+                )
+                return 0
 
         has_chaos = _has_chaos_key(fields)
         has_perk_8 = bool(fields.get("perk_8"))
         clicks = 0
+        budget_clicks = 0
         for choice in candidates:
             if not choice.custom_id:
                 continue
@@ -111,10 +136,13 @@ class KakeraReactor:
             )
             if clicked:
                 clicks += 1
+                if (choice.emoji or "") not in bypass:
+                    budget_clicks += 1
 
         if clicks:
-            self.state.record_kakera_clicks(clicks)
-            if self.on_click_progress:
+            if budget_clicks:
+                self.state.record_kakera_clicks(budget_clicks)
+            if self.on_click_progress and budget_clicks:
                 self.on_click_progress()
             budget_note = ""
             if rules.perk_8_budget_mode and perk8_budget_applies(mode):
@@ -152,6 +180,7 @@ class KakeraReactor:
             if (
                 rules.perk_8_budget_mode
                 and perk8_budget_applies(mode)
+                and budget_clicks
                 and self.state.kakera_clicks_today >= budget
                 and self.on_perk8_exhausted
             ):

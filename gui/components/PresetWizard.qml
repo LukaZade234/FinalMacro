@@ -21,7 +21,8 @@ Item {
                            min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
                            require_perk_8: false, min_spheres: null, low_power: null,
-                           perk_8_budget_mode: false, daily_click_budget: 40, auto_use_dk: false },
+                           perk_8_budget_mode: false, daily_click_budget: 40,
+                           perk_8_budget_bypass_types: ["kakeraP"], auto_use_dk: false },
         sphere_reaction: { enabled: false, types_allowed: [] }
     })
 
@@ -309,6 +310,16 @@ Item {
                         text: "Skip non-perk-8 rolls once the daily budget is hit"
                         checked: !!draft.kakera_reaction.perk_8_budget_mode
                         onToggled: setDraftField("kakera_reaction", "perk_8_budget_mode", checked)
+                    }
+                    ColorChipPicker {
+                        Layout.fillWidth: true
+                        visible: !!draft.kakera_reaction.perk_8_budget_mode
+                        title: "Always click during budget saving (ignore perk-8 limit)"
+                        options: kakeraOptions
+                        selected: draft.kakera_reaction.perk_8_budget_bypass_types || ["kakeraP"]
+                        onSelectionChanged: function(ids) {
+                            setDraftField("kakera_reaction", "perk_8_budget_bypass_types", ids)
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true

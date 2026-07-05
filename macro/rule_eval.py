@@ -273,13 +273,21 @@ def passes_kakera_reaction(
         )
     selected = affordable
 
-    # Perk-8 budget mode: while active, skip non-perk-8 rolls to save clicks.
+    # Perk-8 budget mode: while active, skip non-perk-8 rolls to save clicks — except
+    # configured bypass types (purple is free by default).
     if rules.perk_8_budget_mode and perk8_budget_applies(perk8_mode_from_state(state)):
         remaining = state.remaining_kakera_budget(perk8_click_budget(state, rules))
         if not fields.get("perk_8"):
-            if remaining > 0:
+            bypass = perk8_budget_bypass_types(rules)
+            bypass_selected = [b for b in selected if _kakera_emoji(b) in bypass]
+            if bypass_selected:
+                selected = bypass_selected
+            elif remaining > 0:
                 return ReactionDecision(reason="saving perk-8 kakera budget")
-            return ReactionDecision(reason="daily kakera budget exhausted (perk-8 only)")
+            else:
+                return ReactionDecision(
+                    reason="daily kakera budget exhausted (perk-8 only)"
+                )
 
     choices = [_make_button_choice(message_id, b) for b in selected]
     reason_parts = [f"{len(choices)} kakera"]
@@ -290,6 +298,15 @@ def passes_kakera_reaction(
     elif types_allowed:
         reason_parts.append(f"filter [{','.join(types_allowed)}]")
     if rules.perk_8_budget_mode and perk8_budget_applies(perk8_mode_from_state(state)):
+        bypass = perk8_budget_bypass_types(rules)
+        if not fields.get("perk_8") and any(
+            _kakera_emoji(b) in bypass for b in (fields.get("buttons") or [])
+        ):
+            bypassed = sorted(
+                {_kakera_emoji(b) for b in selected if _kakera_emoji(b) in bypass}
+            )
+            if bypassed:
+                reason_parts.append(f"budget bypass [{','.join(bypassed)}]")
         reason_parts.append(
             f"budget {state.kakera_clicks_today}/{perk8_click_budget(state, rules)}"
         )
@@ -309,6 +326,13 @@ def perk8_click_budget(state: AccountState, rules: KakeraReactionRules) -> int:
     if state.perk8_click_max is not None:
         return max(1, int(state.perk8_click_max))
     return max(1, int(rules.daily_click_budget))
+
+
+def perk8_budget_bypass_types(rules: KakeraReactionRules) -> frozenset[str]:
+    """Kakera emojis that ignore perk-8 daily budget saving."""
+    if rules.perk_8_budget_bypass_types:
+        return frozenset(rules.perk_8_budget_bypass_types)
+    return frozenset({"kakeraP"})
 
 
 # ---------------------------------------------------------------------------

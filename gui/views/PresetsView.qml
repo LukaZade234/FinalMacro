@@ -469,6 +469,19 @@ Item {
                             onToggled: patch("kakera_reaction", "perk_8_budget_mode", checked)
                         }
 
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                            title: "Always click during budget saving (ignore perk-8 limit)"
+                            options: kakeraOptions
+                            selected: rules.kakera_reaction
+                                ? (rules.kakera_reaction.perk_8_budget_bypass_types || ["kakeraP"])
+                                : ["kakeraP"]
+                            onSelectionChanged: function(ids) {
+                                patch("kakera_reaction", "perk_8_budget_bypass_types", ids)
+                            }
+                        }
+
                         // Low-power sub-card
                         Rectangle {
                             Layout.fillWidth: true

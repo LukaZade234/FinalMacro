@@ -1126,13 +1126,18 @@ class AppBridge(QObject):
             self._on_status(f"Error: {exc}")
             self._on_connected(False)
         finally:
-            from mudae.kakera_log import clear_recording_account
+            from mudae.kakera_log import clear_recording_account, flush_disk_log
             from mudae.soulmate_log import clear_recording_account as clear_soulmate_account
-            from mudae.sphere_log import clear_recording_account as clear_sphere_account
+            from mudae.sphere_log import (
+                clear_recording_account as clear_sphere_account,
+                flush_disk_log as flush_sphere_log,
+            )
 
             clear_recording_account()
             clear_soulmate_account()
             clear_sphere_account()
+            flush_disk_log()
+            flush_sphere_log()
             self._run_guild_id = None
             self._run_guild_name = None
             self._run_channel_name = None

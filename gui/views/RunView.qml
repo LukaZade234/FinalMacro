@@ -172,7 +172,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 460
+            Layout.preferredHeight: 560
             spacing: 16
 
             ColumnLayout {
@@ -271,10 +271,12 @@ Item {
                     fillContentVertically: true
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.preferredHeight: 200
-                    Layout.minimumHeight: 160
+                    Layout.preferredHeight: 340
+                    Layout.minimumHeight: 260
 
                     ActivityLogPanel {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         entries: runRoot.activityEntries
                     }
                 }
@@ -282,7 +284,8 @@ Item {
                 PanelCard {
                     title: "Rule trace"
                     Layout.fillWidth: true
-                    Layout.minimumHeight: 140
+                    Layout.maximumHeight: 130
+                    Layout.preferredHeight: 110
 
                     ColumnLayout {
                         Layout.fillWidth: true

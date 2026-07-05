@@ -18,15 +18,29 @@ def parse_hours_minutes(match: Match[str] | None) -> tuple[int, int]:
 
 
 def extract_bold_minutes(text: str, *, start: int = 0, window: int = 72) -> int | None:
-    """Parse **26** min or **8h 37** min starting at `start` in `text`."""
+    """Parse **26** min or **8h 37** min starting at `start` in `text`.
+
+    When several bold durations appear in the window (e.g. rolls reset then
+    ``$daily`` reset on the next line), return the *first* one — not a later
+    ``**7h 57** min`` that would otherwise win the hours pattern.
+    """
     chunk = text[start : start + window]
-    hours_min = re.search(r"\*\*(\d+)h\s*(\d+)\*\*\s*min", chunk, re.IGNORECASE)
-    if hours_min:
-        return int(hours_min.group(1)) * 60 + int(hours_min.group(2))
-    minutes_only = re.search(r"\*\*(\d+)\*\*\s*min", chunk, re.IGNORECASE)
-    if minutes_only:
-        return int(minutes_only.group(1))
-    return None
+    best_pos: int | None = None
+    best_minutes: int | None = None
+
+    def consider(pos: int, minutes: int) -> None:
+        nonlocal best_pos, best_minutes
+        if best_pos is None or pos < best_pos:
+            best_pos = pos
+            best_minutes = minutes
+
+    for match in re.finditer(r"\*\*(\d+)h\s*(\d+)\*\*\s*min", chunk, re.IGNORECASE):
+        consider(match.start(), int(match.group(1)) * 60 + int(match.group(2)))
+
+    for match in re.finditer(r"\*\*(\d+)\*\*\s*min", chunk, re.IGNORECASE):
+        consider(match.start(), int(match.group(1)))
+
+    return best_minutes
 
 
 def strip_markdown(text: str) -> str:

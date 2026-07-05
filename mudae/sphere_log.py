@@ -8,12 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from mudae.account_context import defaults_from_store, resolve_log_account
+from mudae.log_store import DebouncedJsonLog
 from mudae.types import MessageKind, MudaeMessageSnapshot
 
 _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "sphere_log.json"
 _events: list[dict[str, Any]] = []
 _recording_account_id: str = ""
 _recording_account_name: str = ""
+
+# Sphere clicks arrive in bursts during rolling / $oh games; batch the file
+# rewrites instead of rewriting the whole log on every single event.
+_writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
 
 # ``minigame_<id>`` uses ids from ``MINIGAME_IDS`` (oh, oc, oq, …).
 SOURCE_LABELS: dict[str, str] = {
@@ -57,8 +62,12 @@ def _load_disk_log() -> None:
 
 
 def _save_disk_log() -> None:
-    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _LOG_PATH.write_text(json.dumps(_events, indent=2), encoding="utf-8")
+    _writer.mark_dirty()
+
+
+def flush_disk_log() -> None:
+    """Force pending events to disk (called on disconnect/exit)."""
+    _writer.flush()
 
 
 def set_recording_account(account_id: str, account_name: str) -> None:

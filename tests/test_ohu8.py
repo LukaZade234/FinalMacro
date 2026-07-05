@@ -284,6 +284,37 @@ def test_kakera_active_skips_non_perk_8_while_budget_remains():
     assert "saving" in decision.reason.lower()
 
 
+def test_kakera_active_clicks_purple_while_budget_remains():
+    rules = KakeraReactionRules(
+        enabled=True,
+        types_allowed=["kakeraP", "kakeraR"],
+        perk_8_budget_mode=True,
+        daily_click_budget=40,
+    )
+    state = AccountState(perk8_priority_mode="active", perk8_click_max=40)
+    state.kakera_clicks_today = 5
+    fields = _kakera_fields(_kakera_buttons("kakeraP", "kakeraR"), perk_8=False)
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraP"
+    assert "budget bypass" in decision.reason
+
+
+def test_kakera_active_custom_budget_bypass_types():
+    rules = KakeraReactionRules(
+        enabled=True,
+        types_allowed=["kakeraP", "kakeraT", "kakeraR"],
+        perk_8_budget_mode=True,
+        daily_click_budget=40,
+        perk_8_budget_bypass_types=["kakeraT"],
+    )
+    state = AccountState(perk8_priority_mode="active", perk8_click_max=40)
+    fields = _kakera_fields(_kakera_buttons("kakeraP", "kakeraT", "kakeraR"), perk_8=False)
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraT"
+
+
 def test_kakera_done_clicks_equally():
     rules = KakeraReactionRules(
         enabled=True, perk_8_budget_mode=True, daily_click_budget=40

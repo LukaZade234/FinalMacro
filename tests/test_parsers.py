@@ -60,6 +60,24 @@ def test_parse_tu_with_us_bonus():
     assert result.fields["rolls_reset_minutes"] == 42
 
 
+def test_parse_tu_rolls_reset_not_daily_reset():
+    """Rolls reset is hourly; must not pick ``Next $daily reset in **7h 57** min``."""
+    content = (
+        "**lukazade234**, you __can__ claim right now! "
+        "The next claim reset is in **44** min.\n"
+        "You have **0** rolls (+**2** $mk) left. Next rolls reset in **44** min.\n"
+        "Next $daily reset in **7h 57** min.\n"
+        "You can react to kakera right now!\n"
+        "Power: **31%**"
+    )
+    result = parse_tu(content)
+    assert result.fields["next_claim_reset_minutes"] == 44
+    assert result.fields["rolls_reset_minutes"] == 44
+    assert result.fields["rolls_left"] == 0
+    assert result.fields["rolls_mk_bonus"] == 2
+    assert "477" not in result.summary
+
+
 def test_parse_tu_us_bonus_without_left_keyword():
     content = "**User**, you __can__ claim! You have **0** rolls (+**13** $us)."
     result = parse_tu(content)

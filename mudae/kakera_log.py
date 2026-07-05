@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mudae.account_context import defaults_from_store, resolve_log_account
+from mudae.log_store import DebouncedJsonLog
 from macro.state import MacroPhase
 from mudae.types import MessageKind, MudaeMessageSnapshot
 
@@ -15,6 +16,10 @@ _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "kakera_log.json"
 _events: list[dict[str, Any]] = []
 _recording_account_id: str = ""
 _recording_account_name: str = ""
+
+# Kakera clicks arrive in bursts during mass rolling; batch the file rewrites
+# instead of rewriting the (ever-growing) log on every single event.
+_writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
 
 EARN_METHOD_LABELS: dict[str, str] = {
     "kakera_click": "Kakera click",
@@ -44,8 +49,12 @@ def _load_disk_log() -> None:
 
 
 def _save_disk_log() -> None:
-    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _LOG_PATH.write_text(json.dumps(_events, indent=2), encoding="utf-8")
+    _writer.mark_dirty()
+
+
+def flush_disk_log() -> None:
+    """Force pending events to disk (called on disconnect/exit)."""
+    _writer.flush()
 
 
 def set_recording_account(account_id: str, account_name: str) -> None:
@@ -214,7 +223,9 @@ def record_roll_bku_earning(
     """Log BKU payout from a roll embed (reset or incremental pool gain)."""
     msg_id = snapshot.message_id
     method = "bku_reset" if fields.get("bku_reset") else "bku_roll"
-    for existing in _events:
+    # Dedupe only against recent entries (re-parses arrive close together);
+    # scanning the full history gets slower as the log grows.
+    for existing in _events[-200:]:
         if existing.get("message_id") == msg_id and existing.get("earn_method") == method:
             return existing
     payload = dict(fields)

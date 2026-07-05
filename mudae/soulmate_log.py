@@ -34,8 +34,12 @@ def _load_disk_log() -> None:
 
 
 def _save_disk_log() -> None:
+    # Soulmate events are rare (no bursts), so a synchronous write is fine;
+    # tmp+replace keeps the file intact if the app dies mid-write.
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _LOG_PATH.write_text(json.dumps(_events, indent=2), encoding="utf-8")
+    tmp = _LOG_PATH.with_name(_LOG_PATH.name + ".tmp")
+    tmp.write_text(json.dumps(_events, indent=2), encoding="utf-8")
+    tmp.replace(_LOG_PATH)
 
 
 def set_recording_account(account_id: str, account_name: str) -> None:

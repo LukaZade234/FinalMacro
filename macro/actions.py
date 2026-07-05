@@ -106,6 +106,13 @@ def is_ohu8_parse_result(parsed: ParseResult) -> bool:
     return is_ohu8_response(content)
 
 
+# Cap on buffered Mudae messages. The queue is only consumed while the macro
+# waits for replies; while idle/sleeping every channel message would otherwise
+# accumulate without bound. Old entries are dropped first (stale messages are
+# useless to the macro anyway — it drains before each command).
+_MAX_QUEUE_SIZE = 512
+
+
 class DiscordActions:
     """Send commands and wait for parsed Mudae replies on a shared monitor."""
 
@@ -116,6 +123,11 @@ class DiscordActions:
     def feed(self, snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> None:
         if not snapshot.is_mudae:
             return
+        while self._queue.qsize() >= _MAX_QUEUE_SIZE:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
         self._queue.put_nowait((snapshot, parsed))
 
     async def send_command(self, command: str, *, prefix: str | None = None) -> None:
@@ -132,18 +144,26 @@ class DiscordActions:
     ) -> tuple[MudaeMessageSnapshot, ParseResult] | None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        while loop.time() < deadline:
-            remaining = deadline - loop.time()
-            try:
-                snapshot, parsed = await asyncio.wait_for(
-                    self._queue.get(),
-                    timeout=min(remaining, 1.0),
-                )
-            except asyncio.TimeoutError:
-                continue
-            if predicate(snapshot, parsed):
-                return snapshot, parsed
-        return None
+        deferred: list[tuple[MudaeMessageSnapshot, ParseResult]] = []
+        try:
+            while loop.time() < deadline:
+                remaining = deadline - loop.time()
+                try:
+                    snapshot, parsed = await asyncio.wait_for(
+                        self._queue.get(),
+                        timeout=min(remaining, 0.25),
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if predicate(snapshot, parsed):
+                    return snapshot, parsed
+                deferred.append((snapshot, parsed))
+            return None
+        finally:
+            # Re-queue skipped messages exactly once so later waits can still
+            # match them (the finally also covers the successful return above).
+            for item in deferred:
+                self._queue.put_nowait(item)
 
     async def wait_for_tu(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(
@@ -175,7 +195,7 @@ class DiscordActions:
         self,
         *,
         parent_character: str,
-        timeout: float = 5.0,
+        timeout: float = 0.8,
     ) -> tuple[MudaeMessageSnapshot, ParseResult] | None:
         """Wait for a perk-6 spawn embed whose ``[SPAWNED BY …]`` matches ``parent_character``."""
         return await self.wait_for(

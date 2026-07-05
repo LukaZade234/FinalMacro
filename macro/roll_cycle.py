@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -46,9 +47,11 @@ _COMMAND_SETTLE_SEC = 2.5  # pause after $tu before polling for the reply
 _OHU8_SETTLE_SEC = 2.0  # pause after $ohu8 before polling for the reply
 _RESPONSE_TIMEOUT_SEC = 12.0  # max wait for a $tu / $ohu8 / $us text reply
 _ROLL_EMBED_TIMEOUT_SEC = 25.0  # max wait for a character embed after rolling
-_RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset
-_PERK6_SPAWN_WAIT_SEC = 3.0  # wait for perk-6 follow-up embed after parent roll
-_PERK6_POST_SETTLE_SEC = 1.0  # pause after spawn reactions before next roll
+_RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($us mode)
+_ROLLS_RESET_BUFFER_SEC = 5.0  # pad after parsed reset time before re-checking $tu
+_STOP_CHECK_SEC = 1.0  # wake interval so Stop remains responsive during long waits
+_PERK6_SPAWN_WAIT_SEC = 0.8  # brief poll for perk-6 follow-up embed (only when proc'd)
+_PERK6_POST_SETTLE_SEC = 0.5  # pause after spawn reactions before next roll
 
 
 @dataclass
@@ -239,6 +242,44 @@ class RollCycleEngine:
         self._state.phase = MacroPhase.IDLE
         self._notify()
 
+    async def _maybe_refresh_perk8_status(self) -> None:
+        """Re-query ``$ohu8`` when the daily perk-8 refill window has passed."""
+        if not self._config.kakera_reaction.perk_8_budget_mode:
+            return
+        daily = self._get_daily_resets()
+        record = load_perk8_record(daily)
+        refresh_exhausted_if_refill_passed(record)
+        self._save_daily_resets(save_perk8_record(daily, record))
+        if should_query_ohu8(record):
+            await self._refresh_perk8_status()
+        else:
+            mode = apply_cached_perk8(record)
+            self._apply_perk8_mode(mode, record)
+
+    async def _roll_hourly_normal_segment(
+        self,
+        cmd: str,
+        session_records: list[RollRecord],
+        roll_index: int,
+        *,
+        normal_rolls: int,
+    ) -> tuple[int, bool, int]:
+        """Roll the full hourly pool with standard stop/claim rules."""
+        self._reset_roll_stop_tracker()
+        self._log(f"{normal_rolls} hourly roll(s) — standard macro rules")
+        segment_start = len(session_records)
+        done, claimed = await self._run_normal_roll_segment(
+            cmd,
+            session_records,
+            roll_index,
+        )
+        roll_index += done
+        await self._claim_best_at_session_end(
+            session_records[segment_start:],
+            claimed,
+        )
+        return done, claimed, roll_index
+
     def _make_sphere_reactor(self) -> SphereReactor:
         return SphereReactor(
             actions=self._actions,
@@ -324,60 +365,52 @@ class RollCycleEngine:
         try:
             self._monitor.macro_active = True
             self._actions.drain_queue()
-            self._sync_roll_stop_config()
-            self._roll_stop = RollStopTracker(
-                threshold=self._roll_stop.threshold,
-                tail_count=self._roll_stop.tail_count,
-            )
-
-            if not await self.run_tu():
-                return
+            self._reset_roll_stop_tracker()
 
             await self._refresh_perk8_status()
 
-            if self._roll_stop.should_stop_before_roll(self._state.rolls_left):
-                self._log("No rolls remaining")
-                return
-
             cmd = self._config.normalized_roll_command()
-            session_records: list[RollRecord] = []
             roll_index = 0
-            stop_rolling = False
-            claimed_via_interrupt = False
+            tu_fresh = False
 
-            while not self._stop.is_set() and not stop_rolling:
-                if self._roll_stop.should_stop_before_roll(self._state.rolls_left):
-                    self._log("No rolls remaining")
-                    break
+            self._log("Macro starting (continuous hourly mode)")
 
-                roll_index += 1
-                outcome = await self._perform_roll(
+            while not self._stop.is_set():
+                if not tu_fresh:
+                    if not await self.run_tu():
+                        self._log("$tu failed — stopping")
+                        break
+                tu_fresh = False
+
+                await self._maybe_refresh_perk8_status()
+
+                normal_rolls = self._state.rolls_left or 0
+                if normal_rolls <= 0:
+                    if not await self._wait_for_hourly_refill():
+                        break
+                    tu_fresh = True
+                    continue
+
+                # Fresh record list per hourly batch: claim-best runs inside the
+                # segment, and keeping every hour's records would grow forever
+                # on multi-day runs.
+                session_records: list[RollRecord] = []
+                done, claimed, roll_index = await self._roll_hourly_normal_segment(
                     cmd,
-                    roll_index,
                     session_records,
-                    stop_on_interrupt=True,
+                    roll_index,
+                    normal_rolls=normal_rolls,
                 )
-                if not outcome.ok:
+                if claimed:
                     break
-                if outcome.stop:
-                    claimed_via_interrupt = outcome.claimed
-                    stop_rolling = True
+                if done == 0:
+                    self._log("Roll failed — stopping")
                     break
 
-                rl = outcome.rolls_left
-                if rl is not None and int(rl) == self._roll_stop.threshold and not self._roll_stop.saw_warning:
-                    self._log(
-                        f"Parsed {rl} rolls left — "
-                        f"{self._roll_stop.tail_count} more roll(s) then stop"
-                    )
+                if not await self._wait_for_hourly_refill():
+                    break
+                tu_fresh = True
 
-                if self._roll_stop.on_roll_parsed(int(rl) if rl is not None else None):
-                    self._log("Finished rolls after warning")
-                    stop_rolling = True
-
-                await asyncio.sleep(self._config.roll_delay())
-
-            await self._claim_best_at_session_end(session_records, claimed_via_interrupt)
             self._log("Macro finished")
         except asyncio.CancelledError:
             self._log("Macro stopped")
@@ -755,6 +788,8 @@ class RollCycleEngine:
                     self._log("$us mode: $tu failed — stopping")
                     break
 
+                await self._maybe_refresh_perk8_status()
+
                 normal_rolls = self._state.rolls_left or 0
                 us_bonus = self._state.rolls_us_bonus or 0
                 reset_m = self._state.rolls_reset_minutes
@@ -766,6 +801,7 @@ class RollCycleEngine:
                             f"{normal_rolls + us_bonus} usable roll(s) before they reset"
                         )
                         if normal_rolls > 0:
+                            self._reset_roll_stop_tracker()
                             segment_start = len(session_records)
                             done, claimed = await self._run_normal_roll_segment(
                                 cmd,
@@ -939,6 +975,65 @@ class RollCycleEngine:
         await asyncio.sleep(delay)
         return True, roll_timeouts
 
+    def _seconds_until_rolls_reset(self) -> float:
+        """Wall-clock seconds until the next hourly rolls reset from the last ``$tu``."""
+        reset_m = self._state.rolls_reset_minutes
+        if reset_m is None:
+            return 0.0
+        return max(0.0, reset_m * 60.0 + _ROLLS_RESET_BUFFER_SEC)
+
+    def _seconds_until_perk8_refresh(self) -> float | None:
+        """Seconds until the stored perk-8 daily refill, or ``0`` if it just passed.
+
+        Returns ``None`` when no timed perk-8 wake is needed during a long sleep
+        (normal active mode — do not spam ``$ohu8`` every second).
+        """
+        if not self._config.kakera_reaction.perk_8_budget_mode:
+            return None
+        daily = self._get_daily_resets()
+        record = refresh_exhausted_if_refill_passed(load_perk8_record(daily))
+        if not record.clicks_exhausted or not record.refill_at:
+            return None
+        try:
+            refill_at = dt.datetime.fromisoformat(
+                record.refill_at.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return None
+        now = dt.datetime.now(dt.timezone.utc)
+        if now >= refill_at:
+            return 0.0
+        return (refill_at - now).total_seconds()
+
+    async def _sleep_interruptible(self, seconds: float) -> bool:
+        """Sleep up to ``seconds``. Returns False if the macro was stopped."""
+        remaining = max(0.0, seconds)
+        while remaining > 0:
+            if self._stop.is_set():
+                return False
+            step = min(remaining, _STOP_CHECK_SEC)
+            await asyncio.sleep(step)
+            remaining -= step
+        return True
+
+    async def _wait_for_scheduled_wake(self, seconds: float) -> bool:
+        """Sleep until a deadline, waking early for perk-8 refresh if needed."""
+        remaining = max(0.0, seconds)
+        while remaining > 0:
+            if self._stop.is_set():
+                return False
+            perk8_sec = self._seconds_until_perk8_refresh()
+            if perk8_sec is not None and perk8_sec <= 0:
+                await self._maybe_refresh_perk8_status()
+            step = min(remaining, _STOP_CHECK_SEC)
+            if perk8_sec is not None and 0 < perk8_sec < step:
+                step = min(step, perk8_sec)
+            await asyncio.sleep(step)
+            remaining -= step
+            if perk8_sec is not None and 0 < perk8_sec <= step:
+                await self._maybe_refresh_perk8_status()
+        return True
+
     async def _wait_for_rolls_reset(self, margin: int) -> bool:
         """Pause until the hourly rolls reset is no longer imminent.
 
@@ -951,6 +1046,7 @@ class RollCycleEngine:
         )
         while not self._stop.is_set():
             await asyncio.sleep(poll_sec)
+            await self._maybe_refresh_perk8_status()
             if not await self.run_tu():
                 self._log("$us mode: $tu failed while waiting for rolls reset")
                 return False
@@ -959,6 +1055,45 @@ class RollCycleEngine:
                 note = f"next reset in {reset_m}m" if reset_m is not None else "reset passed"
                 self._log(f"$us mode: rolls reset complete ({note}) — resuming")
                 return True
+        return False
+
+    async def _wait_for_hourly_refill(self) -> bool:
+        """Wait until the parsed rolls-reset time, then confirm with ``$tu``."""
+        if self._state.rolls_reset_minutes is None:
+            self._log("No rolls reset time from $tu — stopping")
+            return False
+
+        while not self._stop.is_set():
+            reset_m = self._state.rolls_reset_minutes
+            if reset_m is None:
+                self._log("No rolls reset time from $tu — stopping")
+                return False
+
+            self._log(
+                f"No rolls remaining — waiting {reset_m}m until hourly refill"
+            )
+            if not await self._wait_for_scheduled_wake(self._seconds_until_rolls_reset()):
+                return False
+
+            await self._maybe_refresh_perk8_status()
+            if not await self.run_tu():
+                self._log("$tu failed while waiting for hourly rolls")
+                return False
+
+            if (self._state.rolls_left or 0) > 0:
+                self._log(
+                    f"Hourly rolls available "
+                    f"({self._state.rolls_left} roll(s))"
+                )
+                return True
+
+            new_reset = self._state.rolls_reset_minutes
+            if new_reset is not None:
+                self._log(f"Reset passed but no rolls yet — waiting {new_reset}m")
+                continue
+
+            return False
+
         return False
 
     async def _read_us_stack(self) -> float | None:

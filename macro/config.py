@@ -119,6 +119,8 @@ class KakeraReactionRules:
     low_power: LowPowerOverride | None = None
     perk_8_budget_mode: bool = False
     daily_click_budget: int = 40
+    # Kakera types clicked even while saving perk-8 budget (purple is free by default).
+    perk_8_budget_bypass_types: list[str] = field(default_factory=lambda: ["kakeraP"])
     auto_use_dk: bool = False
 
     @classmethod
@@ -138,6 +140,9 @@ class KakeraReactionRules:
             low_power=low_power,
             perk_8_budget_mode=bool(data.get("perk_8_budget_mode", False)),
             daily_click_budget=int(data.get("daily_click_budget", 40)),
+            perk_8_budget_bypass_types=_coerce_str_list(
+                data.get("perk_8_budget_bypass_types", ["kakeraP"])
+            ),
             auto_use_dk=bool(data.get("auto_use_dk", False)),
         )
 
@@ -151,6 +156,7 @@ class KakeraReactionRules:
             "low_power": self.low_power.to_dict() if self.low_power else None,
             "perk_8_budget_mode": self.perk_8_budget_mode,
             "daily_click_budget": self.daily_click_budget,
+            "perk_8_budget_bypass_types": list(self.perk_8_budget_bypass_types),
             "auto_use_dk": self.auto_use_dk,
         }
 
@@ -266,6 +272,7 @@ class MacroConfig:
                 low_power=base.low_power,
                 perk_8_budget_mode=base.perk_8_budget_mode,
                 daily_click_budget=base.daily_click_budget,
+                perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
                 auto_use_dk=base.auto_use_dk,
             )
         return base
