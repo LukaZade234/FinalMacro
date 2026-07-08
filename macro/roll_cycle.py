@@ -23,7 +23,8 @@ from macro.perk8_daily import (
     mark_perk8_exhausted,
     refresh_exhausted_if_refill_passed,
     save_perk8_record,
-    should_query_ohu8,
+    should_query_ohu8_on_refill,
+    should_skip_ohu8_until_refill,
     sync_refill_deadline,
     update_record_from_ohu8,
 )
@@ -231,7 +232,7 @@ class RollCycleEngine:
         record = refresh_exhausted_if_refill_passed(record)
         self._save_daily_resets(save_perk8_record(daily, record))
 
-    async def _refresh_perk8_status(self) -> None:
+    async def _refresh_perk8_status(self, *, at_startup: bool = False) -> None:
         rules = self._config.kakera_reaction
         if not rules.perk_8_budget_mode:
             self._state.perk8_priority_mode = Perk8PriorityMode.INACTIVE.value
@@ -243,7 +244,7 @@ class RollCycleEngine:
         record = refresh_exhausted_if_refill_passed(record)
         self._save_daily_resets(save_perk8_record(daily, record))
 
-        if not should_query_ohu8(record):
+        if should_skip_ohu8_until_refill(record):
             mode = apply_cached_perk8(record)
             self._apply_perk8_mode(mode, record)
             eta = record.refill_at or "unknown"
@@ -252,6 +253,11 @@ class RollCycleEngine:
                 f"cached mode {mode.value}"
             )
             self._notify()
+            return
+
+        if not at_startup and not should_query_ohu8_on_refill(record):
+            mode = apply_cached_perk8(record)
+            self._apply_perk8_mode(mode, record)
             return
 
         self._actions.drain_queue()
@@ -295,7 +301,7 @@ class RollCycleEngine:
         record = load_perk8_record(daily)
         refresh_exhausted_if_refill_passed(record)
         self._save_daily_resets(save_perk8_record(daily, record))
-        if should_query_ohu8(record):
+        if should_query_ohu8_on_refill(record):
             await self._refresh_perk8_status()
         else:
             mode = apply_cached_perk8(record)
@@ -418,7 +424,7 @@ class RollCycleEngine:
             self._actions.drain_queue()
             self._reset_roll_stop_tracker()
 
-            await self._refresh_perk8_status()
+            await self._refresh_perk8_status(at_startup=True)
 
             cmd = self._config.normalized_roll_command()
             roll_index = 0
@@ -985,7 +991,7 @@ class RollCycleEngine:
 
             self._log("$us mode: starting")
 
-            await self._refresh_perk8_status()
+            await self._refresh_perk8_status(at_startup=True)
 
             while not self._stop.is_set():
                 if not await self.run_tu():

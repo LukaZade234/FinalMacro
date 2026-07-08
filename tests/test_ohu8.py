@@ -14,7 +14,8 @@ from macro.perk8_daily import (
     mode_from_ohu8_fields,
     refresh_exhausted_if_refill_passed,
     save_perk8_record,
-    should_query_ohu8,
+    should_query_ohu8_on_refill,
+    should_skip_ohu8_until_refill,
     update_record_from_ohu8,
 )
 from macro.rule_eval import passes_kakera_reaction
@@ -96,22 +97,28 @@ def test_mode_from_ohu8_active():
     assert mode is Perk8PriorityMode.ACTIVE
 
 
-def test_should_query_ohu8_skips_until_refill():
+def test_should_skip_ohu8_until_refill():
     now = dt.datetime(2026, 6, 23, 12, 0, tzinfo=dt.timezone.utc)
     record = Perk8DailyRecord(
         clicks_exhausted=True,
         refill_at="2026-06-23T20:00:00+00:00",
+        last_clicked=40,
+        last_click_max=40,
     )
-    assert should_query_ohu8(record, now=now) is False
+    assert should_skip_ohu8_until_refill(record, now=now) is True
+    assert should_query_ohu8_on_refill(record, now=now) is False
 
 
-def test_should_query_ohu8_after_refill():
+def test_should_query_ohu8_on_refill_after_refill():
     now = dt.datetime(2026, 6, 23, 21, 0, tzinfo=dt.timezone.utc)
     record = Perk8DailyRecord(
         clicks_exhausted=True,
         refill_at="2026-06-23T20:00:00+00:00",
+        last_clicked=40,
+        last_click_max=40,
     )
-    assert should_query_ohu8(record, now=now) is True
+    assert should_skip_ohu8_until_refill(record, now=now) is False
+    assert should_query_ohu8_on_refill(record, now=now) is True
 
 
 def test_refresh_exhausted_clears_on_new_utc_day_before_refill_at():
@@ -124,27 +131,49 @@ def test_refresh_exhausted_clears_on_new_utc_day_before_refill_at():
     )
     refresh_exhausted_if_refill_passed(record, now=now)
     assert record.clicks_exhausted is False
-    assert should_query_ohu8(record, now=now) is True
+    assert should_skip_ohu8_until_refill(record, now=now) is False
+    assert should_query_ohu8_on_refill(record, now=now) is False
 
 
-def test_should_query_ohu8_skips_when_exhausted_without_refill_at():
+def test_should_skip_ohu8_when_exhausted_without_refill_at():
     record = Perk8DailyRecord(
         clicks_exhausted=True,
         refill_at="",
         last_clicked=40,
         last_click_max=40,
     )
-    assert should_query_ohu8(record) is False
+    assert should_skip_ohu8_until_refill(record) is True
+    assert should_query_ohu8_on_refill(record) is False
 
 
-def test_should_query_ohu8_when_exhausted_flag_but_clicks_remain():
+def test_should_query_ohu8_on_refill_when_exhausted_flag_but_clicks_remain():
     record = Perk8DailyRecord(
         clicks_exhausted=True,
         refill_at="2099-01-01T00:00:00+00:00",
         last_clicked=3,
         last_click_max=40,
     )
-    assert should_query_ohu8(record) is True
+    assert should_skip_ohu8_until_refill(record) is False
+    assert should_query_ohu8_on_refill(record) is True
+
+
+def test_startup_queries_even_with_same_day_cache():
+    """Macro start always live-queries unless clicks are exhausted until refill."""
+    now = dt.datetime(2026, 7, 8, 15, 23, tzinfo=dt.timezone.utc)
+    record = Perk8DailyRecord(
+        clicks_exhausted=False,
+        updated_at="2026-07-08T10:00:00+00:00",
+        last_clicked=10,
+        last_click_max=40,
+    )
+    assert should_skip_ohu8_until_refill(record, now=now) is False
+    assert should_query_ohu8_on_refill(record, now=now) is False
+
+
+def test_fresh_record_not_skipped_at_startup():
+    record = Perk8DailyRecord()
+    assert should_skip_ohu8_until_refill(record) is False
+    assert should_query_ohu8_on_refill(record) is False
 
 
 def test_refresh_exhausted_if_refill_passed_clears_flag():

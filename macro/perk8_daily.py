@@ -176,18 +176,42 @@ def _clicks_below_cap(record: Perk8DailyRecord) -> bool:
     )
 
 
-def should_query_ohu8(record: Perk8DailyRecord, *, now: dt.datetime | None = None) -> bool:
-    """Return False when clicks are exhausted and the daily refill has not passed."""
+def should_skip_ohu8_until_refill(
+    record: Perk8DailyRecord,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """True when daily perk-8 clicks are spent and the refill ETA has not passed."""
     now = now or _utc_now()
     record = refresh_exhausted_if_refill_passed(record, now=now)
     if not record.clicks_exhausted:
-        return True
+        return False
     if _clicks_below_cap(record):
-        return True
+        return False
     refill_at = _parse_iso(record.refill_at)
     if refill_at is None:
-        return False
-    return now >= refill_at
+        return True
+    return now < refill_at
+
+
+def should_query_ohu8_on_refill(
+    record: Perk8DailyRecord,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """True when a mid-session ``$ohu8`` re-query is warranted (refill passed, etc.)."""
+    now = now or _utc_now()
+    if record.clicks_exhausted and _clicks_below_cap(record):
+        return True
+    refill_at = _parse_iso(record.refill_at)
+    if refill_at is not None and now >= refill_at:
+        if record.clicks_exhausted:
+            return True
+        clicked = record.last_clicked
+        cap = record.last_click_max
+        if clicked is not None and cap is not None and int(clicked) >= int(cap):
+            return True
+    return False
 
 
 def apply_cached_perk8(record: Perk8DailyRecord) -> Perk8PriorityMode:
