@@ -199,6 +199,24 @@ ColumnLayout {
         }
     }
 
+    Label {
+        Layout.fillWidth: true
+        visible: root.servers().length === 0
+        text: "No servers configured — use the Servers tab (name + Add, then Add channel)."
+        color: Theme.warning
+        font.pixelSize: 10
+        wrapMode: Text.WordWrap
+    }
+
+    Label {
+        Layout.fillWidth: true
+        visible: root.servers().length > 0 && root.channelsForServer().length === 0
+        text: "This server has no channels — open Servers and use Add channel."
+        color: Theme.warning
+        font.pixelSize: 10
+        wrapMode: Text.WordWrap
+    }
+
     RowLayout {
         Layout.fillWidth: true
         spacing: 10

@@ -10,6 +10,7 @@ from typing import Any
 PERK8_MIN_ROLL_POOL = 10
 PERK8_DAILY_KEY = "perk8"
 PERK8_DEFAULT_REFILL_MINUTES = 24 * 60
+PERK8_DAILY_CLICK_BUDGET = 40
 
 
 class Perk8PriorityMode(str, Enum):
@@ -115,11 +116,22 @@ def _set_refill_deadline(
     """Persist when perk-8 clicks are expected back."""
     minutes = refill_minutes if refill_minutes is not None else record.last_refill_minutes
     if minutes is not None and minutes > 0:
-        record.last_refill_minutes = minutes
-        record.refill_at = _iso(now + dt.timedelta(minutes=minutes))
+        deadline = now + dt.timedelta(minutes=minutes)
+        midnight = _next_utc_midnight(now)
+        if deadline > midnight:
+            deadline = midnight
+        record.last_refill_minutes = int((deadline - now).total_seconds() // 60) or 1
+        record.refill_at = _iso(deadline)
         return
-    record.last_refill_minutes = PERK8_DEFAULT_REFILL_MINUTES
-    record.refill_at = _iso(now + dt.timedelta(minutes=PERK8_DEFAULT_REFILL_MINUTES))
+    midnight = _next_utc_midnight(now)
+    record.last_refill_minutes = int((midnight - now).total_seconds() // 60) or 1
+    record.refill_at = _iso(midnight)
+
+
+def _next_utc_midnight(now: dt.datetime) -> dt.datetime:
+    """Next UTC midnight — Mudae daily perk-8 reset when shifthour is 0."""
+    day = now.astimezone(dt.timezone.utc).date()
+    return dt.datetime.combine(day + dt.timedelta(days=1), dt.time(0), tzinfo=dt.timezone.utc)
 
 
 def refresh_exhausted_if_refill_passed(
@@ -127,10 +139,14 @@ def refresh_exhausted_if_refill_passed(
     *,
     now: dt.datetime | None = None,
 ) -> Perk8DailyRecord:
-    """Clear a stale exhausted flag once the stored refill deadline has passed."""
+    """Clear a stale exhausted flag once the daily refill has passed."""
     if not record.clicks_exhausted:
         return record
     now = now or _utc_now()
+    updated = _parse_iso(record.updated_at)
+    if updated is not None and updated.astimezone(dt.timezone.utc).date() < now.date():
+        record.clicks_exhausted = False
+        return record
     refill_at = _parse_iso(record.refill_at)
     if refill_at is not None and now >= refill_at:
         record.clicks_exhausted = False

@@ -22,6 +22,8 @@ from macro.activity_log import ActivityLog, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
 from macro.sphere_game import OhSphereGame
+from macro.oc_game import OcSphereGame
+from macro.oq_game import OqSphereGame
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
@@ -102,6 +104,7 @@ class AppBridge(QObject):
     soulmatesChanged = Signal()
     kakeraChanged = Signal()
     spheresChanged = Signal()
+    keysChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -134,11 +137,14 @@ class AppBridge(QObject):
         self._stop_event: asyncio.Event | None = None
         self._parse_lab_entries: list[dict[str, Any]] = []
         self._oh_running = False
+        self._oc_running = False
+        self._oq_running = False
         self._servers_emit_pending = False
         self._config_emit_pending = False
         self._run_guild_id: int | None = None
         self._run_guild_name: str | None = None
         self._run_channel_name: str | None = None
+        self._run_account_name: str = ""
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -175,10 +181,6 @@ class AppBridge(QObject):
     @Property(str, constant=False, notify=macroLogChanged)
     def macroActivityLogJson(self) -> str:
         return json.dumps([entry.to_dict() for entry in self._macro_state.activity_log])
-
-    @Property(str, constant=False, notify=macroLogChanged)
-    def ruleTraceJson(self) -> str:
-        return json.dumps([entry.to_dict() for entry in self._macro_state.rule_trace[-12:]])
 
     @Property(int, constant=False, notify=macroStateChanged)
     def macroRollsLeft(self) -> int:
@@ -232,6 +234,12 @@ class AppBridge(QObject):
     @Property(str, constant=False, notify=spheresChanged)
     def spheresJson(self) -> str:
         from mudae.sphere_log import client_payload
+
+        return json.dumps(client_payload(self._accounts))
+
+    @Property(str, constant=False, notify=keysChanged)
+    def keysJson(self) -> str:
+        from mudae.key_log import client_payload
 
         return json.dumps(client_payload(self._accounts))
 
@@ -343,6 +351,10 @@ class AppBridge(QObject):
             elif phase == MacroPhase.IDLE and self._tu_pending_active:
                 self._set_run_action_pending("")
         elif pending == "oh" and not self._oh_running:
+            self._set_run_action_pending("")
+        elif pending == "oc" and not self._oc_running:
+            self._set_run_action_pending("")
+        elif pending == "oq" and not self._oq_running:
             self._set_run_action_pending("")
 
     def _notify_macro(self) -> None:
@@ -612,8 +624,6 @@ class AppBridge(QObject):
         elif key in {"claim_best_at_claim_reset", "auto_claim"}:
             character["enabled"] = value.lower() in {"1", "true", "yes", "on"}
             data["character_claim"] = character
-        elif key == "rolls_left_stop":
-            data[key] = int(value) if value.strip().isdigit() else data.get(key, 0)
         elif key == "roll_delay_sec":
             data[key] = float(value) if value.strip() else 0.6
         else:
@@ -638,7 +648,6 @@ class AppBridge(QObject):
                     "roll_command": data["roll_command"],
                     "prefix": data["prefix"],
                     "roll_delay_sec": data["roll_delay_sec"],
-                    "rolls_left_stop": data["rolls_left_stop"],
                     "claim_expire_sec": data["claim_expire_sec"],
                     "claim_reset_margin_minutes": data["claim_reset_margin_minutes"],
                 },
@@ -669,7 +678,6 @@ class AppBridge(QObject):
                 "roll_command",
                 "prefix",
                 "roll_delay_sec",
-                "rolls_left_stop",
                 "claim_expire_sec",
                 "claim_reset_margin_minutes",
             ):
@@ -908,6 +916,12 @@ class AppBridge(QObject):
                 "_deliver_spheres_notify",
                 Qt.ConnectionType.QueuedConnection,
             )
+        if self._try_record_key_events(snapshot, parsed):
+            QMetaObject.invokeMethod(
+                self,
+                "_deliver_keys_notify",
+                Qt.ConnectionType.QueuedConnection,
+            )
 
     @Slot()
     def _deliver_soulmates_notify(self) -> None:
@@ -920,6 +934,17 @@ class AppBridge(QObject):
     @Slot()
     def _deliver_spheres_notify(self) -> None:
         self.spheresChanged.emit()
+
+    @Slot()
+    def _deliver_keys_notify(self) -> None:
+        self.keysChanged.emit()
+
+    def _on_keys_recorded(self) -> None:
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_keys_notify",
+            Qt.ConnectionType.QueuedConnection,
+        )
 
     def _try_record_kakera_earning(
         self,
@@ -989,6 +1014,23 @@ class AppBridge(QObject):
         record_sphere_earning(snapshot, parsed.fields, source="sphere_click")
         return True
 
+    def _try_record_key_events(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+    ) -> bool:
+        from mudae.key_log import record_roll_key_events, should_record_roll_keys
+
+        if not should_record_roll_keys(
+            parsed.kind,
+            parsed.fields,
+            self._macro_state.own_usernames,
+            self._macro_state.phase,
+            macro_running=bool(self._engine and self._engine.is_running),
+        ):
+            return False
+        return bool(record_roll_key_events(snapshot, parsed.fields))
+
     def _record_minigame_spheres(self, game: str, amount: int, *, clicks: int = 0) -> None:
         if amount <= 0 or not self._monitor:
             return
@@ -1041,13 +1083,16 @@ class AppBridge(QObject):
         run_channel_profile_id = resolved.channel_profile_id
 
         from mudae.kakera_log import set_recording_account as set_kakera_account
+        from mudae.key_log import set_recording_account as set_key_account
         from mudae.soulmate_log import set_recording_account
         from mudae.sphere_log import set_recording_account as set_sphere_account
 
         account = self._accounts.find_account(run_account_id)
         account_name = account.name if account else "Main"
+        self._run_account_name = account_name
         set_recording_account(run_account_id, account_name)
         set_kakera_account(run_account_id, account_name)
+        set_key_account(run_account_id, account_name)
         set_sphere_account(run_account_id, account_name)
 
         channel_profile = self._profiles.active_channel()
@@ -1081,6 +1126,7 @@ class AppBridge(QObject):
             self._macro_state,
             self._monitor,
             on_state=self._on_macro_state,
+            on_keys=self._on_keys_recorded,
             on_persist=self._request_persist,
             daily_resets_get=lambda: self._get_daily_resets_for(
                 run_account_id,
@@ -1127,6 +1173,10 @@ class AppBridge(QObject):
             self._on_connected(False)
         finally:
             from mudae.kakera_log import clear_recording_account, flush_disk_log
+            from mudae.key_log import (
+                clear_recording_account as clear_key_account,
+                flush_disk_log as flush_key_log,
+            )
             from mudae.soulmate_log import clear_recording_account as clear_soulmate_account
             from mudae.sphere_log import (
                 clear_recording_account as clear_sphere_account,
@@ -1135,12 +1185,15 @@ class AppBridge(QObject):
 
             clear_recording_account()
             clear_soulmate_account()
+            clear_key_account()
             clear_sphere_account()
             flush_disk_log()
+            flush_key_log()
             flush_sphere_log()
             self._run_guild_id = None
             self._run_guild_name = None
             self._run_channel_name = None
+            self._run_account_name = ""
             loop.close()
             self._loop = None
 
@@ -1195,6 +1248,44 @@ class AppBridge(QObject):
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
 
+    def _session_meta(self) -> dict[str, str]:
+        channel = self._run_channel_name or self._profiles.active_label() or "?"
+        guild = self._run_guild_name or "?"
+        return {
+            "account": self._run_account_name or "?",
+            "channel": channel,
+            "guild": guild,
+            "preset": self._presets.active_preset_id or "?",
+        }
+
+    def _begin_minigame_session(self, mode: str) -> tuple[ActivityLog, Any]:
+        from macro.session_log import SessionLogRecorder
+
+        meta = self._session_meta()
+        recorder = SessionLogRecorder()
+        recorder.start(mode=mode, **meta)
+        activity = ActivityLog(
+            self._macro_state,
+            on_update=self._notify_macro,
+            session=recorder,
+        )
+        activity.clear()
+        activity.write(
+            "Session started · "
+            f"{mode} · {meta['account']} · {meta['preset']} · {meta['channel']}"
+        )
+        return activity, recorder
+
+    @staticmethod
+    def _finish_minigame_session(activity: ActivityLog, recorder: Any, reason: str) -> None:
+        if not recorder.active:
+            return
+        activity.write(f"Session ending ({reason})")
+        path = recorder.finish(reason)
+        activity.set_session(None)
+        if path is not None:
+            activity.write(f"Session log saved: {path.name}")
+
     @Slot()
     def startMacro(self) -> None:
         if not self._loop or not self._engine:
@@ -1206,7 +1297,12 @@ class AppBridge(QObject):
         self._persist()
         self._engine.update_config(self._macro_config)
         self._set_run_action_pending("start")
-        self._loop.call_soon_threadsafe(self._engine.start)
+        meta = self._session_meta()
+
+        def _start() -> None:
+            self._engine.start(session_meta=meta)
+
+        self._loop.call_soon_threadsafe(_start)
 
     @Slot()
     def startUsMode(self) -> None:
@@ -1216,13 +1312,18 @@ class AppBridge(QObject):
         if self._engine.is_running:
             self._set_status("Macro already running")
             return
-        if self._oh_running:
-            self._set_status("Stop the $oh game before rolling $us")
+        if self._oh_running or self._oc_running or self._oq_running:
+            self._set_status("Stop the minigame before rolling $us")
             return
         self._persist()
         self._engine.update_config(self._macro_config)
         self._set_run_action_pending("us")
-        self._loop.call_soon_threadsafe(self._engine.start_us_mode)
+        meta = self._session_meta()
+
+        def _start() -> None:
+            self._engine.start_us_mode(session_meta=meta)
+
+        self._loop.call_soon_threadsafe(_start)
 
     @Slot()
     def stopMacro(self) -> None:
@@ -1238,16 +1339,17 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oh")
             return
-        if self._oh_running:
-            self._set_status("$oh game already running")
+        if self._oh_running or self._oc_running or self._oq_running:
+            self._set_status("Stop the minigame before playing $oh")
             return
 
-        activity = ActivityLog(self._macro_state, on_update=self._notify_macro)
+        activity, recorder = self._begin_minigame_session("oh")
         game = OhSphereGame(self._actions, self._monitor, log=activity.write)
         self._oh_running = True
         self._set_run_action_pending("oh")
 
         async def _run() -> None:
+            reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
                 reward = int(result.get("reward") or 0)
@@ -1255,9 +1357,89 @@ class AppBridge(QObject):
                 if reward > 0:
                     self._record_minigame_spheres("oh", reward, clicks=clicks)
             except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                reason = "error"
                 activity.write(f"$oh error: {exc}")
             finally:
+                self._finish_minigame_session(activity, recorder, reason)
                 self._oh_running = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def playOcSphere(self) -> None:
+        if not self._loop or not self._actions or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._engine and self._engine.is_running:
+            self._set_status("Stop the macro before playing $oc")
+            return
+        if self._oh_running or self._oc_running or self._oq_running:
+            self._set_status("Stop the minigame before playing $oc")
+            return
+
+        activity, recorder = self._begin_minigame_session("oc")
+        game = OcSphereGame(self._actions, self._monitor, log=activity.write)
+        self._oc_running = True
+        self._set_run_action_pending("oc")
+
+        async def _run() -> None:
+            reason = "finished"
+            try:
+                result = await game.play(prefix=self._macro_config.prefix)
+                reward = int(result.get("reward") or 0)
+                clicks = int(result.get("clicks") or 0)
+                if reward > 0:
+                    self._record_minigame_spheres("oc", reward, clicks=clicks)
+            except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                reason = "error"
+                activity.write(f"$oc error: {exc}")
+            finally:
+                self._finish_minigame_session(activity, recorder, reason)
+                self._oc_running = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def playOqSphere(self) -> None:
+        if not self._loop or not self._actions or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._engine and self._engine.is_running:
+            self._set_status("Stop the macro before playing $oq")
+            return
+        if self._oh_running or self._oc_running or self._oq_running:
+            self._set_status("Stop the minigame before playing $oq")
+            return
+
+        activity, recorder = self._begin_minigame_session("oq")
+        game = OqSphereGame(self._actions, self._monitor, log=activity.write)
+        self._oq_running = True
+        self._set_run_action_pending("oq")
+
+        async def _run() -> None:
+            reason = "finished"
+            try:
+                result = await game.play(prefix=self._macro_config.prefix)
+                reward = int(result.get("reward") or 0)
+                clicks = int(result.get("clicks") or 0)
+                if reward > 0:
+                    self._record_minigame_spheres("oq", reward, clicks=clicks)
+            except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                reason = "error"
+                activity.write(f"$oq error: {exc}")
+            finally:
+                self._finish_minigame_session(activity, recorder, reason)
+                self._oq_running = False
                 QMetaObject.invokeMethod(
                     self,
                     "_clear_run_action_pending",

@@ -305,14 +305,25 @@ def test_us_mode_stops_immediately_when_reset_imminent_and_no_rolls():
 def test_us_kakera_rules_for_us_rolls():
     cfg = MacroConfig(
         kakera_reaction=KakeraReactionRules(enabled=True, types_allowed=["kakeraR"]),
-        us_roll_kakera=UsRollKakeraRules(mode="none"),
+        us_roll_kakera=UsRollKakeraRules(override=True, skip_kakera=True),
     )
     assert cfg.kakera_rules_for_roll(us_roll=False).enabled is True
     assert cfg.kakera_rules_for_roll(us_roll=True).enabled is False
 
     cfg2 = MacroConfig(
-        us_roll_kakera=UsRollKakeraRules(mode="selected", types_allowed=["kakeraP"]),
+        kakera_reaction=KakeraReactionRules(enabled=True, types_allowed=["kakeraR"]),
+        us_roll_kakera=UsRollKakeraRules(override=True, types_allowed=["kakeraP"]),
     )
     selected = cfg2.kakera_rules_for_roll(us_roll=True)
     assert selected.enabled is True
     assert selected.types_allowed == ["kakeraP"]
+    assert cfg2.kakera_rules_for_roll(us_roll=False).types_allowed == ["kakeraR"]
+
+    cfg3 = MacroConfig(
+        us_roll_kakera=UsRollKakeraRules.from_dict(
+            {"mode": "selected", "types_allowed": ["kakeraG"]}
+        ),
+    )
+    migrated = cfg3.us_roll_kakera
+    assert migrated.override is True
+    assert migrated.types_allowed == ["kakeraG"]

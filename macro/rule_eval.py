@@ -16,7 +16,12 @@ from macro.config import (
     KakeraReactionRules,
     SphereReactionRules,
 )
-from macro.perk8_daily import Perk8PriorityMode, perk8_budget_applies, perk8_requirements_relaxed
+from macro.perk8_daily import (
+    PERK8_DAILY_CLICK_BUDGET,
+    Perk8PriorityMode,
+    perk8_budget_applies,
+    perk8_requirements_relaxed,
+)
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
@@ -236,7 +241,13 @@ def passes_kakera_reaction(
     power_display = display_reaction_power(state.power_percent)
 
     # Determine which color filter applies. low_power override wins below threshold.
-    types_allowed = list(rules.types_allowed)
+    if (
+        rules.perk_8_budget_mode
+        and bool(fields.get("perk_8"))
+    ):
+        types_allowed = list(rules.perk_8_types_allowed)
+    else:
+        types_allowed = list(rules.types_allowed)
     using_low_power = False
     if (
         rules.low_power
@@ -322,10 +333,11 @@ def perk8_mode_from_state(state: AccountState) -> Perk8PriorityMode:
 
 
 def perk8_click_budget(state: AccountState, rules: KakeraReactionRules) -> int:
-    """Daily click cap: the $ohu8-reported max wins over the preset value."""
+    """Daily click cap: ``$ohu8``-reported max when known, otherwise 40."""
+    del rules  # kept for call-site symmetry
     if state.perk8_click_max is not None:
         return max(1, int(state.perk8_click_max))
-    return max(1, int(rules.daily_click_budget))
+    return PERK8_DAILY_CLICK_BUDGET
 
 
 def perk8_budget_bypass_types(rules: KakeraReactionRules) -> frozenset[str]:

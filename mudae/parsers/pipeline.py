@@ -18,6 +18,7 @@ from mudae.parsers.claim import parse_claim
 from mudae.parsers.marriage import parse_marriage
 from mudae.parsers.settings import parse_settings
 from mudae.parsers.sphere import parse_sphere_click
+from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.ohu8 import parse_ohu8
 from mudae.parsers.dk import parse_dk
@@ -43,6 +44,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.SPHERE_CLICK: "sphere click",
     MessageKind.CLAIM: "claim",
     MessageKind.CLAIM_INTERVAL: "claim interval",
+    MessageKind.ROLL_LIMIT: "roll limit",
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
 }
@@ -120,6 +122,10 @@ def parse_mudae_message(
     reply_part: int = 1,
     reply_parts: int = 1,
 ) -> ParseResult:
+    content = snapshot.content or ""
+    if is_roll_limit_message(content):
+        return parse_roll_limit(content)
+
     resolved = resolve_command(
         reply_to_command,
         snapshot.content,
@@ -162,6 +168,8 @@ def parse_mudae_message(
         return parse_roll_ownership(snapshot)
     if kind == MessageKind.CLAIM_INTERVAL:
         return parse_claim_interval(snapshot.content)
+    if kind == MessageKind.ROLL_LIMIT:
+        return parse_roll_limit(snapshot.content)
     if kind == MessageKind.OWNERSHIP_UPDATE:
         return parse_ownership_update(snapshot)
     if kind == MessageKind.CHARACTER_EMBED and snapshot.embeds:

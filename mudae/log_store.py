@@ -51,6 +51,14 @@ class DebouncedJsonLog:
                 self._timer.daemon = True
                 self._timer.start()
 
+    def cancel_pending(self) -> None:
+        """Drop a scheduled write without touching disk."""
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            self._pending_path = None
+
     def flush(self) -> None:
         """Write pending events now (no-op when nothing is dirty)."""
         with self._lock:

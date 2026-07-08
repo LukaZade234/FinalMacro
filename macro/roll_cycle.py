@@ -9,8 +9,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from macro.actions import DiscordActions
+from macro.actions import DiscordActions, is_perk6_spawn_parse_result
 from macro.activity_log import ActivityLog
+from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
 from macro.perk8_daily import (
@@ -29,12 +30,15 @@ from macro.perk8_daily import (
 from macro.kakera_reactor import KakeraReactor
 from macro.post_roll import PostRollHandler, RollRecord
 from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
-from macro.roll_stop import RollStopTracker
+from macro.roll_stop import ROLLS_LEFT_STOP, RollStopTracker
 from macro.reaction_power import sync_reaction_power_fields
 from macro.dk_manager import sync_dk_fields_from_tu
 from macro.sphere_reactor import SphereReactor
-from macro.state import AccountState, MacroPhase, RuleTraceEntry
+from macro.state import AccountState, MacroPhase
 from mudae.parsers.us import is_us_stack_response, parse_us_stacked
+from mudae.parsers.pipeline import parse_mudae_message
+from mudae.types import MessageKind
+from mudae.buttons import is_kakera_button, is_sphere_button
 
 # Stop $us mode after this many consecutive "$us N" sends fail to register
 # (Mudae ignores rapid follow-ups, so the usable roll count never rises).
@@ -50,8 +54,9 @@ _ROLL_EMBED_TIMEOUT_SEC = 25.0  # max wait for a character embed after rolling
 _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($us mode)
 _ROLLS_RESET_BUFFER_SEC = 5.0  # pad after parsed reset time before re-checking $tu
 _STOP_CHECK_SEC = 1.0  # wake interval so Stop remains responsive during long waits
-_PERK6_SPAWN_WAIT_SEC = 0.8  # brief poll for perk-6 follow-up embed (only when proc'd)
-_PERK6_POST_SETTLE_SEC = 0.5  # pause after spawn reactions before next roll
+_PERK6_SPAWN_WAIT_SEC = 0.5  # brief poll; queue drain catches late spawns
+_PERK6_SPAWN_POLL_SEC = 0.25
+_PERK6_POST_SETTLE_SEC = 1.2  # pause after spawn reactions before next roll
 
 
 @dataclass
@@ -73,6 +78,7 @@ class RollCycleEngine:
         monitor: Any,
         *,
         on_state: Callable[[], None] | None = None,
+        on_keys: Callable[[], None] | None = None,
         on_persist: Callable[[], None] | None = None,
         daily_resets_get: Callable[[], dict[str, Any]] | None = None,
         daily_resets_save: Callable[[dict[str, Any]], None] | None = None,
@@ -82,6 +88,7 @@ class RollCycleEngine:
         self._state = state
         self._monitor = monitor
         self._on_state = on_state
+        self._on_keys = on_keys
         self._on_persist = on_persist
         self._daily_resets_get = daily_resets_get
         self._daily_resets_save = daily_resets_save
@@ -89,11 +96,16 @@ class RollCycleEngine:
         self._stop = asyncio.Event()
         self._roll_stop = RollStopTracker()
         self._activity = ActivityLog(self._state, on_update=self._notify)
+        self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
 
     def _notify(self) -> None:
         if self._on_state:
             self._on_state()
+
+    def _notify_keys(self) -> None:
+        if self._on_keys:
+            self._on_keys()
 
     def _persist(self) -> None:
         if self._on_persist:
@@ -102,10 +114,41 @@ class RollCycleEngine:
     def _log(self, text: str) -> None:
         self._activity.write(text)
 
+    def _log_debug(self, text: str) -> None:
+        self._activity.debug(text)
+
+    def begin_session(self, mode: str, meta: dict[str, Any]) -> None:
+        if self._session and self._session.active:
+            self._finish_session("replaced")
+        self._session = SessionLogRecorder()
+        self._session.start(mode=mode, **meta)
+        self._activity.set_session(self._session)
+        self._activity.clear()
+        channel = meta.get("channel") or "?"
+        preset = meta.get("preset") or "?"
+        account = meta.get("account") or "?"
+        self._log(
+            f"Session started · {mode} · {account} · {preset} · {channel}"
+        )
+
+    def _finish_session(self, reason: str) -> None:
+        if not self._session or not self._session.active:
+            return
+        self._activity.write(f"Session ending ({reason})")
+        path = self._session.finish(reason)
+        self._activity.set_session(None)
+        self._session = None
+        if path is not None:
+            self._log(f"Session log saved: {path.name}")
+            self._log_debug(f"session file: {path}")
+            self._log_debug(f"session text: {path.with_suffix('.log')}")
+
+    def end_session(self, reason: str) -> None:
+        self._finish_session(reason)
+
     def _sync_roll_stop_config(self) -> None:
-        n = max(1, self._config.rolls_left_stop)
-        self._roll_stop.threshold = n
-        self._roll_stop.tail_count = n
+        self._roll_stop.threshold = ROLLS_LEFT_STOP
+        self._roll_stop.tail_count = ROLLS_LEFT_STOP
 
     def _make_post_roll_handler(self) -> PostRollHandler:
         return PostRollHandler(
@@ -126,6 +169,7 @@ class RollCycleEngine:
             config=self._config,
             state=self._state,
             log=self._log,
+            debug_log=self._log_debug,
             on_perk8_exhausted=on_exhausted,
             on_click_progress=on_progress,
             on_state=self._notify,
@@ -184,7 +228,7 @@ class RollCycleEngine:
         daily = self._get_daily_resets()
         record = load_perk8_record(daily)
         sync_refill_deadline(record, int(refill))
-        refresh_exhausted_if_refill_passed(record)
+        record = refresh_exhausted_if_refill_passed(record)
         self._save_daily_resets(save_perk8_record(daily, record))
 
     async def _refresh_perk8_status(self) -> None:
@@ -196,7 +240,8 @@ class RollCycleEngine:
 
         daily = self._get_daily_resets()
         record = load_perk8_record(daily)
-        refresh_exhausted_if_refill_passed(record)
+        record = refresh_exhausted_if_refill_passed(record)
+        self._save_daily_resets(save_perk8_record(daily, record))
 
         if not should_query_ohu8(record):
             mode = apply_cached_perk8(record)
@@ -272,6 +317,7 @@ class RollCycleEngine:
             cmd,
             session_records,
             roll_index,
+            max_rolls=normal_rolls,
         )
         roll_index += done
         await self._claim_best_at_session_end(
@@ -349,19 +395,24 @@ class RollCycleEngine:
         self._notify()
         return True
 
-    def start(self) -> None:
+    def start(self, *, session_meta: dict[str, Any] | None = None) -> None:
         if self.is_running:
             return
+        if session_meta:
+            self.begin_session("hourly", session_meta)
         self._stop.clear()
         self._task = asyncio.create_task(self._run_cycle(), name="roll-cycle")
 
-    def start_us_mode(self) -> None:
+    def start_us_mode(self, *, session_meta: dict[str, Any] | None = None) -> None:
         if self.is_running:
             return
+        if session_meta:
+            self.begin_session("us", session_meta)
         self._stop.clear()
         self._task = asyncio.create_task(self._run_us_cycle(), name="us-roll-cycle")
 
     async def _run_cycle(self) -> None:
+        session_reason = "finished"
         try:
             self._monitor.macro_active = True
             self._actions.drain_queue()
@@ -413,10 +464,15 @@ class RollCycleEngine:
 
             self._log("Macro finished")
         except asyncio.CancelledError:
+            session_reason = "stopped"
             self._log("Macro stopped")
         except Exception as exc:  # noqa: BLE001 - surface to the activity log
+            session_reason = "error"
             self._log(f"Macro error: {exc}")
         finally:
+            if self._stop.is_set() and session_reason == "finished":
+                session_reason = "stopped"
+            self._finish_session(session_reason)
             self._monitor.macro_active = False
             self._state.phase = MacroPhase.IDLE
             self._notify()
@@ -432,10 +488,19 @@ class RollCycleEngine:
         stop_on_interrupt: bool = True,
     ) -> _RollOutcome:
         """Send one roll, log it, react, and optionally claim on an interrupt trigger."""
+        await self._drain_pending_perk6_spawns(
+            roll_index,
+            session_records,
+            us_roll=us_roll,
+            stop_on_interrupt=stop_on_interrupt,
+        )
+
         self._state.phase = MacroPhase.ROLLING
         self._notify()
 
+        qsize = getattr(self._actions, "queue_size", lambda: 0)()
         self._log(f"Roll {roll_index}: ${cmd}")
+        self._log_debug(f"roll {roll_index}: sending ${cmd} · queue={qsize}")
         await self._actions.send_command(cmd, prefix=self._config.prefix)
         result = await self._actions.wait_for_roll(
             roll_command=cmd,
@@ -443,11 +508,25 @@ class RollCycleEngine:
         )
         if result is None:
             self._log("Roll embed timeout")
+            self._log_debug(
+                f"roll {roll_index}: embed timeout · "
+                f"queue={getattr(self._actions, 'queue_size', lambda: 0)()}"
+            )
             return _RollOutcome(ok=False)
 
+        snapshot, parsed = result
+        if parsed.kind == MessageKind.ROLL_LIMIT:
+            fields = parsed.fields
+            self._state.rolls_left = 0
+            if fields.get("rolls_reset_minutes") is not None:
+                self._state.rolls_reset_minutes = int(fields["rolls_reset_minutes"])
+            self._notify()
+            self._log(parsed.summary or "Hourly roll limit reached")
+            return _RollOutcome(ok=False, rolls_left=0)
+
         outcome = await self._process_roll_embed(
-            result[0],
-            result[1],
+            snapshot,
+            parsed,
             roll_index,
             session_records,
             us_roll=us_roll,
@@ -457,7 +536,7 @@ class RollCycleEngine:
             return outcome
 
         spawn_outcome = await self._handle_perk6_spawn_followup(
-            parent_name=result[1].fields.get("character_name"),
+            parent_name=parsed.fields.get("character_name"),
             roll_index=roll_index,
             session_records=session_records,
             us_roll=us_roll,
@@ -489,6 +568,7 @@ class RollCycleEngine:
         log_prefix: str = "",
     ) -> _RollOutcome:
         """Run claim / kakera / sphere checks for one character embed."""
+        snapshot, parsed = await self._refresh_roll_snapshot(snapshot, parsed)
         fields = dict(parsed.fields)
         name = fields.get("character_name") or "?"
         ka = fields.get("total_kakera")
@@ -514,6 +594,12 @@ class RollCycleEngine:
         )
         session_records.append(record)
 
+        if fields.get("keys") or fields.get("omega_keys"):
+            from mudae.key_log import record_roll_key_events
+
+            if record_roll_key_events(snapshot, fields, from_macro=True):
+                self._notify_keys()
+
         interrupt = evaluate_claim_trigger(
             RollInterruptContext(
                 fields=fields,
@@ -528,15 +614,6 @@ class RollCycleEngine:
                 self._log(f"{interrupt.reason} — stop rolling, claim now")
             else:
                 self._log(f"{interrupt.reason} — claim now (continuing $us rolls)")
-            self._state.append_rule_trace(
-                RuleTraceEntry(
-                    block="character",
-                    roll_index=roll_index,
-                    character=name,
-                    decision="claim",
-                    reason=interrupt.reason,
-                )
-            )
             self._state.phase = MacroPhase.POST_ROLL
             self._notify()
             claimed = await self._make_post_roll_handler().claim_record(
@@ -578,28 +655,88 @@ class RollCycleEngine:
         if not parent_name:
             return None
 
-        result = await self._actions.wait_for_perk6_spawn(
-            parent_character=parent_name,
-            timeout=_PERK6_SPAWN_WAIT_SEC,
-        )
+        result = await self._wait_for_matching_perk6_spawn(parent_name)
         if result is None:
             return None
 
         snapshot, parsed = result
+        spawn_outcome = await self._process_perk6_spawn(
+            snapshot,
+            parsed,
+            roll_index=roll_index,
+            session_records=session_records,
+            us_roll=us_roll,
+            stop_on_interrupt=stop_on_interrupt,
+            rolls_left=rolls_left,
+        )
+        self._log(
+            f"perk 6: settled — waiting {_PERK6_POST_SETTLE_SEC:g}s "
+            "before next roll"
+        )
+        await asyncio.sleep(_PERK6_POST_SETTLE_SEC)
+        return spawn_outcome
+
+    async def _wait_for_matching_perk6_spawn(
+        self,
+        parent_name: str,
+    ) -> tuple[Any, Any] | None:
+        """Poll for a perk-6 spawn tied to ``parent_name``, then scan the queue."""
+        collect = getattr(self._actions, "collect_queued", None)
+        if collect is not None:
+            queued = collect(
+                lambda snapshot, parsed: (
+                    not snapshot.edited
+                    and is_perk6_spawn_parse_result(
+                        parsed,
+                        parent_character=parent_name,
+                    )
+                )
+            )
+            if queued:
+                return queued[0]
+
+        deadline = time.monotonic() + _PERK6_SPAWN_WAIT_SEC
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            result = await self._actions.wait_for_perk6_spawn(
+                parent_character=parent_name,
+                timeout=min(_PERK6_SPAWN_POLL_SEC, remaining),
+            )
+            if result is not None:
+                return result
+
+        if collect is not None:
+            queued = collect(
+                lambda snapshot, parsed: (
+                    not snapshot.edited
+                    and is_perk6_spawn_parse_result(
+                        parsed,
+                        parent_character=parent_name,
+                    )
+                )
+            )
+            if queued:
+                return queued[0]
+        return None
+
+    async def _process_perk6_spawn(
+        self,
+        snapshot: Any,
+        parsed: Any,
+        *,
+        roll_index: int,
+        session_records: list[RollRecord],
+        us_roll: bool,
+        stop_on_interrupt: bool,
+        rolls_left: int | None,
+    ) -> _RollOutcome:
         spawn_name = parsed.fields.get("character_name") or "?"
-        spawner = parsed.fields.get("spawned_by") or parent_name
+        spawner = parsed.fields.get("spawned_by") or "?"
         self._log(
             f"perk 6: {spawn_name} spawned by {spawner} "
             f"(roll {roll_index}) — reacting before next roll"
-        )
-        self._state.append_rule_trace(
-            RuleTraceEntry(
-                block="perk_6",
-                roll_index=roll_index,
-                character=spawn_name,
-                decision="spawn",
-                reason=f"spawned by {spawner}",
-            )
         )
         self._notify()
 
@@ -619,12 +756,78 @@ class RollCycleEngine:
                 claimed=spawn_outcome.claimed,
                 stop=spawn_outcome.stop,
             )
-        self._log(
-            f"perk 6: settled — waiting {_PERK6_POST_SETTLE_SEC:g}s "
-            "before next roll"
-        )
-        await asyncio.sleep(_PERK6_POST_SETTLE_SEC)
         return spawn_outcome
+
+    async def _drain_pending_perk6_spawns(
+        self,
+        roll_index: int,
+        session_records: list[RollRecord],
+        *,
+        us_roll: bool,
+        stop_on_interrupt: bool,
+    ) -> None:
+        """Service perk-6 spawns already sitting in the queue (prevents falling behind)."""
+        collect = getattr(self._actions, "collect_queued", None)
+        if collect is None:
+            return
+        pending = collect(
+            lambda snapshot, parsed: (
+                not snapshot.edited
+                and bool(parsed.fields.get("perk_6") or parsed.fields.get("is_perk_6_spawn"))
+            )
+        )
+        for snapshot, parsed in pending:
+            spawn_name = parsed.fields.get("character_name") or "?"
+            spawner = parsed.fields.get("spawned_by") or "?"
+            self._log(
+                f"perk 6: queued spawn {spawn_name} (by {spawner}) — "
+                "processing before next roll"
+            )
+            await self._process_perk6_spawn(
+                snapshot,
+                parsed,
+                roll_index=roll_index,
+                session_records=session_records,
+                us_roll=us_roll,
+                stop_on_interrupt=stop_on_interrupt,
+                rolls_left=self._state.rolls_left,
+            )
+            self._log(
+                f"perk 6: settled — waiting {_PERK6_POST_SETTLE_SEC:g}s "
+                "before next roll"
+            )
+            await asyncio.sleep(_PERK6_POST_SETTLE_SEC)
+
+    def _roll_has_react_buttons(self, fields: dict[str, Any], snapshot: Any) -> bool:
+        buttons = list(fields.get("buttons") or getattr(snapshot, "buttons", []) or [])
+        return any(
+            isinstance(btn, dict)
+            and (is_kakera_button(btn) or is_sphere_button(btn))
+            and not btn.get("disabled")
+            for btn in buttons
+        )
+
+    async def _refresh_roll_snapshot(
+        self,
+        snapshot: Any,
+        parsed: Any,
+    ) -> tuple[Any, Any]:
+        """Re-fetch slow embeds so kakera/sphere buttons are present before reacting."""
+        if self._roll_has_react_buttons(parsed.fields, snapshot):
+            return snapshot, parsed
+        fetch = getattr(self._monitor, "fetch_message_snapshot", None)
+        if fetch is None:
+            return snapshot, parsed
+        try:
+            fresh = await fetch(snapshot.message_id)
+        except Exception:
+            return snapshot, parsed
+        if fresh is None:
+            return snapshot, parsed
+        fresh_parsed = parse_mudae_message(fresh)
+        if self._roll_has_react_buttons(fresh_parsed.fields, fresh):
+            return fresh, fresh_parsed
+        return snapshot, parsed
 
     async def _claim_best_at_session_end(
         self,
@@ -758,6 +961,7 @@ class RollCycleEngine:
           ``us_reset_margin_minutes`` — fresh ``$us`` rolls would be wiped;
           pauses until the reset passes, then resumes (rolls normal rolls first).
         """
+        session_reason = "finished"
         try:
             self._monitor.macro_active = True
             self._actions.drain_queue()
@@ -935,10 +1139,15 @@ class RollCycleEngine:
             await self._claim_best_at_session_end(session_records, claimed_any)
             self._log(f"$us mode: finished ({roll_index} roll(s))")
         except asyncio.CancelledError:
+            session_reason = "stopped"
             self._log("$us mode stopped")
         except Exception as exc:  # noqa: BLE001 - surface to the activity log
+            session_reason = "error"
             self._log(f"$us mode error: {exc}")
         finally:
+            if self._stop.is_set() and session_reason == "finished":
+                session_reason = "stopped"
+            self._finish_session(session_reason)
             self._monitor.macro_active = False
             self._state.phase = MacroPhase.IDLE
             self._notify()

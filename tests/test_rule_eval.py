@@ -26,7 +26,6 @@ def test_legacy_macro_dict_migrates_to_character_claim():
         "roll_command": "wa",
         "auto_claim_wish": True,
         "claim_best_at_claim_reset": True,
-        "rolls_left_stop": 3,
     }
     cfg = MacroConfig.from_dict(raw)
     assert cfg.character_claim.enabled is True
@@ -34,7 +33,6 @@ def test_legacy_macro_dict_migrates_to_character_claim():
     assert cfg.character_claim.only_final_hour is True
     assert cfg.kakera_reaction.enabled is False
     assert cfg.sphere_reaction.enabled is False
-    assert cfg.rolls_left_stop == 3
 
 
 def test_legacy_auto_claim_maps_to_enabled():
@@ -52,7 +50,6 @@ def test_round_trip_preserves_all_blocks():
             require_perk_8=True,
             low_power=LowPowerOverride(below_percent=25, types_allowed=["kakeraR"]),
             perk_8_budget_mode=True,
-            daily_click_budget=20,
         ),
         sphere_reaction=SphereReactionRules(
             enabled=True,
@@ -66,7 +63,6 @@ def test_round_trip_preserves_all_blocks():
     assert restored.kakera_reaction.low_power.below_percent == 25
     assert restored.kakera_reaction.low_power.types_allowed == ["kakeraR"]
     assert restored.kakera_reaction.perk_8_budget_mode is True
-    assert restored.kakera_reaction.daily_click_budget == 20
     assert restored.kakera_reaction.perk_8_budget_bypass_types == ["kakeraP"]
     assert restored.sphere_reaction.types_allowed == ["spY", "spB"]
 
@@ -268,9 +264,9 @@ def test_kakera_low_power_inactive_above_threshold():
 def test_kakera_perk_8_budget_blocks_when_exhausted_and_not_perk_8():
     fields = _kakera_fields(_kakera_buttons("kakeraR"))
     rules = KakeraReactionRules(
-        enabled=True, perk_8_budget_mode=True, daily_click_budget=2
+        enabled=True, perk_8_budget_mode=True
     )
-    state = AccountState(perk8_priority_mode="active")
+    state = AccountState(perk8_priority_mode="active", perk8_click_max=2)
     state.rollover_kakera_budget_if_needed()
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
@@ -281,9 +277,9 @@ def test_kakera_perk_8_budget_blocks_when_exhausted_and_not_perk_8():
 def test_kakera_perk_8_budget_allows_perk_8_when_exhausted():
     fields = _kakera_fields(_kakera_buttons("kakeraR"), perk_8=True)
     rules = KakeraReactionRules(
-        enabled=True, perk_8_budget_mode=True, daily_click_budget=2
+        enabled=True, perk_8_budget_mode=True
     )
-    state = AccountState(perk8_priority_mode="active")
+    state = AccountState(perk8_priority_mode="active", perk8_click_max=2)
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
@@ -295,9 +291,8 @@ def test_kakera_perk_8_budget_allows_purple_when_exhausted():
         enabled=True,
         types_allowed=["kakeraP", "kakeraR"],
         perk_8_budget_mode=True,
-        daily_click_budget=2,
     )
-    state = AccountState(perk8_priority_mode="active")
+    state = AccountState(perk8_priority_mode="active", perk8_click_max=2)
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
@@ -380,4 +375,32 @@ def test_sphere_reaction_always_clicks_megasphere():
     assert len(decision.buttons) == 2
     emojis = {choice.emoji for choice in decision.buttons}
     assert emojis == {"spM", "spY"}
+
+
+def test_kakera_perk_8_types_allowed_separate_from_normal_filter():
+    fields = _kakera_fields(_kakera_buttons("kakeraR", "kakeraO"), perk_8=True)
+    rules = KakeraReactionRules(
+        enabled=True,
+        types_allowed=["kakeraR"],
+        perk_8_types_allowed=["kakeraO"],
+        perk_8_budget_mode=True,
+    )
+    state = AccountState(perk8_priority_mode="active")
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraO"
+
+
+def test_kakera_normal_filter_after_budget_on_non_perk_8():
+    fields = _kakera_fields(_kakera_buttons("kakeraR", "kakeraO"), perk_8=False)
+    rules = KakeraReactionRules(
+        enabled=True,
+        types_allowed=["kakeraR"],
+        perk_8_types_allowed=["kakeraO"],
+        perk_8_budget_mode=True,
+    )
+    state = AccountState(perk8_priority_mode="done", perk8_click_max=40)
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraR"
 

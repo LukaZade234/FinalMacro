@@ -118,9 +118,10 @@ class KakeraReactionRules:
     min_spheres: int | None = None
     low_power: LowPowerOverride | None = None
     perk_8_budget_mode: bool = False
-    daily_click_budget: int = 40
     # Kakera types clicked even while saving perk-8 budget (purple is free by default).
     perk_8_budget_bypass_types: list[str] = field(default_factory=lambda: ["kakeraP"])
+    # Color filter for perk-8 characters while budget mode is on (empty = any).
+    perk_8_types_allowed: list[str] = field(default_factory=list)
     auto_use_dk: bool = False
 
     @classmethod
@@ -139,10 +140,10 @@ class KakeraReactionRules:
             min_spheres=_coerce_int_or_none(data.get("min_spheres")),
             low_power=low_power,
             perk_8_budget_mode=bool(data.get("perk_8_budget_mode", False)),
-            daily_click_budget=int(data.get("daily_click_budget", 40)),
             perk_8_budget_bypass_types=_coerce_str_list(
                 data.get("perk_8_budget_bypass_types", ["kakeraP"])
             ),
+            perk_8_types_allowed=_coerce_str_list(data.get("perk_8_types_allowed")),
             auto_use_dk=bool(data.get("auto_use_dk", False)),
         )
 
@@ -155,8 +156,8 @@ class KakeraReactionRules:
             "min_spheres": self.min_spheres,
             "low_power": self.low_power.to_dict() if self.low_power else None,
             "perk_8_budget_mode": self.perk_8_budget_mode,
-            "daily_click_budget": self.daily_click_budget,
             "perk_8_budget_bypass_types": list(self.perk_8_budget_bypass_types),
+            "perk_8_types_allowed": list(self.perk_8_types_allowed),
             "auto_use_dk": self.auto_use_dk,
         }
 
@@ -165,27 +166,37 @@ class KakeraReactionRules:
 class UsRollKakeraRules:
     """Kakera clicking policy for rolls added via ``$us`` (not normal hourly rolls)."""
 
-    # ``normal`` — same rules as :attr:`MacroConfig.kakera_reaction`
-    # ``none`` — skip kakera on $us rolls (spheres still use sphere_reaction)
-    # ``selected`` — only ``types_allowed`` below (other kakera filters still apply)
-    mode: str = "normal"
+    # When False, ``$us`` rolls use the same kakera rules as normal hourly rolls.
+    override: bool = False
+    # When override is True, skip all kakera on ``$us`` rolls.
+    skip_kakera: bool = False
     types_allowed: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> UsRollKakeraRules:
         if not data:
             return cls()
+        if "override" in data or "skip_kakera" in data:
+            return cls(
+                override=bool(data.get("override", False)),
+                skip_kakera=bool(data.get("skip_kakera", False)),
+                types_allowed=_coerce_str_list(data.get("types_allowed")),
+            )
+        # Legacy ``mode`` field migration.
         mode = str(data.get("mode", "normal")).strip().lower()
-        if mode not in ("normal", "none", "selected"):
-            mode = "normal"
-        return cls(
-            mode=mode,
-            types_allowed=_coerce_str_list(data.get("types_allowed")),
-        )
+        if mode == "none":
+            return cls(override=True, skip_kakera=True)
+        if mode == "selected":
+            return cls(
+                override=True,
+                types_allowed=_coerce_str_list(data.get("types_allowed")),
+            )
+        return cls()
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "mode": self.mode,
+            "override": self.override,
+            "skip_kakera": self.skip_kakera,
             "types_allowed": list(self.types_allowed),
         }
 
@@ -218,7 +229,6 @@ class MacroConfig:
     roll_command: str = "wa"
     prefix: str = "$"
     roll_delay_sec: float = 0.6
-    rolls_left_stop: int = 2
     claim_reset_margin_minutes: int = 20
     claim_expire_sec: int = 45
     # $us mass-roll mode: rolls Mudae adds per "$us N" (capped at 20 by Mudae),
@@ -260,22 +270,22 @@ class MacroConfig:
         if not us_roll:
             return base
         policy = self.us_roll_kakera
-        if policy.mode == "none":
+        if not policy.override:
+            return base
+        if policy.skip_kakera:
             return KakeraReactionRules(enabled=False)
-        if policy.mode == "selected":
-            return KakeraReactionRules(
-                enabled=True,
-                types_allowed=list(policy.types_allowed),
-                require_chaos_key=base.require_chaos_key,
-                require_perk_8=base.require_perk_8,
-                min_spheres=base.min_spheres,
-                low_power=base.low_power,
-                perk_8_budget_mode=base.perk_8_budget_mode,
-                daily_click_budget=base.daily_click_budget,
-                perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
-                auto_use_dk=base.auto_use_dk,
-            )
-        return base
+        return KakeraReactionRules(
+            enabled=base.enabled,
+            types_allowed=list(policy.types_allowed),
+            require_chaos_key=base.require_chaos_key,
+            require_perk_8=base.require_perk_8,
+            min_spheres=base.min_spheres,
+            low_power=base.low_power,
+            perk_8_budget_mode=base.perk_8_budget_mode,
+            perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
+            perk_8_types_allowed=list(base.perk_8_types_allowed),
+            auto_use_dk=base.auto_use_dk,
+        )
 
     def roll_delay(self) -> float:
         return max(self.roll_delay_sec, 0.6)
@@ -329,7 +339,6 @@ class MacroConfig:
             roll_command=str(data.get("roll_command", "wa")),
             prefix=str(data.get("prefix", "$")),
             roll_delay_sec=float(data.get("roll_delay_sec", 0.6)),
-            rolls_left_stop=int(data.get("rolls_left_stop", 2)),
             claim_reset_margin_minutes=int(data.get("claim_reset_margin_minutes", 20)),
             claim_expire_sec=int(data.get("claim_expire_sec", 45)),
             us_batch_size=int(data.get("us_batch_size", 20)),
@@ -348,7 +357,6 @@ class MacroConfig:
             "roll_command": self.roll_command,
             "prefix": self.prefix,
             "roll_delay_sec": self.roll_delay_sec,
-            "rolls_left_stop": self.rolls_left_stop,
             "claim_reset_margin_minutes": self.claim_reset_margin_minutes,
             "claim_expire_sec": self.claim_expire_sec,
             "us_batch_size": self.us_batch_size,

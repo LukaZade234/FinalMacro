@@ -13,13 +13,15 @@ Item {
     readonly property var sections: [
         { label: "Soulmates", title: "Soulmates" },
         { label: "Kakera", title: "Kakera" },
-        { label: "Spheres", title: "Spheres" }
+        { label: "Spheres", title: "Spheres" },
+        { label: "Keys", title: "Keys" }
     ]
 
     readonly property var sectionSources: [
         "SoulmatesView.qml",
         "KakeraView.qml",
-        "SpheresView.qml"
+        "SpheresView.qml",
+        "KeysView.qml"
     ]
 
     ColumnLayout {

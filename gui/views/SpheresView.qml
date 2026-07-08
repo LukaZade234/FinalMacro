@@ -228,7 +228,7 @@ Item {
         anchors.fill: parent
 
         Label {
-            text: "Spheres from roll button clicks, kakera click bonuses, and minigames while connected. $oh is tracked now; $oc and $oq will follow."
+            text: "Spheres from roll button clicks, kakera click bonuses, and minigames while connected. $oh, $oc, and $oq minigames are tracked."
             color: Theme.fgMuted
             font.pixelSize: 11
             wrapMode: Text.WordWrap

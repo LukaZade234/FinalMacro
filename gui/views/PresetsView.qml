@@ -18,6 +18,7 @@ Item {
     property string editingPresetId: ""
     property var rules: ({})
     property bool _ready: false
+    property bool showAdvancedKakera: false
 
     // Kakera buttons, listed in value order (cheapest first, chaos last). Purple
     // is shown first since it costs no reaction power. Icons resolve to PNG/WebP
@@ -70,6 +71,7 @@ Item {
     function loadRules() {
         if (!editingPresetId) {
             rules = {}
+            showAdvancedKakera = false
             return
         }
         try {
@@ -77,6 +79,23 @@ Item {
         } catch (e) {
             rules = {}
         }
+        showAdvancedKakera = kakeraUsesAdvancedOptions()
+    }
+
+    function kakeraUsesAdvancedOptions() {
+        var k = rules.kakera_reaction || {}
+        var u = rules.us_roll_kakera || {}
+        if (k.require_perk_8)
+            return true
+        if (k.min_spheres !== null && k.min_spheres !== undefined)
+            return true
+        if (k.perk_8_budget_mode)
+            return true
+        if (k.low_power !== null && k.low_power !== undefined)
+            return true
+        if (u.override)
+            return true
+        return false
     }
 
     function patch(block, key, value) {
@@ -135,26 +154,22 @@ Item {
         }
     }
 
-    ScrollablePage {
+    RowLayout {
         anchors.fill: parent
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 560
-            spacing: 12
+        spacing: 12
 
         // ----- Left sidebar: preset list -----
         PanelCard {
             Layout.preferredWidth: 200
             Layout.maximumWidth: 240
-            Layout.preferredHeight: 560
+            Layout.fillHeight: true
             title: "Presets"
             titleSize: 14
             fillContentVertically: true
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 520
+                Layout.fillHeight: true
                 spacing: 8
 
                 RowLayout {
@@ -190,7 +205,7 @@ Item {
                 ListView {
                     id: presetList
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 380
+                    Layout.fillHeight: true
                     clip: true
                     model: presets().length
                     currentIndex: selectedIndex
@@ -250,7 +265,7 @@ Item {
         // ----- Right pane: details -----
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 560
+            Layout.fillHeight: true
             spacing: 12
 
             RowLayout {
@@ -278,7 +293,7 @@ Item {
             ScrollView {
                 id: scroller
                 Layout.fillWidth: true
-                Layout.preferredHeight: 480
+                Layout.fillHeight: true
                 clip: true
                 ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -324,15 +339,6 @@ Item {
                                 Layout.preferredHeight: 32
                                 text: (rules.basic && rules.basic.roll_delay_sec !== undefined) ? rules.basic.roll_delay_sec.toString() : "0.6"
                                 onEditingFinished: patchBasic("roll_delay_sec", parseFloat(text) || 0.6)
-                            }
-
-                            Label { text: "Stop at N rolls left"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
-                            ThemedSpinBox {
-                                from: 0
-                                to: 20
-                                Layout.fillWidth: true
-                                value: (rules.basic && rules.basic.rolls_left_stop !== undefined) ? rules.basic.rolls_left_stop : 2
-                                onValueModified: patchBasic("rolls_left_stop", value)
                             }
                         }
                     }
@@ -416,133 +422,49 @@ Item {
                         }
 
                         ThemedCheckBox {
+                            Layout.fillWidth: true
                             text: "Use $dk when reaction power runs out"
                             checked: rules.kakera_reaction ? !!rules.kakera_reaction.auto_use_dk : false
                             onToggled: patch("kakera_reaction", "auto_use_dk", checked)
                         }
 
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: 12
-
-                            ThemedCheckBox {
-                                text: "Require chaos key"
-                                checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_chaos_key : false
-                                onToggled: patch("kakera_reaction", "require_chaos_key", checked)
-                            }
-                            ThemedCheckBox {
-                                text: "Require perk 8 character"
-                                checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_perk_8 : false
-                                onToggled: patch("kakera_reaction", "require_perk_8", checked)
-                            }
-                        }
-
-                        GridLayout {
-                            Layout.fillWidth: true
-                            columns: 2
-                            columnSpacing: 12
-                            rowSpacing: 8
-
-                            Label { text: "Min spheres on roll"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
-                            ThemedTextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 32
-                                placeholderText: "off"
-                                text: getInt("kakera_reaction", "min_spheres")
-                                onEditingFinished: patch("kakera_reaction", "min_spheres", parseIntOrNull(text))
-                            }
-
-                            Label { text: "Daily click budget"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
-                            ThemedSpinBox {
-                                from: 0
-                                to: 500
-                                Layout.fillWidth: true
-                                value: rules.kakera_reaction ? (rules.kakera_reaction.daily_click_budget || 40) : 40
-                                onValueModified: patch("kakera_reaction", "daily_click_budget", value)
-                            }
-                        }
-
                         ThemedCheckBox {
                             Layout.fillWidth: true
-                            text: "Perk-8 priority: skip non-perk-8 once the daily budget is hit"
-                            checked: rules.kakera_reaction ? !!rules.kakera_reaction.perk_8_budget_mode : false
-                            onToggled: patch("kakera_reaction", "perk_8_budget_mode", checked)
+                            text: "Require chaos key"
+                            checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_chaos_key : false
+                            onToggled: patch("kakera_reaction", "require_chaos_key", checked)
                         }
 
-                        ColorChipPicker {
+                        RowLayout {
                             Layout.fillWidth: true
-                            visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
-                            title: "Always click during budget saving (ignore perk-8 limit)"
-                            options: kakeraOptions
-                            selected: rules.kakera_reaction
-                                ? (rules.kakera_reaction.perk_8_budget_bypass_types || ["kakeraP"])
-                                : ["kakeraP"]
-                            onSelectionChanged: function(ids) {
-                                patch("kakera_reaction", "perk_8_budget_bypass_types", ids)
+                            spacing: 8
+
+                            Label {
+                                text: "Advanced kakera options"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.fillWidth: true
+                            }
+
+                            ThemedSwitch {
+                                checked: presetsRoot.showAdvancedKakera
+                                onToggled: presetsRoot.showAdvancedKakera = checked
                             }
                         }
 
-                        // Low-power sub-card
-                        Rectangle {
+                        KakeraAdvancedPanel {
                             Layout.fillWidth: true
-                            radius: 8
-                            color: Theme.bgDark
-                            border.color: Theme.border
-                            implicitHeight: lpLayout.implicitHeight + 16
-
-                            ColumnLayout {
-                                id: lpLayout
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 8
-                                spacing: 6
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Label {
-                                        text: "Low-power override"
-                                        color: Theme.fgPrimary
-                                        font.pixelSize: 12
-                                        Layout.fillWidth: true
-                                    }
-                                    ThemedSwitch {
-                                        checked: rules.kakera_reaction && rules.kakera_reaction.low_power !== null && rules.kakera_reaction.low_power !== undefined
-                                        onToggled: setLowPowerEnabled(checked)
-                                    }
-                                }
-                                Label {
-                                    visible: rules.kakera_reaction && rules.kakera_reaction.low_power
-                                    text: "When power drops below the threshold, only these colors are clicked."
-                                    color: Theme.fgMuted
-                                    font.pixelSize: 10
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                }
-                                RowLayout {
-                                    visible: rules.kakera_reaction && rules.kakera_reaction.low_power
-                                    Layout.fillWidth: true
-                                    Label { text: "Below power %"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                                    ThemedSpinBox {
-                                        from: 0
-                                        to: 100
-                                        value: (rules.kakera_reaction && rules.kakera_reaction.low_power) ? (rules.kakera_reaction.low_power.below_percent || 30) : 30
-                                        onValueModified: patchLowPower("below_percent", value)
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                }
-                                ColorChipPicker {
-                                    Layout.fillWidth: true
-                                    visible: rules.kakera_reaction && rules.kakera_reaction.low_power
-                                    title: "Allowed colors when low power"
-                                    options: kakeraOptions
-                                    selected: (rules.kakera_reaction && rules.kakera_reaction.low_power)
-                                        ? (rules.kakera_reaction.low_power.types_allowed || [])
-                                        : []
-                                    onSelectionChanged: function(ids) {
-                                        patchLowPower("types_allowed", ids)
-                                    }
-                                }
+                            visible: presetsRoot.showAdvancedKakera
+                            rules: presetsRoot.rules
+                            kakeraOptions: presetsRoot.kakeraOptions
+                            onPatch: function(block, key, value) {
+                                presetsRoot.patch(block, key, value)
+                            }
+                            onPatchLowPower: function(key, value) {
+                                presetsRoot.patchLowPower(key, value)
+                            }
+                            onSetLowPowerEnabled: function(on) {
+                                presetsRoot.setLowPowerEnabled(on)
                             }
                         }
                     }
@@ -568,66 +490,8 @@ Item {
                             }
                         }
                     }
-
-                    // -- $us roll kakera --
-                    RuleBlockCard {
-                        Layout.fillWidth: true
-                        title: "$us roll kakera"
-                        subtitle: {
-                            var mode = (rules.us_roll_kakera && rules.us_roll_kakera.mode) || "normal"
-                            if (mode === "none")
-                                return "Skip kakera on $us-added rolls (spheres unchanged)."
-                            if (mode === "selected")
-                                return "Only selected kakera types on $us-added rolls."
-                            return "Same kakera rules as normal rolls."
-                        }
-                        enabled_: true
-                        showEnableToggle: false
-
-                        Label {
-                            Layout.fillWidth: true
-                            text: "Normal hourly rolls always use the kakera reaction rules above."
-                            color: Theme.fgMuted
-                            font.pixelSize: 11
-                            wrapMode: Text.WordWrap
-                        }
-
-                        Label { text: "Kakera on $us rolls"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
-                        ThemedComboBox {
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: 200
-                            model: [
-                                { label: "Same as normal rolls", value: "normal" },
-                                { label: "Don't claim kakera", value: "none" },
-                                { label: "Selected types only", value: "selected" }
-                            ]
-                            textRole: "label"
-                            currentIndex: {
-                                var mode = (rules.us_roll_kakera && rules.us_roll_kakera.mode) || "normal"
-                                if (mode === "none") return 1
-                                if (mode === "selected") return 2
-                                return 0
-                            }
-                            onActivated: function(index) {
-                                var values = ["normal", "none", "selected"]
-                                patch("us_roll_kakera", "mode", values[index])
-                            }
-                        }
-
-                        ColorChipPicker {
-                            Layout.fillWidth: true
-                            visible: rules.us_roll_kakera && rules.us_roll_kakera.mode === "selected"
-                            title: "Kakera types on $us rolls"
-                            options: kakeraOptions
-                            selected: rules.us_roll_kakera ? (rules.us_roll_kakera.types_allowed || []) : []
-                            onSelectionChanged: function(ids) {
-                                patch("us_roll_kakera", "types_allowed", ids)
-                            }
-                        }
-                    }
                 }
             }
-        }
         }
     }
 

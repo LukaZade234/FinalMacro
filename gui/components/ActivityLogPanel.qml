@@ -64,7 +64,10 @@ ColumnLayout {
         for (var i = 0; i < rows.length; i++) {
             var entry = rows[i]
             var color = severityColor(entry.severity).toString()
-            parts.push('<span style="color:' + color + '">' + escapeHtml(entry.text) + "</span>")
+            var prefix = ""
+            if (entry.ts && entry.ts.length >= 19)
+                prefix = "[" + entry.ts.substring(11, 19) + "] "
+            parts.push('<span style="color:' + color + '">' + escapeHtml(prefix + entry.text) + "</span>")
         }
         return parts.join("<br>")
     }

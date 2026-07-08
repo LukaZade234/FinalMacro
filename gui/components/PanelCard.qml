@@ -40,22 +40,11 @@ Item {
             Layout.fillWidth: true
         }
 
-        Item {
-            id: contentHost
+        ColumnLayout {
+            id: contentLayout
             Layout.fillWidth: true
             Layout.fillHeight: root.fillContentVertically
-            implicitHeight: root.fillContentVertically
-                              ? Math.max(contentLayout.implicitHeight, 0)
-                              : contentLayout.implicitHeight
-
-            ColumnLayout {
-                id: contentLayout
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.bottom: root.fillContentVertically ? parent.bottom : undefined
-                spacing: 10
-            }
+            spacing: 10
         }
     }
 }

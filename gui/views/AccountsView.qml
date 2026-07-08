@@ -137,31 +137,33 @@ Item {
                 Layout.fillHeight: true
                 spacing: 8
 
-                RowLayout {
+                ThemedTextField {
+                    id: newAccountField
                     Layout.fillWidth: true
-                    ThemedTextField {
-                        id: newAccountField
-                        Layout.fillWidth: true
-                        placeholderText: "Account name"
-                    }
-                    ThemedButton {
-                        text: "Add"
-                        accent: true
-                        enabled: newAccountField.text.trim().length > 0
-                        onClicked: {
-                            App.addAccount(newAccountField.text.trim(), "Main")
-                            newAccountField.text = ""
-                            reload()
-                            accountList.currentIndex = accounts().length - 1
-                            selectedIndex = accountList.currentIndex
-                        }
+                    Layout.preferredHeight: 32
+                    placeholderText: "Account name"
+                }
+
+                ThemedButton {
+                    Layout.fillWidth: true
+                    text: "Add account"
+                    accent: true
+                    enabled: newAccountField.text.trim().length > 0
+                    onClicked: {
+                        App.addAccount(newAccountField.text.trim(), "Main")
+                        newAccountField.text = ""
+                        reload()
+                        accountList.currentIndex = accounts().length - 1
+                        selectedIndex = accountList.currentIndex
                     }
                 }
 
                 ListView {
                     id: accountList
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 360
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 120
+                    Layout.preferredHeight: 320
                     clip: true
                     model: accounts().length
                     currentIndex: selectedIndex

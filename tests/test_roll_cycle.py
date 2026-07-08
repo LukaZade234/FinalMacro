@@ -37,6 +37,16 @@ def _roll(message_id: int, rolls_left: int | None = None) -> tuple[SimpleNamespa
     )
 
 
+def _roll_limit(reset_minutes: int = 34) -> tuple[SimpleNamespace, ParseResult]:
+    from mudae.parsers.roll_limit import parse_roll_limit
+
+    content = (
+        "lukazade234, the roulette is limited to 30 uses per hour. "
+        f"{reset_minutes} min left."
+    )
+    return SimpleNamespace(message_id=999), parse_roll_limit(content)
+
+
 class _FakeActions:
     def __init__(self, tu_script: list, roll_script: list) -> None:
         self._tu = deque(tu_script)
@@ -107,6 +117,33 @@ def test_normal_macro_rolls_one_hour_then_stops_when_tu_exhausted():
 
     assert len(actions.roll_commands()) == 5
     assert any("waiting 30m until hourly refill" in entry.text for entry in state.activity_log)
+
+
+def test_normal_macro_caps_rolls_at_tu_count():
+    actions = _FakeActions(
+        tu_script=[_tu(1, 34), _tu(0, 34)],
+        roll_script=[_roll(1, 0), _roll(2, 0)],
+    )
+    engine, state = _make_engine(actions)
+
+    _run_normal(engine)
+
+    assert len(actions.roll_commands()) == 1
+
+
+def test_normal_macro_stops_on_roll_limit_message():
+    actions = _FakeActions(
+        tu_script=[_tu(2, 34), _tu(0, 34)],
+        roll_script=[_roll(1, 1), _roll_limit(34)],
+    )
+    engine, state = _make_engine(actions)
+
+    _run_normal(engine)
+
+    assert len(actions.roll_commands()) == 2
+    assert state.rolls_left == 0
+    assert state.rolls_reset_minutes == 34
+    assert any("Hourly roll limit reached" in entry.text for entry in state.activity_log)
 
 
 def test_normal_macro_waits_and_rolls_next_hour():

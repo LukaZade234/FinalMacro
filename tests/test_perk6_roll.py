@@ -86,6 +86,9 @@ class _Perk6Actions:
     def drain_queue(self) -> None:
         pass
 
+    def collect_queued(self, predicate) -> list:
+        return []
+
     async def send_command(self, command: str, *, prefix: str | None = None) -> None:
         self.sent.append(command)
 
@@ -109,7 +112,7 @@ async def _fast_sleep(_delay: float) -> None:
     return None
 
 
-def test_perk6_spawn_wait_is_short_when_no_spawn():
+def test_perk6_spawn_wait_polls_when_no_spawn():
     config = MacroConfig(
         roll_command="wa",
         character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
@@ -132,7 +135,8 @@ def test_perk6_spawn_wait_is_short_when_no_spawn():
         )
 
     assert outcome.ok is True
-    assert timeouts == [0.8]
+    assert timeouts
+    assert all(timeout <= 0.25 for timeout in timeouts)
 
 
 def test_perk6_spawn_is_processed_after_parent_roll():
@@ -154,4 +158,33 @@ def test_perk6_spawn_is_processed_after_parent_roll():
     assert any("Akame spawned by POWER" in text for text in perk6_logs)
     assert any("perk 6 · → Akame" in text for text in perk6_logs)
     assert any("settled" in text for text in perk6_logs)
-    assert any(entry.block == "perk_6" for entry in state.rule_trace)
+
+
+def test_queued_perk6_spawn_is_serviced_before_next_roll():
+    config = MacroConfig(
+        roll_command="wa",
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    state = AccountState()
+    actions = _Perk6Actions()
+    actions._rolls = deque([
+        (_snapshot(3, "Rem"), _parsed("Rem")),
+    ])
+    actions._spawns.clear()
+    engine = RollCycleEngine(actions, config, state, SimpleNamespace(macro_active=False))
+
+    spawn = (_snapshot(2, "Akame", spawned_by="POWER"), _parsed("Akame", spawned_by="POWER"))
+    actions.collect_queued = lambda predicate: [spawn] if predicate(*spawn) else []  # type: ignore[method-assign]
+
+    async def no_spawn(*, parent_character: str, timeout: float = 0.8):
+        return None
+
+    actions.wait_for_perk6_spawn = no_spawn  # type: ignore[method-assign]
+
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        outcome = asyncio.run(
+            engine._perform_roll("wa", 2, [], us_roll=False, stop_on_interrupt=True)
+        )
+
+    assert outcome.ok is True
+    assert any("queued spawn Akame" in entry.text for entry in state.activity_log)

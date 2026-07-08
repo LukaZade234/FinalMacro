@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from macro.actions import DiscordActions
+from macro.actions import DiscordActions, is_kakera_outcome_message
+from mudae.parsers.classify import classify_message
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 
@@ -91,5 +92,75 @@ def test_feed_caps_queue_size_dropping_oldest():
             newest = actions._queue.get_nowait()
         assert newest is not None
         assert newest[0].message_id == _MAX_QUEUE_SIZE + 49
+
+    asyncio.run(_run())
+
+
+def test_kakera_outcome_matches_embed_only_claim():
+    from macro.actions import is_kakera_outcome_message
+
+    snapshot = MudaeMessageSnapshot(
+        message_id=1,
+        channel_id=1,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=1,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[{"description": "**user +123** ($k)", "title": "", "footer": "", "author": ""}],
+        buttons=[],
+        created_at="12:00:00",
+    )
+    parsed = ParseResult(kind=MessageKind.CHARACTER_EMBED, summary="", fields={})
+    assert is_kakera_outcome_message(snapshot, parsed)
+    assert classify_message(snapshot) == MessageKind.KAKERA_CLAIM
+
+
+def test_wait_for_kakera_outcome_finds_misclassified_claim():
+    actions = DiscordActions(SimpleNamespace())
+
+    async def _run() -> None:
+        snapshot = MudaeMessageSnapshot(
+            message_id=2,
+            channel_id=1,
+            channel_name="mudae",
+            guild_id=1,
+            guild_name="srv",
+            author_id=1,
+            author_name="Mudae",
+            is_mudae=True,
+            content="",
+            embeds=[{"description": "**user +50** ($k)", "title": "", "footer": "", "author": ""}],
+            buttons=[],
+            created_at="12:00:00",
+        )
+        parsed = ParseResult(kind=MessageKind.UNKNOWN, summary="", fields={})
+        actions.feed(snapshot, parsed)
+
+        result = await actions.wait_for_kakera_outcome(timeout=0.5)
+        assert result is not None
+        assert result.kind == MessageKind.KAKERA_CLAIM
+        assert result.fields.get("amount") == 50
+
+    asyncio.run(_run())
+
+    actions = DiscordActions(SimpleNamespace())
+
+    async def _run() -> None:
+        actions.feed(_snapshot(1), _parsed(MessageKind.TU))
+        actions.feed(_snapshot(2), _parsed(MessageKind.KAKERA_CLAIM))
+
+        matches = actions.collect_queued(
+            lambda _s, p: p.kind == MessageKind.KAKERA_CLAIM
+        )
+        assert len(matches) == 1
+        assert matches[0][0].message_id == 2
+        assert actions._queue.qsize() == 1
+
+        tu = await _wait_kind(actions, MessageKind.TU, timeout=0.5)
+        assert tu is not None
+        assert tu[0].message_id == 1
 
     asyncio.run(_run())

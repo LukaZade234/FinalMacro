@@ -85,6 +85,47 @@ def test_parse_tu_us_bonus_without_left_keyword():
     assert result.fields["rolls_us_bonus"] == 13
 
 
+def test_parse_roll_limit_message():
+    from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
+
+    content = (
+        "lukazade234, the roulette is limited to 30 uses per hour. 34 min left.\n"
+        "Upvote Mudae to reset the timer: $vote. Website: https://mudae.net/\n"
+        "Get a bonus when rolling with slash commands: type $search slash"
+    )
+    assert is_roll_limit_message(content) is True
+    result = parse_roll_limit(content)
+    assert result.kind == MessageKind.ROLL_LIMIT
+    assert result.fields["rolls_left"] == 0
+    assert result.fields["rolls_exhausted"] is True
+    assert result.fields["hourly_roll_limit"] == 30
+    assert result.fields["rolls_reset_minutes"] == 34
+    assert "refill in 34m" in result.summary
+
+
+def test_roll_limit_wins_over_roll_command_context():
+    content = (
+        "lukazade234, the roulette is limited to 30 uses per hour. 34 min left."
+    )
+    snapshot = MudaeMessageSnapshot(
+        message_id=8,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=content,
+        embeds=[],
+        buttons=[],
+        created_at="12:00:00",
+    )
+    result = parse_message(snapshot, reply_to_command="wa")
+    assert result.kind == MessageKind.ROLL_LIMIT
+    assert result.fields["rolls_reset_minutes"] == 34
+
+
 def test_parse_us_stack_response():
     from mudae.parsers.us import is_us_stack_response, parse_us, parse_us_stacked
 
@@ -1474,7 +1515,31 @@ def test_parse_perk_6_spawn():
     assert "Kakera Buttons" not in result.summary
 
 
+def test_parse_omega_keys_ignores_pr_profile_inventory():
+    from mudae.parsers.kakera import parse_omega_keys
+
+    pr_desc = (
+        "Collection size: 1,617 (100%:female: 0% :male:)\n"
+        "Keys: 3,154:bronzekey: 4,656:silverkey: 5,877:goldkey: 33,122:chaoskey:\n"
+        "84 :omegakey:\n\n711 :sp:\n"
+        "Mudapins: 2,347/2,347\n"
+    )
+    assert parse_omega_keys(pr_desc) == []
+
+
+def test_parse_omega_keys_ignores_ohu8_sphere_stock():
+    from mudae.parsers.kakera import parse_omega_keys
+
+    ohu_desc = (
+        "0 $oh left for today, 0 $oc, 0 $oq and 0 $ot (+3 stored).\n"
+        "Stock: 711 :sp:\n"
+        "(Perk 8) Clicked today: 40/40. Rolled today: 37/123\n"
+    )
+    assert parse_omega_keys(ohu_desc) == []
+
+
 def test_parse_perk_6_akame_spawned_by_power():
+    from mudae.parsers.kakera import parse_keys, parse_omega_keys
     from mudae.parsers.pipeline import parse_mudae_message
     from mudae.parsers.roll import perk6_spawner_matches
 
@@ -1505,11 +1570,15 @@ def test_parse_perk_6_akame_spawned_by_power():
         buttons=[],
         created_at="20:00:00",
     )
+    assert parse_keys(embed["description"]) == [{"type": "chaos", "level": 98}]
+    assert parse_omega_keys(embed["description"]) == [{"gain": 6}]
     result = parse_mudae_message(snapshot)
     assert result.fields["perk_6"] is True
     assert result.fields["spawned_by"] == "POWER"
     assert result.fields["is_perk_6_spawn"] is True
     assert result.fields["character_name"] == "Akame"
+    assert result.fields["keys"] == [{"type": "chaos", "level": 98}]
+    assert result.fields["omega_keys"] == [{"gain": 6}]
     assert perk6_spawner_matches("POWER", "Power") is True
     assert perk6_spawner_matches("POWER", "Akame") is False
 

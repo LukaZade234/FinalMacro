@@ -6,7 +6,40 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
+from mudae.parsers.classify import snapshot_is_kakera_claim, snapshot_text
+from mudae.parsers.reaction_power import is_kakera_react_denied
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
+
+
+def is_kakera_outcome_message(
+    snapshot: MudaeMessageSnapshot,
+    parsed: ParseResult,
+) -> bool:
+    """True for a kakera claim or insufficient-power denial."""
+    if parsed.kind in {MessageKind.KAKERA_CLAIM, MessageKind.KAKERA_REACT_DENIED}:
+        return True
+    text = snapshot_text(snapshot)
+    if snapshot_is_kakera_claim(snapshot):
+        return True
+    return is_kakera_react_denied(text)
+
+
+def normalize_kakera_outcome(
+    snapshot: MudaeMessageSnapshot,
+    parsed: ParseResult,
+) -> ParseResult:
+    """Re-parse claim/denial lines that were misclassified (e.g. embed-only +$k)."""
+    if parsed.kind in {MessageKind.KAKERA_CLAIM, MessageKind.KAKERA_REACT_DENIED}:
+        return parsed
+    from mudae.parsers.kakera import parse_kakera_claim
+    from mudae.parsers.reaction_power import parse_kakera_react_denied
+
+    text = snapshot_text(snapshot)
+    if is_kakera_react_denied(text):
+        return parse_kakera_react_denied(text)
+    if snapshot_is_kakera_claim(snapshot):
+        return parse_kakera_claim(text)
+    return parsed
 
 _ROLL_KINDS = frozenset(
     {
@@ -19,7 +52,15 @@ _ROLL_KINDS = frozenset(
 )
 
 
+def is_roll_limit_parse_result(parsed: ParseResult) -> bool:
+    return parsed.kind == MessageKind.ROLL_LIMIT
+
+
 def is_roll_parse_result(parsed: ParseResult, *, roll_command: str) -> bool:
+    if parsed.fields.get("perk_6") or parsed.fields.get("is_perk_6_spawn"):
+        return False
+    if parsed.kind == MessageKind.ROLL_LIMIT:
+        return True
     if parsed.kind in {
         MessageKind.TU,
         MessageKind.KAKERA_CLAIM,
@@ -38,12 +79,14 @@ def is_roll_parse_result(parsed: ParseResult, *, roll_command: str) -> bool:
     }:
         return parsed.fields.get("character_name") is not None
     if parsed.kind == MessageKind.ROLL:
-        return True
+        return parsed.fields.get("character_name") is not None
     if parsed.kind == MessageKind.COMMAND_RESPONSE:
         parser = (parsed.fields.get("parser_command") or "").lower()
         display = (parsed.fields.get("command") or "").lower()
         canonical = roll_command.lower()
-        return parser == "roll" or display == canonical or canonical in display
+        if not (parser == "roll" or display == canonical or canonical in display):
+            return False
+        return parsed.fields.get("character_name") is not None
     return False
 
 
@@ -129,6 +172,9 @@ class DiscordActions:
             except asyncio.QueueEmpty:
                 break
         self._queue.put_nowait((snapshot, parsed))
+
+    def queue_size(self) -> int:
+        return self._queue.qsize()
 
     async def send_command(self, command: str, *, prefix: str | None = None) -> None:
         await self._monitor.send_command(command, prefix=prefix)
@@ -223,7 +269,7 @@ class DiscordActions:
     async def wait_for_claim(
         self,
         *,
-        timeout: float = 8.0,
+        timeout: float = 15.0,
     ) -> ParseResult | None:
         result = await self.wait_for(
             lambda _s, p: p.kind in {MessageKind.CLAIM, MessageKind.MARRIAGE},
@@ -249,11 +295,28 @@ class DiscordActions:
     ) -> ParseResult | None:
         """Wait for a successful kakera claim or an insufficient-power denial."""
         result = await self.wait_for(
-            lambda _s, p: p.kind
-            in {MessageKind.KAKERA_CLAIM, MessageKind.KAKERA_REACT_DENIED},
+            is_kakera_outcome_message,
             timeout=timeout,
         )
-        return result[1] if result else None
+        if result is None:
+            return None
+        return normalize_kakera_outcome(result[0], result[1])
+
+    def count_queued_outcomes(
+        self,
+        predicate: Callable[[MudaeMessageSnapshot, ParseResult], bool],
+    ) -> tuple[int, int]:
+        """Return ``(queue_size, matches)`` without consuming (for timeout diagnostics)."""
+        items: list[tuple[MudaeMessageSnapshot, ParseResult]] = []
+        while True:
+            try:
+                items.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        matches = sum(1 for item in items if predicate(*item))
+        for item in items:
+            self._queue.put_nowait(item)
+        return len(items), matches
 
     async def wait_for_dk_use(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(is_dk_use_parse_result, timeout=timeout)
@@ -265,3 +328,20 @@ class DiscordActions:
                 self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+    def collect_queued(
+        self,
+        predicate: Callable[[MudaeMessageSnapshot, ParseResult], bool],
+    ) -> list[tuple[MudaeMessageSnapshot, ParseResult]]:
+        """Remove matching queued messages and put the rest back in order."""
+        items: list[tuple[MudaeMessageSnapshot, ParseResult]] = []
+        while True:
+            try:
+                items.append(self._queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        matches = [item for item in items if predicate(*item)]
+        for item in items:
+            if item not in matches:
+                self._queue.put_nowait(item)
+        return matches

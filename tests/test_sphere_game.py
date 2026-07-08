@@ -22,6 +22,7 @@ from macro.sphere_game import (
     reward_has_entries,
     reward_line_types,
     total_reward_from_content,
+    wait_for_minigame_click_ack,
 )
 
 _FIXTURE = Path(__file__).resolve().parent.parent / "data" / "oh_log.json"
@@ -57,6 +58,95 @@ def _reward_snapshot(content: str, *, message_id: int = 2000):
         content=content,
         buttons=[],
     )
+
+
+def test_wait_for_minigame_click_ack_retries_before_giving_up():
+    before = [_btn(i, "spU") for i in range(25)]
+    after = [_btn(16, "spB", disabled=True)] + [_btn(i, "spU") for i in range(25) if i != 16]
+    before_snap = _grid_snapshot(before, message_id=1000)
+    after_snap = _grid_snapshot(after, message_id=1000)
+    reward = "<:spB:1> **+14**"
+    reward_snap = _reward_snapshot(reward)
+
+    class _Actions:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        async def wait_for(self, predicate, *, timeout: float = 10.0):
+            self.attempts += 1
+            if self.attempts == 1:
+                return None
+            for snapshot in (reward_snap, after_snap):
+                if predicate(snapshot, None):
+                    return snapshot, None
+            return None
+
+    holder = {"content": ""}
+
+    async def _run():
+        return await wait_for_minigame_click_ack(
+            _Actions(),
+            monitor=None,
+            grid_id=1000,
+            before_sig=grid_signature(before),
+            before_reward="",
+            is_grid_message=is_oh_grid_message,
+            get_reward_content=lambda: holder["content"],
+            set_reward_content=lambda value: holder.__setitem__("content", value),
+            edit_timeout=0.01,
+            retry_timeout=0.01,
+            max_retries=1,
+        )
+
+    grid, content = asyncio.run(_run())
+    assert grid is not None
+    assert content == reward
+
+
+def test_wait_for_minigame_click_ack_resends_click_on_retry():
+    before = [_btn(i, "spU") for i in range(25)]
+    after = [_btn(0, "spL", disabled=True)] + [_btn(i, "spU") for i in range(1, 25)]
+    reward = "<:spL:1> **+22**"
+    reward_snap = _reward_snapshot(reward)
+    after_snap = _grid_snapshot(after, message_id=1000)
+    retry_clicks: list[str] = []
+
+    class _Actions:
+        def __init__(self) -> None:
+            self.attempts = 0
+
+        async def wait_for(self, predicate, *, timeout: float = 10.0):
+            self.attempts += 1
+            if self.attempts <= 2:
+                return None
+            for snapshot in (reward_snap, after_snap):
+                if predicate(snapshot, None):
+                    return snapshot, None
+            return None
+
+    async def _retry_click() -> None:
+        retry_clicks.append("sent")
+
+    async def _run():
+        return await wait_for_minigame_click_ack(
+            _Actions(),
+            monitor=None,
+            grid_id=1000,
+            before_sig=grid_signature(before),
+            before_reward="",
+            is_grid_message=is_oh_grid_message,
+            get_reward_content=lambda: "",
+            set_reward_content=lambda _value: None,
+            edit_timeout=0.01,
+            retry_timeout=0.01,
+            max_retries=2,
+            on_retry_click=_retry_click,
+        )
+
+    grid, content = asyncio.run(_run())
+    assert retry_clicks == ["sent", "sent"]
+    assert grid is not None
+    assert content == reward
 
 
 def test_parse_clicks_allowed():
@@ -229,6 +319,74 @@ class _FakeActions:
             if predicate(snapshot, None):
                 return snapshot, None
         return None
+
+
+def test_choose_prefers_yellow_over_green_when_both_revealed():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[10]["emoji"] = "spY"
+    buttons[15]["emoji"] = "spG"
+    choice = choose_oh_click(buttons, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spY"
+
+
+def test_oh_game_waits_for_grid_when_reward_arrives_first():
+    """Reward lines often beat the grid edit; must not choose on stale buttons."""
+    grid0 = _grid_snapshot(
+        [_btn(i, "spU") for i in range(25)],
+        content="You can click **2** times on the buttons below.",
+    )
+    # Hidden click on s8 unveils yellow (s11) and green (s15); reward lands first.
+    grid1 = _grid_snapshot(
+        [
+            _btn(
+                i,
+                "spY" if i == 11 else "spG" if i == 15 else "spU",
+                disabled=(i == 12),
+            )
+            for i in range(25)
+        ],
+        content="You can click **2** times on the buttons below.",
+    )
+    grid2 = _grid_snapshot(
+        [
+            _btn(
+                i,
+                "spY" if i == 11 else "spG" if i == 15 else "spU",
+                disabled=(i in (12, 11)),
+            )
+            for i in range(25)
+        ],
+        content="You can click **2** times on the buttons below.",
+    )
+    scripted = [
+        grid0,
+        _reward_snapshot("<:spU:1> **+1**"),
+        grid1,
+        _reward_snapshot("<:spU:1> **+1**\n<:spY:2> **+59**"),
+        grid2,
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    clicks: list[str] = []
+
+    async def track_click(message_id: int, custom_id: str) -> bool:
+        clicks.append(custom_id)
+        return True
+
+    actions.click_button = track_click  # type: ignore[method-assign]
+
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert clicks == ["cmd s12", "cmd s11"]
+    assert result["clicks"] == 2
 
 
 def test_oh_game_plays_until_clicks_exhausted():

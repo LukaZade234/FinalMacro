@@ -139,14 +139,12 @@ def test_macro_config_roundtrip():
 
     cfg = MacroConfig(
         roll_command="wa",
-        rolls_left_stop=2,
         character_claim=CharacterClaimRules(
             enabled=False,
             claim_on_wish_ping=True,
         ),
     )
     restored = MacroConfig.from_dict(cfg.to_dict())
-    assert restored.rolls_left_stop == 2
     assert restored.character_claim.claim_on_wish_ping is True
     assert restored.character_claim.enabled is False
     assert restored.auto_claim_wish is True
@@ -191,6 +189,34 @@ def test_is_roll_parse_result():
             kind=MessageKind.COMMAND_RESPONSE,
             summary="",
             fields={"parser_command": "roll", "character_name": "Rem"},
+        ),
+        roll_command="wa",
+    )
+    assert is_roll_parse_result(
+        ParseResult(
+            kind=MessageKind.ROLL_LIMIT,
+            summary="",
+            fields={"rolls_left": 0, "rolls_reset_minutes": 34},
+        ),
+        roll_command="wa",
+    )
+    assert not is_roll_parse_result(
+        ParseResult(
+            kind=MessageKind.COMMAND_RESPONSE,
+            summary="",
+            fields={"parser_command": "roll", "command": "wa"},
+        ),
+        roll_command="wa",
+    )
+    assert not is_roll_parse_result(
+        ParseResult(
+            kind=MessageKind.ROLL,
+            summary="",
+            fields={
+                "character_name": "Akame",
+                "perk_6": True,
+                "spawned_by": "Power",
+            },
         ),
         roll_command="wa",
     )

@@ -1,14 +1,20 @@
-"""Single write path for macro activity log lines (GUI + state)."""
+"""Single write path for macro activity log lines (GUI + state + session files)."""
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from macro.state import AccountState
 
-ActivitySeverity = Literal["info", "claim", "click", "skip", "error"]
+if TYPE_CHECKING:
+    from macro.session_log import SessionLogRecorder
+
+ActivitySeverity = Literal["info", "claim", "click", "skip", "error", "debug"]
+
+ACTIVITY_LOG_MAX_LINES = 400
 
 _SEVERITY_ORDER: tuple[ActivitySeverity, ...] = (
     "info",
@@ -16,6 +22,7 @@ _SEVERITY_ORDER: tuple[ActivitySeverity, ...] = (
     "click",
     "skip",
     "error",
+    "debug",
 )
 
 
@@ -23,9 +30,13 @@ _SEVERITY_ORDER: tuple[ActivitySeverity, ...] = (
 class ActivityLogEntry:
     text: str
     severity: ActivitySeverity = "info"
+    ts: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"text": self.text, "severity": self.severity}
+        out: dict[str, Any] = {"text": self.text, "severity": self.severity}
+        if self.ts:
+            out["ts"] = self.ts
+        return out
 
 
 def classify_activity_line(text: str) -> ActivitySeverity:
@@ -64,6 +75,20 @@ def classify_activity_line(text: str) -> ActivitySeverity:
     return "info"
 
 
+def _now_ts() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+
+
+def _display_ts(iso_ts: str) -> str:
+    if not iso_ts:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except ValueError:
+        return iso_ts
+    return parsed.astimezone().strftime("%H:%M:%S")
+
+
 class ActivityLog:
     """
     Append-only activity log backed by ``AccountState.activity_log``.
@@ -77,24 +102,45 @@ class ActivityLog:
         state: AccountState,
         *,
         on_update: Callable[[], None] | None = None,
-        max_lines: int = 200,
+        max_lines: int = ACTIVITY_LOG_MAX_LINES,
+        session: SessionLogRecorder | None = None,
     ) -> None:
         self._state = state
         self._on_update = on_update
         self._max_lines = max(1, max_lines)
+        self._session = session
 
-    def write(self, text: str, *, severity: ActivitySeverity | None = None) -> None:
+    def set_session(self, session: SessionLogRecorder | None) -> None:
+        self._session = session
+
+    def write(
+        self,
+        text: str,
+        *,
+        severity: ActivitySeverity | None = None,
+        session_only: bool = False,
+    ) -> None:
         if not text:
             return
+        ts = _now_ts()
         entry = ActivityLogEntry(
             text=text,
             severity=severity or classify_activity_line(text),
+            ts=ts,
         )
+        if self._session:
+            self._session.write(entry, ts=ts)
+        if session_only:
+            return
         self._state.activity_log.append(entry)
         if len(self._state.activity_log) > self._max_lines:
             self._state.activity_log = self._state.activity_log[-self._max_lines :]
         if self._on_update:
             self._on_update()
+
+    def debug(self, text: str) -> None:
+        """Verbose line saved to the session file but hidden from the Run tab."""
+        self.write(text, severity="debug", session_only=True)
 
     def clear(self) -> None:
         self._state.activity_log.clear()
@@ -103,7 +149,13 @@ class ActivityLog:
 
 
 def activity_log_text(entries: list[ActivityLogEntry]) -> str:
-    return "\n".join(entry.text for entry in entries)
+    lines: list[str] = []
+    for entry in entries:
+        if entry.ts:
+            lines.append(f"[{_display_ts(entry.ts)}] {entry.text}")
+        else:
+            lines.append(entry.text)
+    return "\n".join(lines)
 
 
 def normalize_activity_log(raw: list[Any]) -> list[ActivityLogEntry]:
@@ -117,7 +169,13 @@ def normalize_activity_log(raw: list[Any]) -> list[ActivityLogEntry]:
             sev = str(item.get("severity") or "info")
             if sev not in _SEVERITY_ORDER:
                 sev = classify_activity_line(text)
-            out.append(ActivityLogEntry(text=text, severity=sev))  # type: ignore[arg-type]
+            out.append(
+                ActivityLogEntry(
+                    text=text,
+                    severity=sev,  # type: ignore[arg-type]
+                    ts=str(item.get("ts") or ""),
+                )
+            )
         elif isinstance(item, str):
             out.append(ActivityLogEntry(text=item, severity=classify_activity_line(item)))
     return out

@@ -14,7 +14,6 @@ Item {
     }
 
     property var stateData: ({})
-    property var ruleTrace: []
     property var activeRules: ({})
     property var activityEntries: []
 
@@ -46,22 +45,6 @@ Item {
         } catch (e) {
             activityEntries = []
         }
-    }
-
-    function refreshRuleTrace() {
-        try {
-            ruleTrace = JSON.parse(App.ruleTraceJson)
-        } catch (e) {
-            ruleTrace = []
-        }
-    }
-
-    function decisionColor(decision) {
-        if (decision === "claim")
-            return Theme.success
-        if (decision === "click")
-            return Theme.accentPrimary
-        return Theme.fgMuted
     }
 
     function macroIsRunning() {
@@ -111,7 +94,6 @@ Item {
         }
         function onMacroLogChanged() {
             runRoot.refreshActivityLog()
-            runRoot.refreshRuleTrace()
         }
     }
 
@@ -197,6 +179,8 @@ Item {
                         onStartClicked: App.startMacro()
                         onStopClicked: App.stopMacro()
                         onPlayOhClicked: App.playOhSphere()
+                        onPlayOcClicked: App.playOcSphere()
+                        onPlayOqClicked: App.playOqSphere()
                         onPlayUsClicked: App.startUsMode()
                     }
                 }
@@ -271,74 +255,12 @@ Item {
                     fillContentVertically: true
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.preferredHeight: 340
-                    Layout.minimumHeight: 260
+                    Layout.minimumHeight: 420
 
                     ActivityLogPanel {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         entries: runRoot.activityEntries
-                    }
-                }
-
-                PanelCard {
-                    title: "Rule trace"
-                    Layout.fillWidth: true
-                    Layout.maximumHeight: 130
-                    Layout.preferredHeight: 110
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        Label {
-                            visible: ruleTrace.length === 0
-                            text: "No decisions yet. The macro will log each claim/click reason here."
-                            color: Theme.fgMuted
-                            font.pixelSize: 11
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Repeater {
-                            model: ruleTrace.slice(-5)
-                            delegate: RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Rectangle {
-                                    width: 6; height: 18; radius: 3
-                                    color: runRoot.decisionColor(modelData.decision)
-                                }
-                                Label {
-                                    text: "roll " + modelData.roll_index
-                                    color: Theme.fgMuted
-                                    font.pixelSize: 10
-                                    font.family: "Consolas, monospace"
-                                    Layout.preferredWidth: 50
-                                }
-                                Label {
-                                    text: modelData.block
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 10
-                                    Layout.preferredWidth: 70
-                                }
-                                Label {
-                                    text: modelData.decision
-                                    color: runRoot.decisionColor(modelData.decision)
-                                    font.pixelSize: 10
-                                    font.weight: Font.DemiBold
-                                    Layout.preferredWidth: 50
-                                }
-                                Label {
-                                    text: modelData.character + " · " + modelData.reason
-                                    color: Theme.fgPrimary
-                                    font.pixelSize: 10
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -347,7 +269,6 @@ Item {
 
     Component.onCompleted: {
         refreshState()
-        refreshRuleTrace()
         refreshActivityLog()
         refreshActiveRules()
         controlBar.connected = App.connected

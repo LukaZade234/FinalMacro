@@ -22,6 +22,7 @@ class MessageKind(str, Enum):
     MARRIAGE = "marriage"
     CLAIM = "claim"
     CLAIM_INTERVAL = "claim_interval"
+    ROLL_LIMIT = "roll_limit"
     CHARACTER_EMBED = "character_embed"
     CLAIM_BUTTONS = "claim_buttons"
     KAKERA_BUTTONS = "kakera_buttons"

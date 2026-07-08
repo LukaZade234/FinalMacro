@@ -10,6 +10,7 @@ from mudae.parsers.claim import is_custom_claim, is_marriage_claim
 from mudae.parsers.claim_interval import is_claim_interval_message
 from mudae.parsers.dk import is_dk_claim
 from mudae.parsers.reaction_power import is_kakera_react_denied
+from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
 from mudae.parsers.embed import (
     is_character_embed,
@@ -19,8 +20,25 @@ from mudae.parsers.embed import (
 from mudae.types import MessageKind, MudaeMessageSnapshot
 
 
+def snapshot_text(snapshot: MudaeMessageSnapshot) -> str:
+    """All visible Mudae text on a message (content + embed fields)."""
+    parts = [snapshot.content or ""]
+    for embed in snapshot.embeds or []:
+        if not isinstance(embed, dict):
+            continue
+        for key in ("description", "title", "footer", "author"):
+            value = embed.get(key) or ""
+            if value:
+                parts.append(str(value))
+    return "\n".join(parts)
+
+
 def is_kakera_claim(content: str) -> bool:
     return bool(content and "+" in content and "($k)" in content.lower())
+
+
+def snapshot_is_kakera_claim(snapshot: MudaeMessageSnapshot) -> bool:
+    return is_kakera_claim(snapshot_text(snapshot))
 
 
 def has_kakera_buttons(snapshot: MudaeMessageSnapshot) -> bool:
@@ -54,7 +72,7 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.KAKERA_REACT_DENIED
     if is_dk_claim(content):
         return MessageKind.DK_CLAIM
-    if is_kakera_claim(content):
+    if snapshot_is_kakera_claim(snapshot):
         return MessageKind.KAKERA_CLAIM
     if is_sphere_click_message(content):
         return MessageKind.SPHERE_CLICK
@@ -64,6 +82,8 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.CLAIM
     if is_claim_interval_message(content):
         return MessageKind.CLAIM_INTERVAL
+    if is_roll_limit_message(content):
+        return MessageKind.ROLL_LIMIT
 
     if snapshot.embeds and is_character_embed(snapshot.embeds[0]):
         if has_kakera_buttons(snapshot):

@@ -43,6 +43,18 @@ def test_timer_writes_after_delay(tmp_path):
     assert json.loads(path.read_text()) == [{"amount": 5}]
 
 
+def test_cancel_pending_drops_scheduled_write(tmp_path):
+    path = tmp_path / "log.json"
+    events = [{"amount": 1}]
+    writer = DebouncedJsonLog(lambda: path, lambda: events, delay_sec=60.0)
+
+    writer.mark_dirty()
+    writer.cancel_pending()
+    writer.flush()
+
+    assert not path.exists()
+
+
 def test_kakera_log_flush_writes_pending_events(tmp_path, monkeypatch):
     import mudae.kakera_log as kakera_log
 

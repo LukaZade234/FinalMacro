@@ -88,6 +88,12 @@ def _is_new_soulmate(description: str) -> bool:
     )
 
 
+def _is_profile_embed(description: str) -> bool:
+    """``$pr`` profile embed — inventory totals, not a roll."""
+    lower = (description or "").lower()
+    return "collection size:" in lower or "mudapins:" in lower
+
+
 def _parse_perk_6_spawn(description: str) -> tuple[bool, str | None]:
     """Perk 6 extra spawn — ``[SPAWNED BY Name]`` in description (often after ``<:spG:...>``)."""
     match = re.search(r"\[SPAWNED BY\s+([^\]]+)\]", description, re.IGNORECASE)
@@ -276,6 +282,9 @@ def parse_roll(
     character_name = embed.get("author") or None
     owner = get_character_owner(footer)
     claimed = owner is not None
+
+    if _is_profile_embed(description):
+        fields["is_profile"] = True
 
     fields["character_name"] = character_name
     fields["series"] = _parse_series(description)

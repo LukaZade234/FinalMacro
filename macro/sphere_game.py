@@ -78,6 +78,10 @@ def is_oh_grid_message(snapshot: Any) -> bool:
     spheres = _sphere_buttons(getattr(snapshot, "buttons", []) or [])
     if len(spheres) < _MIN_GRID_BUTTONS:
         return False
+    if "red sphere" in content and "find" in content:
+        return False
+    if "purple" in content and "find" in content:
+        return False
     return "buttons below" in content or "spheres buttons" in content
 
 
@@ -160,6 +164,164 @@ def _disable_button(buttons: list[dict[str, Any]], custom_id: str) -> list[dict[
     return out
 
 
+async def wait_for_minigame_click_ack(
+    actions: Any,
+    *,
+    monitor: Any | None,
+    grid_id: int,
+    before_sig: tuple,
+    before_reward: str,
+    is_grid_message: Callable[[Any], bool],
+    get_reward_content: Callable[[], str],
+    set_reward_content: Callable[[str], None],
+    edit_timeout: float = 12.0,
+    bonus_timeout: float = 3.0,
+    retry_timeout: float = 6.0,
+    max_retries: int = 2,
+    log: Callable[[str], None] | None = None,
+    on_retry_click: Callable[[], Any] | None = None,
+) -> tuple[Any | None, str]:
+    """Wait for Mudae to acknowledge a minigame click, with retries and fetch fallback."""
+
+    async def _wait_for_grid_edit() -> Any | None:
+        result = await actions.wait_for(
+            _make_wait_predicate(
+                lambda snapshot: (
+                    snapshot.message_id == grid_id
+                    and is_grid_message(snapshot)
+                    and grid_signature(snapshot.buttons) != before_sig
+                )
+            ),
+            timeout=bonus_timeout,
+        )
+        return result[0] if result else None
+
+    def _make_wait_predicate(
+        matches: Callable[[Any], bool],
+    ) -> Callable[[Any, Any], bool]:
+        def predicate(snapshot: Any, _parsed: Any) -> bool:
+            if is_oh_reward_message(snapshot):
+                content = getattr(snapshot, "content", "") or ""
+                if reward_has_entries(content):
+                    set_reward_content(content)
+            return matches(snapshot)
+
+        return predicate
+
+    async def _try_fetch_grid() -> Any | None:
+        if monitor is None or not hasattr(monitor, "fetch_message_snapshot"):
+            return None
+        try:
+            snapshot = await monitor.fetch_message_snapshot(grid_id)
+        except Exception:
+            return None
+        if (
+            snapshot is not None
+            and is_grid_message(snapshot)
+            and grid_signature(snapshot.buttons) != before_sig
+        ):
+            return snapshot
+        return None
+
+    async def _resolve_once(timeout: float) -> tuple[Any | None, str, bool]:
+        latest_grid: Any | None = None
+        latest_reward = before_reward
+
+        def matches(snapshot: Any) -> bool:
+            nonlocal latest_grid, latest_reward
+            if is_oh_reward_message(snapshot):
+                content = getattr(snapshot, "content", "") or ""
+                if reward_has_entries(content) and content != before_reward:
+                    latest_reward = content
+                    set_reward_content(content)
+                    return True
+            if (
+                snapshot.message_id == grid_id
+                and is_grid_message(snapshot)
+                and grid_signature(snapshot.buttons) != before_sig
+            ):
+                latest_grid = snapshot
+                latest_reward = get_reward_content()
+                return True
+            return False
+
+        result = await actions.wait_for(
+            _make_wait_predicate(matches),
+            timeout=timeout,
+        )
+        if not result:
+            current_reward = get_reward_content()
+            if current_reward != before_reward:
+                latest_reward = current_reward
+            return None, latest_reward, False
+
+        if latest_grid is not None and latest_reward == before_reward:
+            bonus = await actions.wait_for(
+                _make_wait_predicate(
+                    lambda snapshot: (
+                        is_oh_reward_message(snapshot)
+                        and reward_has_entries(getattr(snapshot, "content", "") or "")
+                        and (getattr(snapshot, "content", "") or "") != before_reward
+                    )
+                ),
+                timeout=bonus_timeout,
+            )
+            if bonus:
+                latest_reward = get_reward_content()
+
+        if latest_grid is None and latest_reward != before_reward:
+            fetched = await _wait_for_grid_edit()
+            if fetched is not None:
+                latest_grid = fetched
+
+        if latest_grid is not None:
+            return latest_grid, latest_reward, True
+        if latest_reward != before_reward:
+            return None, latest_reward, True
+        return None, latest_reward, False
+
+    for attempt in range(max_retries + 1):
+        timeout = edit_timeout if attempt == 0 else retry_timeout
+        grid, reward, ok = await _resolve_once(timeout)
+        if ok:
+            return grid, reward
+
+        fetched = await _try_fetch_grid()
+        if fetched is not None:
+            if log:
+                log("click ack recovered via fetch — continuing")
+            return fetched, get_reward_content()
+
+        current_reward = get_reward_content()
+        if current_reward != before_reward:
+            if log:
+                log("reward received — waiting for grid edit")
+            grid = await _wait_for_grid_edit()
+            if grid is not None:
+                return grid, current_reward
+            if attempt < max_retries:
+                if log:
+                    log(
+                        f"grid edit slow — retry "
+                        f"{attempt + 1}/{max_retries}"
+                    )
+                await asyncio.sleep(0.5)
+                continue
+            if log:
+                log("grid edit missing — continuing from reward line")
+            return None, current_reward
+
+        if attempt < max_retries:
+            if log:
+                log(f"click ack slow — retry {attempt + 1}/{max_retries}")
+            if on_retry_click is not None:
+                await on_retry_click()
+            await asyncio.sleep(0.5)
+            continue
+
+    return None, before_reward
+
+
 def is_free_oh_click(button: dict[str, Any]) -> bool:
     return _emoji(button) in SPHERE_FREE_EMOJIS
 
@@ -221,7 +383,7 @@ class OhSphereGame:
         log: Callable[[str], None],
         rng: random.Random | None = None,
         grid_timeout: float = 12.0,
-        edit_timeout: float = 8.0,
+        edit_timeout: float = 12.0,
         click_delay: float = 1.2,
     ) -> None:
         self._actions = actions
@@ -294,10 +456,14 @@ class OhSphereGame:
                     grid_id,
                     before_sig,
                     before_reward,
+                    custom_id=custom_id,
                 )
                 if updated is None and reward_content == before_reward:
                     self._log("$oh: click ack timeout — stopping")
                     break
+
+                if updated is None and reward_content != before_reward:
+                    self._log("$oh: continuing from reward line (grid edit pending)")
 
                 self._reward_content = reward_content
                 for outcome in new_reward_line_types(before_reward, reward_content):
@@ -344,53 +510,31 @@ class OhSphereGame:
         grid_id: int,
         before_sig: tuple,
         before_reward: str,
+        *,
+        custom_id: str,
     ) -> tuple[Any | None, str]:
         """Wait for Mudae to acknowledge a click via grid edit and/or reward line."""
-        latest_grid: Any | None = None
-        latest_reward = before_reward
 
-        def matches(snapshot: Any) -> bool:
-            nonlocal latest_grid, latest_reward
-            if is_oh_reward_message(snapshot):
-                content = getattr(snapshot, "content", "") or ""
-                if reward_has_entries(content) and content != before_reward:
-                    latest_reward = content
-                    self._reward_content = content
-                    return True
-            if (
-                snapshot.message_id == grid_id
-                and is_oh_grid_message(snapshot)
-                and grid_signature(snapshot.buttons) != before_sig
-            ):
-                latest_grid = snapshot
-                latest_reward = self._reward_content
-                return True
-            return False
+        async def _retry_click() -> None:
+            ok = await self._actions.click_button(grid_id, custom_id)
+            if ok:
+                self._log("$oh: resending click")
+            else:
+                self._log("$oh: retry click send failed")
 
-        result = await self._actions.wait_for(
-            self._make_predicate(matches),
-            timeout=self._edit_timeout,
+        return await wait_for_minigame_click_ack(
+            self._actions,
+            monitor=self._monitor,
+            grid_id=grid_id,
+            before_sig=before_sig,
+            before_reward=before_reward,
+            is_grid_message=is_oh_grid_message,
+            get_reward_content=lambda: self._reward_content,
+            set_reward_content=lambda content: setattr(self, "_reward_content", content),
+            edit_timeout=self._edit_timeout,
+            log=self._log,
+            on_retry_click=_retry_click,
         )
-        if not result:
-            return None, before_reward
-
-        if latest_grid is not None and latest_reward == before_reward:
-            bonus = await self._actions.wait_for(
-                self._make_predicate(
-                    lambda snapshot: (
-                        is_oh_reward_message(snapshot)
-                        and reward_has_entries(getattr(snapshot, "content", "") or "")
-                        and (getattr(snapshot, "content", "") or "") != before_reward
-                    )
-                ),
-                timeout=2.0,
-            )
-            if bonus:
-                latest_reward = self._reward_content
-
-        if latest_grid is not None:
-            return latest_grid, latest_reward
-        return None, latest_reward
 
     def _make_predicate(
         self, matches: Callable[[Any], bool]

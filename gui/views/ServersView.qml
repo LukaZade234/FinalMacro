@@ -252,30 +252,31 @@ Item {
                 Layout.fillHeight: true
                 spacing: 8
 
-                RowLayout {
+                ThemedTextField {
+                    id: newServerField
                     Layout.fillWidth: true
-                    spacing: 6
-                    ThemedTextField {
-                        id: newServerField
-                        Layout.fillWidth: true
-                        placeholderText: "Server name"
-                    }
-                    ThemedButton {
-                        text: "Add"
-                        accent: true
-                        enabled: newServerField.text.trim().length > 0
-                        onClicked: {
-                            serversRoot.pendingSelectLastServer = true
-                            App.addServer(newServerField.text.trim())
-                            newServerField.text = ""
-                        }
+                    Layout.preferredHeight: 32
+                    placeholderText: "Server name"
+                }
+
+                ThemedButton {
+                    Layout.fillWidth: true
+                    text: "Add server"
+                    accent: true
+                    enabled: newServerField.text.trim().length > 0
+                    onClicked: {
+                        serversRoot.pendingSelectLastServer = true
+                        App.addServer(newServerField.text.trim())
+                        newServerField.text = ""
                     }
                 }
 
                 ListView {
                     id: serverList
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 380
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 120
+                    Layout.preferredHeight: 320
                     clip: true
                     model: serversRoot.serverListCount
                     onCurrentIndexChanged: serversRoot.onServerSelectionChanged()
@@ -328,31 +329,35 @@ Item {
                         ThemedTextField {
                             id: chNameField
                             Layout.preferredWidth: 120
+                            Layout.preferredHeight: 32
                             placeholderText: "Label"
                         }
                         ThemedTextField {
                             id: chIdField
                             Layout.fillWidth: true
+                            Layout.preferredHeight: 32
                             placeholderText: "Discord channel ID"
                         }
-                        ThemedButton {
-                            text: "Add channel"
-                            accent: true
-                            enabled: currentServer() && chNameField.text.trim() && chIdField.text.trim()
-                            onClicked: {
-                                var server = currentServer()
-                                if (!server)
-                                    return
-                                var newChannelId = App.addChannel(
-                                    server.id,
-                                    chNameField.text.trim(),
-                                    chIdField.text.trim()
-                                )
-                                chNameField.text = ""
-                                chIdField.text = ""
-                                if (newChannelId)
-                                    serversRoot.pendingChannelSelectId = newChannelId
-                            }
+                    }
+
+                    ThemedButton {
+                        Layout.fillWidth: true
+                        text: "Add channel"
+                        accent: true
+                        enabled: currentServer() && chNameField.text.trim() && chIdField.text.trim()
+                        onClicked: {
+                            var server = currentServer()
+                            if (!server)
+                                return
+                            var newChannelId = App.addChannel(
+                                server.id,
+                                chNameField.text.trim(),
+                                chIdField.text.trim()
+                            )
+                            chNameField.text = ""
+                            chIdField.text = ""
+                            if (newChannelId)
+                                serversRoot.pendingChannelSelectId = newChannelId
                         }
                     }
 
@@ -360,6 +365,7 @@ Item {
                         id: channelList
                         Layout.fillWidth: true
                         Layout.preferredHeight: 100
+                        Layout.minimumHeight: 60
                         clip: true
                         model: serversRoot.channelListCount
                         onCurrentIndexChanged: serversRoot.onChannelSelectionChanged()

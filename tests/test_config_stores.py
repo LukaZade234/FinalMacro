@@ -13,12 +13,11 @@ def test_legacy_token_and_macro_migration() -> None:
     presets = PresetStore()
     accounts.load_from_settings({"token": "tok123", "accounts": []})
     presets.load_from_settings({
-        "macro": {"roll_command": "wg", "rolls_left_stop": 3},
+        "macro": {"roll_command": "wg"},
         "presets": {},
     })
     assert accounts.active_token() == "tok123"
     assert presets.presets["default"].roll_command == "wg"
-    assert presets.presets["default"].rolls_left_stop == 3
 
 
 def test_resolve_run_target() -> None:
@@ -28,7 +27,7 @@ def test_resolve_run_target() -> None:
     targets = TargetStore()
 
     acc_id = accounts.add_account("main", token="token", account_type="Main")
-    presets.presets["aggressive"] = MacroConfig(roll_command="wa", rolls_left_stop=1)
+    presets.presets["aggressive"] = MacroConfig(roll_command="wa")
     presets.set_active("aggressive")
     srv_id = profiles.add_server("Guild")
     ch_id = profiles.add_channel(srv_id, "mudae", "999")

@@ -14,6 +14,8 @@ ColumnLayout {
     signal startClicked()
     signal stopClicked()
     signal playOhClicked()
+    signal playOcClicked()
+    signal playOqClicked()
     signal playUsClicked()
 
     spacing: 10
@@ -88,11 +90,40 @@ ColumnLayout {
         ActionButton {
             text: "Play $oh"
             loading: App.runActionPending === "oh"
-            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "oh"
+            enabled: bar.connected && !bar.macroRunning
+                     && App.runActionPending !== "oh"
+                     && App.runActionPending !== "oc"
+                     && App.runActionPending !== "oq"
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
             onClicked: bar.playOhClicked()
+        }
+
+        ActionButton {
+            text: "Play $oc"
+            loading: App.runActionPending === "oc"
+            enabled: bar.connected && !bar.macroRunning
+                     && App.runActionPending !== "oh"
+                     && App.runActionPending !== "oc"
+                     && App.runActionPending !== "oq"
+            Layout.fillWidth: true
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
+            onClicked: bar.playOcClicked()
+        }
+
+        ActionButton {
+            text: "Play $oq"
+            loading: App.runActionPending === "oq"
+            enabled: bar.connected && !bar.macroRunning
+                     && App.runActionPending !== "oh"
+                     && App.runActionPending !== "oc"
+                     && App.runActionPending !== "oq"
+            Layout.fillWidth: true
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
+            onClicked: bar.playOqClicked()
         }
 
         ActionButton {

@@ -1,4 +1,6 @@
 data/settings.json
+data/session_logs/*.json
+data/session_logs/*.log
 .venv/
 __pycache__/
 *.pyc

@@ -14,6 +14,7 @@ Item {
     property var sphereOptions: []
     property bool open: false
     property int activeStep: 0
+    property bool showAdvancedKakera: false
 
     // Working draft (initialised from the current preset on open).
     property var draft: ({
@@ -21,8 +22,10 @@ Item {
                            min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
                            require_perk_8: false, min_spheres: null, low_power: null,
-                           perk_8_budget_mode: false, daily_click_budget: 40,
-                           perk_8_budget_bypass_types: ["kakeraP"], auto_use_dk: false },
+                           perk_8_budget_mode: false,
+                           perk_8_budget_bypass_types: ["kakeraP"],
+                           perk_8_types_allowed: [], auto_use_dk: false },
+        us_roll_kakera: { override: false, skip_kakera: false, types_allowed: [] },
         sphere_reaction: { enabled: false, types_allowed: [] }
     })
 
@@ -38,10 +41,44 @@ Item {
             draft = {
                 character_claim: Object.assign({}, draft.character_claim, d.character_claim || {}),
                 kakera_reaction: Object.assign({}, draft.kakera_reaction, d.kakera_reaction || {}),
+                us_roll_kakera: Object.assign({}, draft.us_roll_kakera, d.us_roll_kakera || {}),
                 sphere_reaction: Object.assign({}, draft.sphere_reaction, d.sphere_reaction || {})
             }
+            // Legacy ``mode`` field from older presets.
+            var us = draft.us_roll_kakera
+            if (us.mode !== undefined && us.override === undefined) {
+                if (us.mode === "none") {
+                    us.override = true
+                    us.skip_kakera = true
+                } else if (us.mode === "selected") {
+                    us.override = true
+                    us.skip_kakera = false
+                } else {
+                    us.override = false
+                    us.skip_kakera = false
+                }
+                delete us.mode
+                draft.us_roll_kakera = us
+            }
+            showAdvancedKakera = kakeraUsesAdvancedOptions()
         } catch (e) {
         }
+    }
+
+    function kakeraUsesAdvancedOptions() {
+        var k = draft.kakera_reaction || {}
+        var u = draft.us_roll_kakera || {}
+        if (k.require_perk_8)
+            return true
+        if (k.min_spheres !== null && k.min_spheres !== undefined)
+            return true
+        if (k.perk_8_budget_mode)
+            return true
+        if (k.low_power !== null && k.low_power !== undefined)
+            return true
+        if (u.override)
+            return true
+        return false
     }
 
     function setDraftField(block, key, value) {
@@ -85,6 +122,7 @@ Item {
         var patch = {
             character_claim: draft.character_claim,
             kakera_reaction: draft.kakera_reaction,
+            us_roll_kakera: draft.us_roll_kakera,
             sphere_reaction: draft.sphere_reaction
         }
         App.updatePresetRules(presetId, JSON.stringify(patch))
@@ -133,7 +171,7 @@ Item {
                     elide: Text.ElideRight
                 }
                 Label {
-                    text: "Step " + (activeStep + 1) + " / 6"
+                    text: "Step " + (activeStep + 1) + " / 4"
                     color: Theme.fgMuted
                     font.pixelSize: 11
                 }
@@ -241,145 +279,84 @@ Item {
                 }
 
                 // ---- Step 3: Kakera reaction ----
-                ColumnLayout {
-                    spacing: 8
-                    Label { text: "3 · Kakera reaction"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    Label {
-                        text: "Pick which kakera colors the macro should click. Leave all unselected to allow every color."
-                        color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Enable kakera reactions"
-                        checked: draft.kakera_reaction.enabled
-                        onToggled: setDraftField("kakera_reaction", "enabled", checked)
-                    }
-                    ColorChipPicker {
-                        Layout.fillWidth: true
-                        title: "Allowed kakera colors"
-                        options: kakeraOptions
-                        selected: draft.kakera_reaction.types_allowed || []
-                        onSelectionChanged: function(ids) {
-                            setDraftField("kakera_reaction", "types_allowed", ids)
+                ScrollView {
+                    id: kakeraStepScroll
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    contentWidth: availableWidth
+
+                    ColumnLayout {
+                        width: kakeraStepScroll.availableWidth
+                        spacing: 8
+                        Label { text: "3 · Kakera reaction"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
+                        Label {
+                            text: "Pick which kakera colors the macro should click. Leave all unselected to allow every color."
+                            color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                         }
-                    }
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: 12
                         ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Enable kakera reactions"
+                            checked: draft.kakera_reaction.enabled
+                            onToggled: setDraftField("kakera_reaction", "enabled", checked)
+                        }
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            title: "Allowed kakera colors"
+                            options: kakeraOptions
+                            selected: draft.kakera_reaction.types_allowed || []
+                            onSelectionChanged: function(ids) {
+                                setDraftField("kakera_reaction", "types_allowed", ids)
+                            }
+                        }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Use $dk when reaction power runs out (refills power to max)"
+                            checked: !!draft.kakera_reaction.auto_use_dk
+                            onToggled: setDraftField("kakera_reaction", "auto_use_dk", checked)
+                        }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
                             text: "Require chaos key"
                             checked: !!draft.kakera_reaction.require_chaos_key
                             onToggled: setDraftField("kakera_reaction", "require_chaos_key", checked)
                         }
-                        ThemedCheckBox {
-                            text: "Require perk 8"
-                            checked: !!draft.kakera_reaction.require_perk_8
-                            onToggled: setDraftField("kakera_reaction", "require_perk_8", checked)
-                        }
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Use $dk when reaction power runs out (refills power to max)"
-                        checked: !!draft.kakera_reaction.auto_use_dk
-                        onToggled: setDraftField("kakera_reaction", "auto_use_dk", checked)
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-                        Label { text: "Min spheres on roll"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 160 }
-                        ThemedTextField {
+                        RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 32
-                            placeholderText: "off"
-                            text: draft.kakera_reaction.min_spheres === null ? "" : draft.kakera_reaction.min_spheres.toString()
-                            onEditingFinished: setDraftField("kakera_reaction", "min_spheres", parseIntOrNull(text))
+                            spacing: 8
+                            Label {
+                                text: "Advanced kakera options"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.fillWidth: true
+                            }
+                            ThemedSwitch {
+                                checked: wizard.showAdvancedKakera
+                                onToggled: wizard.showAdvancedKakera = checked
+                            }
+                        }
+                        KakeraAdvancedPanel {
+                            Layout.fillWidth: true
+                            visible: wizard.showAdvancedKakera
+                            rules: wizard.draft
+                            kakeraOptions: wizard.kakeraOptions
+                            onPatch: function(block, key, value) {
+                                setDraftField(block, key, value)
+                            }
+                            onPatchLowPower: function(key, value) {
+                                setLowPowerField(key, value)
+                            }
+                            onSetLowPowerEnabled: function(on) {
+                                setLowPowerEnabled(on)
+                            }
                         }
                     }
                 }
 
-                // ---- Step 4: Perk-8 budget ----
+                // ---- Step 4: Sphere reaction ----
                 ColumnLayout {
                     spacing: 8
-                    Label { text: "4 · Perk-8 budget"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    Label {
-                        text: "Use a daily click cap so common kakera characters don't burn power; once exhausted only perk-8 (half-power) rolls remain clickable."
-                        color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Skip non-perk-8 rolls once the daily budget is hit"
-                        checked: !!draft.kakera_reaction.perk_8_budget_mode
-                        onToggled: setDraftField("kakera_reaction", "perk_8_budget_mode", checked)
-                    }
-                    ColorChipPicker {
-                        Layout.fillWidth: true
-                        visible: !!draft.kakera_reaction.perk_8_budget_mode
-                        title: "Always click during budget saving (ignore perk-8 limit)"
-                        options: kakeraOptions
-                        selected: draft.kakera_reaction.perk_8_budget_bypass_types || ["kakeraP"]
-                        onSelectionChanged: function(ids) {
-                            setDraftField("kakera_reaction", "perk_8_budget_bypass_types", ids)
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 12
-                        Label { text: "Daily click budget"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 160 }
-                        ThemedSpinBox {
-                            Layout.fillWidth: true
-                            from: 0
-                            to: 500
-                            value: draft.kakera_reaction.daily_click_budget || 40
-                            onValueModified: setDraftField("kakera_reaction", "daily_click_budget", value)
-                        }
-                    }
-                }
-
-                // ---- Step 5: Low power ----
-                ColumnLayout {
-                    spacing: 8
-                    Label { text: "5 · Low-power override"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    Label {
-                        text: "Lock the kakera filter to a smaller set once your power drops below a threshold."
-                        color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Enable low-power override"
-                        checked: draft.kakera_reaction.low_power !== null && draft.kakera_reaction.low_power !== undefined
-                        onToggled: setLowPowerEnabled(checked)
-                    }
-                    RowLayout {
-                        visible: draft.kakera_reaction.low_power
-                        Layout.fillWidth: true
-                        spacing: 12
-                        Label { text: "Below power %"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 160 }
-                        ThemedSpinBox {
-                            Layout.fillWidth: true
-                            from: 0
-                            to: 100
-                            value: (draft.kakera_reaction.low_power && draft.kakera_reaction.low_power.below_percent) || 30
-                            onValueModified: setLowPowerField("below_percent", value)
-                        }
-                    }
-                    ColorChipPicker {
-                        Layout.fillWidth: true
-                        visible: draft.kakera_reaction.low_power
-                        title: "Allowed when below threshold"
-                        options: kakeraOptions
-                        selected: draft.kakera_reaction.low_power
-                            ? (draft.kakera_reaction.low_power.types_allowed || [])
-                            : []
-                        onSelectionChanged: function(ids) {
-                            setLowPowerField("types_allowed", ids)
-                        }
-                    }
-                }
-
-                // ---- Step 6: Sphere reaction ----
-                ColumnLayout {
-                    spacing: 8
-                    Label { text: "6 · Sphere reaction"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Label { text: "4 · Sphere reaction"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Label {
                         text: "Perk 9 lets you grab spheres on roll. Pick which colors to click — leaving all unselected accepts any color."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
@@ -417,15 +394,15 @@ Item {
 
                 ThemedButton {
                     text: "Skip"
-                    visible: activeStep < 5
-                    onClicked: activeStep = Math.min(5, activeStep + 1)
+                    visible: activeStep < 3
+                    onClicked: activeStep = Math.min(3, activeStep + 1)
                 }
 
                 ThemedButton {
-                    text: activeStep < 5 ? "Next" : "Save preset"
+                    text: activeStep < 3 ? "Next" : "Save preset"
                     accent: true
                     onClicked: {
-                        if (activeStep < 5) {
+                        if (activeStep < 3) {
                             activeStep += 1
                         } else {
                             saveAndClose()

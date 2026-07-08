@@ -15,7 +15,24 @@ from macro.kakera_reactor import (
     KakeraReactor,
 )
 from macro.state import AccountState
-from mudae.types import MessageKind, ParseResult
+from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
+
+
+def _snapshot() -> MudaeMessageSnapshot:
+    return MudaeMessageSnapshot(
+        message_id=1,
+        channel_id=1,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=1,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[],
+        buttons=[],
+        created_at="12:00:00",
+    )
 
 
 class _FakeActions:
@@ -37,7 +54,20 @@ class _FakeActions:
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         return True
 
+    async def wait_for(self, predicate, *, timeout: float = 8.0):
+        del timeout
+        outcome = ParseResult(
+            kind=MessageKind.KAKERA_REACT_DENIED,
+            summary="denied",
+            fields={"kakera_cooldown_minutes": 5},
+        )
+        item = (_snapshot(), outcome)
+        if predicate(*item):
+            return item
+        return None
+
     async def wait_for_kakera_outcome(self, *, timeout: float = 8.0):
+        del timeout
         return ParseResult(
             kind=MessageKind.KAKERA_REACT_DENIED,
             summary="denied",
@@ -138,28 +168,5 @@ def test_dk_retry_uses_longer_pauses():
         assert _DK_RETRY_PAUSE_BEFORE_SEC in sleeps
         assert _DK_RETRY_PAUSE_AFTER_SEC in sleeps
         assert actions.sent == [("dk", "$"), ("dk", "$")]
-
-    asyncio.run(_case())
-
-
-def test_dk_writes_rule_trace():
-    async def _case() -> None:
-        state = AccountState(dk_stock=1, power_percent=100.0, power_max_percent=155.0)
-        config = MacroConfig(
-            kakera_reaction=KakeraReactionRules(
-                enabled=True,
-                types_allowed=["kakeraR"],
-                auto_use_dk=True,
-            ),
-        )
-        actions = _FakeActions()
-        reactor = KakeraReactor(actions, config, state, log=lambda _m: None)
-        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
-            await reactor.react(message_id=5, fields=_fields(), roll_index=7)
-
-        dk_traces = [t for t in state.rule_trace if t.block == "dk"]
-        assert dk_traces
-        assert any(t.decision == "wait" for t in dk_traces)
-        assert any(t.decision == "use" for t in dk_traces)
 
     asyncio.run(_case())

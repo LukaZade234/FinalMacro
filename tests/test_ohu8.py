@@ -114,6 +114,19 @@ def test_should_query_ohu8_after_refill():
     assert should_query_ohu8(record, now=now) is True
 
 
+def test_refresh_exhausted_clears_on_new_utc_day_before_refill_at():
+    """Exhausted yesterday but refill_at still in future — daily reset already happened."""
+    now = dt.datetime(2026, 7, 7, 0, 14, tzinfo=dt.timezone.utc)
+    record = Perk8DailyRecord(
+        clicks_exhausted=True,
+        refill_at="2026-07-07T22:10:31+00:00",
+        updated_at="2026-07-06T22:10:31+00:00",
+    )
+    refresh_exhausted_if_refill_passed(record, now=now)
+    assert record.clicks_exhausted is False
+    assert should_query_ohu8(record, now=now) is True
+
+
 def test_should_query_ohu8_skips_when_exhausted_without_refill_at():
     record = Perk8DailyRecord(
         clicks_exhausted=True,
@@ -185,7 +198,7 @@ def test_update_record_from_ohu8_done_without_refill_sets_fallback():
     )
     assert mode is Perk8PriorityMode.DONE
     assert record.clicks_exhausted is True
-    assert record.refill_at == "2026-06-24T12:00:00+00:00"
+    assert record.refill_at == "2026-06-24T00:00:00+00:00"
 
 
 def test_update_record_from_ohu8_marks_done_with_refill():
@@ -221,7 +234,7 @@ def test_mark_perk8_exhausted_sets_fallback_without_refill_minutes():
     now = dt.datetime(2026, 6, 23, 12, 0, tzinfo=dt.timezone.utc)
     record = mark_perk8_exhausted(Perk8DailyRecord(last_click_max=40), now=now)
     assert record.clicks_exhausted is True
-    assert record.refill_at == "2026-06-24T12:00:00+00:00"
+    assert record.refill_at == "2026-06-24T00:00:00+00:00"
 
 
 def test_parse_refill_minutes_alternate_formats():
@@ -274,7 +287,7 @@ def _kakera_buttons(*emojis):
 
 def test_kakera_active_skips_non_perk_8_while_budget_remains():
     rules = KakeraReactionRules(
-        enabled=True, perk_8_budget_mode=True, daily_click_budget=40
+        enabled=True, perk_8_budget_mode=True
     )
     state = AccountState(perk8_priority_mode="active", perk8_click_max=40)
     state.kakera_clicks_today = 5
@@ -289,7 +302,6 @@ def test_kakera_active_clicks_purple_while_budget_remains():
         enabled=True,
         types_allowed=["kakeraP", "kakeraR"],
         perk_8_budget_mode=True,
-        daily_click_budget=40,
     )
     state = AccountState(perk8_priority_mode="active", perk8_click_max=40)
     state.kakera_clicks_today = 5
@@ -305,7 +317,6 @@ def test_kakera_active_custom_budget_bypass_types():
         enabled=True,
         types_allowed=["kakeraP", "kakeraT", "kakeraR"],
         perk_8_budget_mode=True,
-        daily_click_budget=40,
         perk_8_budget_bypass_types=["kakeraT"],
     )
     state = AccountState(perk8_priority_mode="active", perk8_click_max=40)
@@ -317,7 +328,7 @@ def test_kakera_active_custom_budget_bypass_types():
 
 def test_kakera_done_clicks_equally():
     rules = KakeraReactionRules(
-        enabled=True, perk_8_budget_mode=True, daily_click_budget=40
+        enabled=True, perk_8_budget_mode=True
     )
     state = AccountState(perk8_priority_mode="done", perk8_click_max=40)
     state.kakera_clicks_today = 5
@@ -332,7 +343,6 @@ def test_kakera_insufficient_pool_bypasses_require_perk_8():
         require_perk_8=True,
         require_chaos_key=True,
         perk_8_budget_mode=True,
-        daily_click_budget=40,
     )
     state = AccountState(perk8_priority_mode="insufficient_pool", perk8_click_max=40)
     fields = _kakera_fields(_kakera_buttons("kakeraO"), perk_8=False)

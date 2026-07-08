@@ -14,6 +14,14 @@ Button {
     property bool loading: false
 
     implicitHeight: 32
+    implicitWidth: Math.max(64, textMetrics.width + 24)
+
+    TextMetrics {
+        id: textMetrics
+        text: control.text
+        font.pixelSize: 12
+        font.weight: (control.accent || control.danger) ? Font.DemiBold : Font.Normal
+    }
 
     background: Rectangle {
         radius: 6

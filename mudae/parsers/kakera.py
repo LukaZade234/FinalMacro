@@ -144,22 +144,49 @@ def parse_individual_kakera(description: str) -> dict[str, int]:
     return kakera_map
 
 
+_KEY_LEVEL_PATTERNS: tuple[str, ...] = (
+    # Discord markup: <:chaoskey:690110264166842421> (**77**)
+    r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}\s*(\d+)\*{0,2}\)",
+    # Plain/static emoji text: :chaoskey: (98) or :chaoskey: (**98**)
+    r":(bronze|silver|gold|chaos)key:\s*\(\*{0,2}\s*(\d+)\*{0,2}\)",
+)
+
+_OMEGA_GAIN_PATTERNS: tuple[str, ...] = (
+    r"<:omegakey:\d+>\s*\*{0,2}\s*\+([\d,]+)\*{0,2}",
+    r":omegakey:\s*\*{0,2}\s*\+([\d,]+)\*{0,2}",
+)
+
+
 def parse_keys(description: str) -> list[dict[str, Any]]:
     if not description:
         return []
     keys: list[dict[str, Any]] = []
-    pattern = r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}(\d+)\*{0,2}\)"
-    for match in re.finditer(pattern, description, re.IGNORECASE):
-        keys.append({"type": match.group(1).lower(), "level": int(match.group(2))})
+    seen_spans: list[tuple[int, int]] = []
+    for pattern in _KEY_LEVEL_PATTERNS:
+        for match in re.finditer(pattern, description, re.IGNORECASE):
+            span = match.span()
+            if any(not (span[1] <= start or span[0] >= end) for start, end in seen_spans):
+                continue
+            seen_spans.append(span)
+            keys.append({"type": match.group(1).lower(), "level": int(match.group(2))})
     return keys
 
 
 def parse_omega_keys(description: str) -> list[dict[str, Any]]:
-    """Omega keys gained on this roll, e.g. ``<:omegakey:...> **+1**``."""
+    """Omega keys gained on this roll, e.g. ``<:omegakey:...> **+1**``.
+
+    Inventory totals like ``84 :omegakey:`` or ``711 :sp:`` on the next line are ignored;
+    a literal ``+`` before the amount is required.
+    """
     if not description:
         return []
     keys: list[dict[str, Any]] = []
-    pattern = r"<:omegakey:\d+>\s*\*{0,2}\+?([\d,]+)\*{0,2}"
-    for match in re.finditer(pattern, description, re.IGNORECASE):
-        keys.append({"gain": int(match.group(1).replace(",", ""))})
+    seen_spans: list[tuple[int, int]] = []
+    for pattern in _OMEGA_GAIN_PATTERNS:
+        for match in re.finditer(pattern, description, re.IGNORECASE):
+            span = match.span()
+            if any(not (span[1] <= start or span[0] >= end) for start, end in seen_spans):
+                continue
+            seen_spans.append(span)
+            keys.append({"gain": int(match.group(1).replace(",", ""))})
     return keys

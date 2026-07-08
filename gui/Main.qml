@@ -7,10 +7,10 @@ import "views"
 
 ApplicationWindow {
     id: win
-    width: 1000
-    height: 680
-    minimumWidth: 760
-    minimumHeight: 480
+    width: 1200
+    height: 1000
+    minimumWidth: 1140
+    minimumHeight: 720
     visible: true
     title: "FinalMacro"
     color: Theme.bgDark

@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from macro.actions import DiscordActions
+from macro.actions import DiscordActions, is_kakera_outcome_message, normalize_kakera_outcome
 from macro.config import KakeraReactionRules, MacroConfig
 from macro.dk_manager import apply_dk_response, has_dk_available
 from macro.perk8_daily import perk8_budget_applies
@@ -30,8 +30,8 @@ from macro.rule_eval import (
     perk8_click_budget,
     perk8_mode_from_state,
 )
-from macro.state import AccountState, RuleTraceEntry
-from mudae.types import MessageKind
+from macro.state import AccountState
+from mudae.types import MessageKind, ParseResult
 
 # Pauses around ``$dk`` so Mudae finishes processing the prior kakera denial.
 _DK_PAUSE_BEFORE_SEC = 1.0
@@ -40,6 +40,11 @@ _DK_RETRY_PAUSE_BEFORE_SEC = 3.0
 _DK_RETRY_PAUSE_AFTER_SEC = 2.0
 _DK_RESPONSE_TIMEOUT_SEC = 12.0
 _MAX_DK_ATTEMPTS_PER_CLICK = 2
+_KAKERA_OUTCOME_TIMEOUT_SEC = 8.0
+_KAKERA_OUTCOME_RETRY_TIMEOUT_SEC = 6.0
+_KAKERA_CLICK_SETTLE_SEC = 0.35
+_KAKERA_BETWEEN_CLICKS_SEC = 0.5
+_MAX_KAKERA_CLICK_ATTEMPTS = 2
 
 
 @dataclass
@@ -51,6 +56,7 @@ class KakeraReactor:
     on_perk8_exhausted: Callable[[], None] | None = None
     on_click_progress: Callable[[], None] | None = None
     on_state: Callable[[], None] | None = None
+    debug_log: Callable[[str], None] | None = None
 
     async def react(
         self,
@@ -62,13 +68,13 @@ class KakeraReactor:
     ) -> int:
         """React to one parsed roll. Returns number of buttons clicked."""
         rules = rules if rules is not None else self.config.kakera_reaction
+        self._drain_stale_kakera_outcomes()
         character = fields.get("character_name") or "?"
         decision = await self._resolve_decision(
             fields, rules, message_id, character, roll_index
         )
         if not decision.should_click:
             if rules.enabled:
-                self._trace("skip", character, roll_index, decision.reason)
                 self.log(f"kakera skip {character}: {decision.reason}")
             return 0
 
@@ -87,12 +93,6 @@ class KakeraReactor:
             if remaining <= 0 and not paid_candidates:
                 candidates = bypass_candidates
             elif remaining <= 0:
-                self._trace(
-                    "skip",
-                    character,
-                    roll_index,
-                    f"budget {self.state.kakera_clicks_today}/{budget}",
-                )
                 self.log(
                     f"kakera skip {character}: daily budget "
                     f"{self.state.kakera_clicks_today}/{budget} reached"
@@ -102,12 +102,6 @@ class KakeraReactor:
                 candidates = bypass_candidates + paid_candidates[:remaining]
 
             if not candidates:
-                self._trace(
-                    "skip",
-                    character,
-                    roll_index,
-                    f"budget {self.state.kakera_clicks_today}/{budget}",
-                )
                 self.log(
                     f"kakera skip {character}: daily budget "
                     f"{self.state.kakera_clicks_today}/{budget} reached"
@@ -138,6 +132,8 @@ class KakeraReactor:
                 clicks += 1
                 if (choice.emoji or "") not in bypass:
                     budget_clicks += 1
+                if len(candidates) > 1 and clicks < len(candidates):
+                    await asyncio.sleep(_KAKERA_BETWEEN_CLICKS_SEC)
 
         if clicks:
             if budget_clicks:
@@ -161,22 +157,6 @@ class KakeraReactor:
                 f"kakera click ×{clicks} {character}: {decision.reason}"
                 f"{budget_note}{power_note}{dk_note}"
             )
-            self._trace(
-                "click",
-                character,
-                roll_index,
-                decision.reason
-                + (
-                    f" · budget {self.state.kakera_clicks_today}/{budget}"
-                    if rules.perk_8_budget_mode and perk8_budget_applies(mode)
-                    else ""
-                )
-                + (
-                    f" · power {display_reaction_power(self.state.power_percent)}%"
-                    if self.state.power_percent is not None
-                    else ""
-                ),
-            )
             if (
                 rules.perk_8_budget_mode
                 and perk8_budget_applies(mode)
@@ -187,7 +167,6 @@ class KakeraReactor:
                 self.on_perk8_exhausted()
         elif decision.should_click:
             self.log(f"kakera click failed {character}")
-            self._trace("skip", character, roll_index, "click failed")
         return clicks
 
     async def _resolve_decision(
@@ -259,19 +238,42 @@ class KakeraReactor:
                     f"({display_reaction_power(self.state.power_percent)}% "
                     f"need {cost:g}%)"
                 )
-                self._trace(
-                    "skip",
-                    character,
-                    roll_index,
-                    f"insufficient power need {cost:g}%",
+                return False
+            for attempt in range(1, _MAX_KAKERA_CLICK_ATTEMPTS + 1):
+                ok = await self.actions.click_button(message_id, choice.custom_id)
+                if not ok:
+                    self._debug(
+                        f"kakera: button click failed {character} "
+                        f"(msg {message_id})"
+                    )
+                    return False
+                await asyncio.sleep(_KAKERA_CLICK_SETTLE_SEC)
+                wait_timeout = (
+                    _KAKERA_OUTCOME_TIMEOUT_SEC
+                    if attempt == 1
+                    else _KAKERA_OUTCOME_RETRY_TIMEOUT_SEC
                 )
-                return False
-            ok = await self.actions.click_button(message_id, choice.custom_id)
-            if not ok:
-                return False
-            outcome = await self.actions.wait_for_kakera_outcome(timeout=8.0)
-            if outcome is None:
-                self.log(f"kakera click timeout {character}")
+                qsize = getattr(self.actions, "queue_size", lambda: 0)()
+                self._debug(
+                    f"kakera: wait outcome {character} "
+                    f"attempt {attempt}/{_MAX_KAKERA_CLICK_ATTEMPTS} "
+                    f"timeout={wait_timeout:g}s queue={qsize}"
+                )
+                outcome = await self._wait_for_kakera_outcome(timeout=wait_timeout)
+                if outcome is not None:
+                    self._debug(
+                        f"kakera: outcome {character} · {outcome.kind.value} · "
+                        f"{outcome.summary or '?'}"
+                    )
+                    break
+                self._drain_stale_kakera_outcomes()
+                if attempt < _MAX_KAKERA_CLICK_ATTEMPTS:
+                    self.log(
+                        f"kakera: retrying click on {character} "
+                        f"(attempt {attempt + 1}/{_MAX_KAKERA_CLICK_ATTEMPTS})"
+                    )
+            else:
+                self._log_kakera_timeout(character)
                 return False
             if outcome.kind == MessageKind.KAKERA_REACT_DENIED:
                 cooldown = int(outcome.fields.get("kakera_cooldown_minutes") or 0)
@@ -303,12 +305,6 @@ class KakeraReactor:
                             f"(need {cost:g}%)"
                         )
                         continue
-                self._trace(
-                    "skip",
-                    character,
-                    roll_index,
-                    f"denied · wait {cooldown}m",
-                )
                 return False
             if not spend_reaction_power(self.state, cost):
                 self.log(
@@ -331,12 +327,6 @@ class KakeraReactor:
         if not rules.auto_use_dk or not has_dk_available(self.state):
             if rules.auto_use_dk:
                 self.log(f"$dk: none available — cannot refill for {character}")
-                self._trace_dk(
-                    "skip",
-                    character,
-                    roll_index,
-                    "no $dk stock",
-                )
             return False
 
         stock_before = int(self.state.dk_stock or 0)
@@ -351,12 +341,6 @@ class KakeraReactor:
             f"(attempt {attempt}/{_MAX_DK_ATTEMPTS_PER_CLICK}, "
             f"{stock_before} left, power {power_before}%) — {reason} · {character}"
         )
-        self._trace_dk(
-            "wait",
-            character,
-            roll_index,
-            f"pause {pause_before:g}s before attempt {attempt} ({reason})",
-        )
         await asyncio.sleep(pause_before)
 
         await self.actions.send_command("dk", prefix=self.config.prefix)
@@ -367,12 +351,6 @@ class KakeraReactor:
                 f"$dk: no Mudae response within {_DK_RESPONSE_TIMEOUT_SEC:g}s "
                 f"(attempt {attempt}) — kakera retry cancelled"
             )
-            self._trace_dk(
-                "fail",
-                character,
-                roll_index,
-                f"timeout after attempt {attempt}",
-            )
             return False
 
         fields = dict(parsed.fields)
@@ -380,12 +358,6 @@ class KakeraReactor:
             self.log(
                 f"$dk: response did not look like a successful claim "
                 f"(attempt {attempt}) — kakera retry cancelled"
-            )
-            self._trace_dk(
-                "fail",
-                character,
-                roll_index,
-                f"unexpected response attempt {attempt}",
             )
             return False
 
@@ -404,47 +376,80 @@ class KakeraReactor:
         if next_m is not None:
             parts.append(f"next $dk in {next_m}m")
         self.log(" · ".join(parts))
-        self._trace_dk(
-            "use",
-            character,
-            roll_index,
-            f"attempt {attempt}: {power_before}%→{power_after}% · "
-            f"{stock_before}→{stock_after} $dk ({reason})",
-        )
 
         self.log(f"$dk: waiting {pause_after:g}s for Mudae to settle before kakera retry")
         await asyncio.sleep(pause_after)
         self._notify_state()
         return True
 
-    def _trace_dk(
+    def _debug(self, text: str) -> None:
+        if self.debug_log:
+            self.debug_log(text)
+
+    def _drain_stale_kakera_outcomes(self) -> int:
+        """Drop orphaned kakera claim/denial messages left after a timeout."""
+        collect = getattr(self.actions, "collect_queued", None)
+        if collect is None:
+            return 0
+        stale = collect(is_kakera_outcome_message)
+        if stale:
+            self.log(f"kakera: cleared {len(stale)} stale response(s) from queue")
+        return len(stale)
+
+    def _normalize_kakera_outcome(
         self,
-        decision: str,
-        character: str,
-        roll_index: int,
-        reason: str,
-    ) -> None:
-        self.state.append_rule_trace(
-            RuleTraceEntry(
-                block="dk",
-                roll_index=roll_index,
-                character=character,
-                decision=decision,
-                reason=reason,
+        snapshot: Any,
+        parsed: ParseResult,
+    ) -> ParseResult:
+        return normalize_kakera_outcome(snapshot, parsed)
+
+    def _log_kakera_timeout(self, character: str) -> None:
+        count = getattr(self.actions, "count_queued_outcomes", None)
+        if count is None:
+            self.log(f"kakera click timeout {character}")
+            return
+        from mudae.parsers.classify import snapshot_is_kakera_claim
+
+        qsize, missed = count(
+            lambda snapshot, parsed: (
+                is_kakera_outcome_message(snapshot, parsed)
+                or snapshot_is_kakera_claim(snapshot)
             )
         )
+        if missed:
+            self.log(
+                f"kakera click timeout {character}: "
+                f"{missed} (+$k) response(s) were in queue (size {qsize}) "
+                "but not matched — report this"
+            )
+        elif qsize:
+            self.log(
+                f"kakera click timeout {character}: "
+                f"no (+$k) line in queue (size {qsize})"
+            )
+        else:
+            self.log(f"kakera click timeout {character}: no Mudae response seen")
+
+    async def _wait_for_kakera_outcome(self, *, timeout: float) -> ParseResult | None:
+        collect = getattr(self.actions, "collect_queued", None)
+        if collect is not None:
+            queued = collect(is_kakera_outcome_message)
+            if queued:
+                snapshot, parsed = queued[0]
+                return self._normalize_kakera_outcome(snapshot, parsed)
+        result = await self.actions.wait_for(
+            is_kakera_outcome_message,
+            timeout=timeout,
+        )
+        if result is not None:
+            return self._normalize_kakera_outcome(result[0], result[1])
+        if collect is not None:
+            queued = collect(is_kakera_outcome_message)
+            if queued:
+                snapshot, parsed = queued[0]
+                return self._normalize_kakera_outcome(snapshot, parsed)
+        return None
 
     def _notify_state(self) -> None:
         if self.on_state:
             self.on_state()
-
-    def _trace(self, decision: str, character: str, roll_index: int, reason: str) -> None:
-        self.state.append_rule_trace(
-            RuleTraceEntry(
-                block="kakera",
-                roll_index=roll_index,
-                character=character,
-                decision=decision,
-                reason=reason,
-            )
-        )

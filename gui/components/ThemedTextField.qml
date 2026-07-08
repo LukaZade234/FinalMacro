@@ -6,6 +6,8 @@ import gui 1.0
 TextField {
     id: control
 
+    implicitHeight: 32
+
     color: Theme.fgPrimary
     placeholderTextColor: Theme.fgMuted
     selectionColor: Theme.accentPrimary

@@ -122,6 +122,19 @@ class ChannelMonitor:
                     return False
         return False
 
+    async def fetch_message_snapshot(self, message_id: int) -> MudaeMessageSnapshot | None:
+        """Re-fetch a message from Discord (used when edits are slow to arrive)."""
+        try:
+            channel = await self._get_text_channel()
+            message = await channel.fetch_message(message_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            message = self._messages.get(message_id)
+            if message is None:
+                return None
+        else:
+            self._remember_message(message)
+        return snapshot_from_message(message, edited=True)
+
     async def _get_text_channel(self) -> discord.TextChannel:
         if not self._client:
             raise RuntimeError("Not connected")

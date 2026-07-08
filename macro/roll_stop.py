@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Mudae footer "N rolls left" → roll N more times, then stop.
+ROLLS_LEFT_STOP = 2
+
 
 @dataclass
 class RollStopTracker:
     """After footer parses ``rolls_left == threshold``, roll ``tail_count`` more times."""
 
-    threshold: int = 2
-    tail_count: int = 2
+    threshold: int = ROLLS_LEFT_STOP
+    tail_count: int = ROLLS_LEFT_STOP
     tail_remaining: int | None = None
     saw_warning: bool = False
 
