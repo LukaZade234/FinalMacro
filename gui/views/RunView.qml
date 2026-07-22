@@ -78,6 +78,12 @@ Item {
         function onConnectedChanged() {
             controlBar.connected = App.connected
         }
+        function onNotificationStandbyChanged() {
+            controlBar.notificationStandby = App.notificationStandby
+        }
+        function onSessionActiveChanged() {
+            controlBar.sessionActive = App.sessionActive
+        }
         function onConfigChanged() {
             runRoot.refreshActiveRules()
         }
@@ -86,6 +92,7 @@ Item {
             phaseStepper.currentPhase = App.macroPhase
         }
         function onMacroStateChanged() {
+            controlBar.macroEngineRunning = App.macroEngineRunning
             runRoot.refreshState()
             rollsChip.value = runRoot.rollsLeftText()
             claimChip.value = App.macroClaimStatus
@@ -173,6 +180,9 @@ Item {
                         Layout.fillWidth: true
                         connected: App.connected
                         macroRunning: runRoot.macroIsRunning()
+                        macroEngineRunning: App.macroEngineRunning
+                        notificationStandby: App.notificationStandby
+                        sessionActive: App.sessionActive
                         onConnectClicked: App.connect()
                         onDisconnectClicked: App.disconnect()
                         onRunTuClicked: App.runTu()
@@ -273,6 +283,9 @@ Item {
         refreshActiveRules()
         controlBar.connected = App.connected
         controlBar.macroRunning = macroIsRunning()
+        controlBar.macroEngineRunning = App.macroEngineRunning
+        controlBar.notificationStandby = App.notificationStandby
+        controlBar.sessionActive = App.sessionActive
         phaseStepper.currentPhase = App.macroPhase
     }
 }

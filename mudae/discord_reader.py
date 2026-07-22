@@ -50,6 +50,29 @@ class ChannelMonitor:
         self._messages: dict[int, discord.Message] = {}
         self._pending_macro_command: str | None = None
         self.macro_active = False
+        self._connect_task: asyncio.Task[None] | None = None
+
+    async def start_background(self) -> bool:
+        """Connect in a background task; return True when the gateway is ready."""
+        if self._connect_task is not None and not self._connect_task.done():
+            return await self.wait_ready(timeout=30.0)
+        self._ready = asyncio.Event()
+        self._connect_task = asyncio.create_task(self.connect(), name="discord-connect")
+        return await self.wait_ready(timeout=30.0)
+
+    async def stop_background(self) -> None:
+        """Close the gateway and cancel the background connect task."""
+        await self.disconnect()
+        task = self._connect_task
+        self._connect_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
 
     @property
     def claims(self) -> ClaimContextTracker:
@@ -245,6 +268,7 @@ class ChannelMonitor:
 
     async def disconnect(self) -> None:
         self._connected = False
+        self._ready.clear()
         if self._client:
             await self._client.close()
             self._client = None

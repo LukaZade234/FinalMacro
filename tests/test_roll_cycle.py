@@ -188,3 +188,204 @@ def test_seconds_until_perk8_refresh_none_while_active():
         daily_resets_get=lambda: {"perk8": {"clicks_exhausted": False}},
     )
     assert engine._seconds_until_perk8_refresh() is None
+
+
+def test_notification_mode_disconnects_during_hourly_wait():
+    disconnects: list[str] = []
+    reconnects: list[str] = []
+
+    async def disconnect() -> bool:
+        monitor.is_connected = False
+        disconnects.append("disconnect")
+        return True
+
+    async def reconnect() -> bool:
+        monitor.is_connected = True
+        reconnects.append("reconnect")
+        return True
+
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(1, 0)],
+    )
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.6,
+        notification_mode=True,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    state = AccountState()
+    monitor = SimpleNamespace(macro_active=False, is_connected=True)
+    engine = RollCycleEngine(
+        actions,
+        config,
+        state,
+        monitor,
+        notification_disconnect=disconnect,
+        notification_reconnect=reconnect,
+    )
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._run_cycle())
+
+    assert len(disconnects) >= 1
+    assert len(reconnects) >= 1
+    assert disconnects[0] == "disconnect"
+    assert any("Notification mode: disconnecting" in entry.text for entry in state.activity_log)
+    assert any("Notification mode: reconnecting" in entry.text for entry in state.activity_log)
+
+
+def test_notification_mode_off_skips_connection_callbacks():
+    disconnects: list[str] = []
+
+    async def disconnect() -> bool:
+        disconnects.append("disconnect")
+        return True
+
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(1, 0)],
+    )
+    engine, state = _make_engine(actions)
+    engine._config = MacroConfig(
+        roll_command="wa",
+        notification_mode=False,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    engine._notification_disconnect = disconnect
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._run_cycle())
+
+    assert disconnects == []
+
+
+def test_notification_mode_stop_during_wait_skips_reconnect():
+    disconnects: list[str] = []
+    reconnects: list[str] = []
+
+    async def disconnect() -> bool:
+        monitor.is_connected = False
+        disconnects.append("disconnect")
+        return True
+
+    async def reconnect() -> bool:
+        reconnects.append("reconnect")
+        return True
+
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(1, 0)],
+    )
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.6,
+        notification_mode=True,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    state = AccountState()
+    monitor = SimpleNamespace(macro_active=False, is_connected=True)
+    engine = RollCycleEngine(
+        actions,
+        config,
+        state,
+        monitor,
+        notification_disconnect=disconnect,
+        notification_reconnect=reconnect,
+    )
+    engine._stop.clear()
+
+    async def stop_during_wait(_seconds: float) -> bool:
+        engine.stop()
+        return False
+
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        with patch.object(engine, "_wait_for_scheduled_wake", side_effect=stop_during_wait):
+            asyncio.run(engine._run_cycle())
+
+    assert disconnects == ["disconnect"]
+    assert reconnects == []
+
+
+def test_notification_restore_skips_when_stop_requested():
+    reconnects: list[str] = []
+
+    async def reconnect() -> bool:
+        reconnects.append("reconnect")
+        return True
+
+    engine, _state = _make_engine(
+        _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
+    )
+    engine._config = MacroConfig(notification_mode=True)
+    engine._notification_reconnect = reconnect
+    engine._stop.set()
+    monitor = SimpleNamespace(is_connected=False)
+    engine._monitor = monitor
+
+    result = asyncio.run(engine._restore_connection_for_notifications())
+
+    assert result is False
+    assert reconnects == []
+
+
+def test_wait_for_scheduled_wake_defers_ohu8_when_disconnected():
+    actions = _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
+    config = MacroConfig(
+        notification_mode=True,
+        kakera_reaction=KakeraReactionRules(enabled=False, perk_8_budget_mode=True),
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    monitor = SimpleNamespace(is_connected=False, macro_active=False)
+    engine = RollCycleEngine(actions, config, AccountState(), monitor)
+    engine._stop.clear()
+    engine._pending_perk8_refresh = False
+
+    async def run() -> None:
+        with patch.object(engine, "_seconds_until_perk8_refresh", return_value=0.0):
+            with patch.object(
+                engine,
+                "_maybe_refresh_perk8_status",
+                side_effect=AssertionError("must defer while disconnected"),
+            ):
+                ok = await engine._wait_for_scheduled_wake(0.05)
+        assert ok is True
+        assert engine._pending_perk8_refresh is True
+
+    asyncio.run(run())
+
+
+def test_maybe_refresh_perk8_defers_without_connection():
+    actions = _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
+
+    async def fail_send(*_args, **_kwargs):
+        raise RuntimeError("Not connected")
+
+    actions.send_command = fail_send  # type: ignore[method-assign]
+
+    config = MacroConfig(
+        notification_mode=True,
+        kakera_reaction=KakeraReactionRules(enabled=False, perk_8_budget_mode=True),
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    monitor = SimpleNamespace(is_connected=False, macro_active=False)
+    engine = RollCycleEngine(
+        actions,
+        config,
+        AccountState(),
+        monitor,
+        daily_resets_get=lambda: {
+            "perk8": {
+                "clicks_exhausted": True,
+                "refill_at": "2000-01-01T00:00:00+00:00",
+                "last_clicked": 40,
+                "last_click_max": 40,
+            }
+        },
+    )
+
+    async def run() -> None:
+        await engine._maybe_refresh_perk8_status()
+
+    asyncio.run(run())
+    assert engine._pending_perk8_refresh is True

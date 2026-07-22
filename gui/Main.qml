@@ -38,6 +38,9 @@ ApplicationWindow {
         function onConnectedChanged(connected) {
             topBar.statusOnline = connected
         }
+        function onNotificationStandbyChanged() {
+            topBar.notificationStandby = App.notificationStandby
+        }
         function onStatusChanged(text) {
             topBar.statusText = text
         }
@@ -74,6 +77,7 @@ ApplicationWindow {
                 pageTitle: win.pageTitleAt(win.currentPage)
                 statusText: App.statusText
                 statusOnline: App.connected
+                notificationStandby: App.notificationStandby
             }
 
             Loader {

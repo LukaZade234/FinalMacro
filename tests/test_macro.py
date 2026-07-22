@@ -153,6 +153,12 @@ def test_macro_config_roundtrip():
     assert restored.roll_delay() >= 0.6
 
 
+def test_notification_mode_config_roundtrip():
+    cfg = MacroConfig(notification_mode=True)
+    restored = MacroConfig.from_dict(cfg.to_dict())
+    assert restored.notification_mode is True
+
+
 def test_account_state_to_dict():
     state = AccountState(rolls_left=29, claim_available=True, phase=MacroPhase.ROLLING)
     data = state.to_dict()

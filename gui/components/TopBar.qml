@@ -8,6 +8,7 @@ RowLayout {
     property string pageTitle: "Run"
     property string statusText: "Disconnected"
     property bool statusOnline: false
+    property bool notificationStandby: false
 
     spacing: 12
     Layout.fillWidth: true
@@ -26,7 +27,9 @@ RowLayout {
         implicitWidth: statusRow.implicitWidth + 24
         radius: 18
         color: Theme.bgMedium
-        border.color: bar.statusOnline ? Theme.success : Theme.border
+        border.color: bar.statusOnline
+            ? Theme.success
+            : (bar.notificationStandby ? Theme.warning : Theme.border)
 
         RowLayout {
             id: statusRow
@@ -35,12 +38,18 @@ RowLayout {
 
             Label {
                 text: "●"
-                color: bar.statusOnline ? Theme.success : Theme.fgMuted
+                color: bar.statusOnline
+                    ? Theme.success
+                    : (bar.notificationStandby ? Theme.warning : Theme.fgMuted)
                 font.pixelSize: 14
             }
             Label {
-                text: bar.statusOnline ? bar.statusText : "Disconnected"
-                color: bar.statusOnline ? Theme.fgPrimary : Theme.fgMuted
+                text: bar.statusOnline || bar.notificationStandby
+                    ? bar.statusText
+                    : "Disconnected"
+                color: bar.statusOnline || bar.notificationStandby
+                    ? Theme.fgPrimary
+                    : Theme.fgMuted
                 font.pixelSize: 12
                 font.weight: Font.DemiBold
                 elide: Text.ElideRight

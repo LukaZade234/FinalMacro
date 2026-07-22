@@ -244,6 +244,9 @@ class MacroConfig:
     us_add_delay_sec: float = 5.0
     # Seconds to wait after a roll timeout before resuming $us mode.
     us_roll_timeout_retry_sec: float = 5.0
+    # When enabled, the hourly macro disconnects between roll sessions so mobile
+    # Discord notifications are not suppressed. Does not affect $us or minigames.
+    notification_mode: bool = False
     us_roll_kakera: UsRollKakeraRules = field(default_factory=UsRollKakeraRules)
     character_claim: CharacterClaimRules = field(default_factory=CharacterClaimRules)
     kakera_reaction: KakeraReactionRules = field(default_factory=KakeraReactionRules)
@@ -346,6 +349,7 @@ class MacroConfig:
             us_read_before_add_delay_sec=float(data.get("us_read_before_add_delay_sec", 2.0)),
             us_add_delay_sec=float(data.get("us_add_delay_sec", 5.0)),
             us_roll_timeout_retry_sec=float(data.get("us_roll_timeout_retry_sec", 5.0)),
+            notification_mode=bool(data.get("notification_mode", False)),
             us_roll_kakera=us_roll_kakera,
             character_claim=character_claim,
             kakera_reaction=kakera_reaction,
@@ -364,6 +368,7 @@ class MacroConfig:
             "us_read_before_add_delay_sec": self.us_read_before_add_delay_sec,
             "us_add_delay_sec": self.us_add_delay_sec,
             "us_roll_timeout_retry_sec": self.us_roll_timeout_retry_sec,
+            "notification_mode": self.notification_mode,
             "us_roll_kakera": self.us_roll_kakera.to_dict(),
             "character_claim": self.character_claim.to_dict(),
             "kakera_reaction": self.kakera_reaction.to_dict(),

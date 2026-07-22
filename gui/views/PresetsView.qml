@@ -340,6 +340,21 @@ Item {
                                 text: (rules.basic && rules.basic.roll_delay_sec !== undefined) ? rules.basic.roll_delay_sec.toString() : "0.6"
                                 onEditingFinished: patchBasic("roll_delay_sec", parseFloat(text) || 0.6)
                             }
+
+                            Label {
+                                text: "Notification mode"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.preferredWidth: 140
+                                Layout.alignment: Qt.AlignTop
+                                wrapMode: Text.WordWrap
+                            }
+                            ThemedCheckBox {
+                                Layout.fillWidth: true
+                                text: "Disconnect between hourly roll sessions so phone notifications work"
+                                checked: rules.basic ? !!rules.basic.notification_mode : false
+                                onToggled: patchBasic("notification_mode", checked)
+                            }
                         }
                     }
 

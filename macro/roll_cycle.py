@@ -83,6 +83,8 @@ class RollCycleEngine:
         on_persist: Callable[[], None] | None = None,
         daily_resets_get: Callable[[], dict[str, Any]] | None = None,
         daily_resets_save: Callable[[dict[str, Any]], None] | None = None,
+        notification_disconnect: Callable[[], Any] | None = None,
+        notification_reconnect: Callable[[], Any] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -93,12 +95,15 @@ class RollCycleEngine:
         self._on_persist = on_persist
         self._daily_resets_get = daily_resets_get
         self._daily_resets_save = daily_resets_save
+        self._notification_disconnect = notification_disconnect
+        self._notification_reconnect = notification_reconnect
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._roll_stop = RollStopTracker()
         self._activity = ActivityLog(self._state, on_update=self._notify)
         self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
+        self._pending_perk8_refresh = False
 
     def _notify(self) -> None:
         if self._on_state:
@@ -111,6 +116,38 @@ class RollCycleEngine:
     def _persist(self) -> None:
         if self._on_persist:
             self._on_persist()
+
+    async def _release_connection_for_notifications(self) -> bool:
+        """Disconnect between hourly sessions when notification mode is enabled."""
+        if self._stop.is_set():
+            return False
+        if not self._config.notification_mode:
+            return True
+        if self._notification_disconnect is None:
+            return True
+        if not getattr(self._monitor, "is_connected", False):
+            return True
+        self._log("Notification mode: disconnecting until next roll session")
+        result = self._notification_disconnect()
+        if asyncio.iscoroutine(result):
+            return bool(await result)
+        return bool(result)
+
+    async def _restore_connection_for_notifications(self) -> bool:
+        """Reconnect before the next hourly roll session when needed."""
+        if self._stop.is_set():
+            return False
+        if not self._config.notification_mode:
+            return True
+        if self._notification_reconnect is None:
+            return True
+        if getattr(self._monitor, "is_connected", False):
+            return True
+        self._log("Notification mode: reconnecting for roll session")
+        result = self._notification_reconnect()
+        if asyncio.iscoroutine(result):
+            return bool(await result)
+        return bool(result)
 
     def _log(self, text: str) -> None:
         self._activity.write(text)
@@ -185,6 +222,30 @@ class RollCycleEngine:
         if self._daily_resets_save:
             self._daily_resets_save(daily)
 
+    def _mudae_shifthour(self) -> int:
+        from mudae.channel_cache import get_channel_settings
+
+        channel_id = getattr(self._monitor, "channel_id", None)
+        if channel_id is None:
+            return 0
+        settings = get_channel_settings(int(channel_id))
+        if not settings:
+            return 0
+        value = settings.get("shifthour")
+        if value is None:
+            return 0
+        try:
+            return max(0, min(23, int(value)))
+        except (TypeError, ValueError):
+            return 0
+
+    def _discord_commands_blocked(self) -> bool:
+        """True when notification mode has dropped the gateway (no sends yet)."""
+        return (
+            self._config.notification_mode
+            and not getattr(self._monitor, "is_connected", False)
+        )
+
     def _apply_perk8_mode(self, mode: Perk8PriorityMode, record: Perk8DailyRecord) -> None:
         self._state.perk8_priority_mode = mode.value
         if record.last_click_max is not None:
@@ -204,6 +265,7 @@ class RollCycleEngine:
         record = mark_perk8_exhausted(
             load_perk8_record(daily),
             clicked_today=self._state.kakera_clicks_today,
+            shifthour=self._mudae_shifthour(),
         )
         self._save_daily_resets(save_perk8_record(daily, record))
         self._apply_perk8_mode(Perk8PriorityMode.DONE, record)
@@ -229,7 +291,9 @@ class RollCycleEngine:
         daily = self._get_daily_resets()
         record = load_perk8_record(daily)
         sync_refill_deadline(record, int(refill))
-        record = refresh_exhausted_if_refill_passed(record)
+        record = refresh_exhausted_if_refill_passed(
+            record, shifthour=self._mudae_shifthour()
+        )
         self._save_daily_resets(save_perk8_record(daily, record))
 
     async def _refresh_perk8_status(self, *, at_startup: bool = False) -> None:
@@ -239,12 +303,17 @@ class RollCycleEngine:
             self._state.perk8_click_max = None
             return
 
+        if self._discord_commands_blocked():
+            self._pending_perk8_refresh = True
+            return
+
+        shifthour = self._mudae_shifthour()
         daily = self._get_daily_resets()
         record = load_perk8_record(daily)
-        record = refresh_exhausted_if_refill_passed(record)
+        record = refresh_exhausted_if_refill_passed(record, shifthour=shifthour)
         self._save_daily_resets(save_perk8_record(daily, record))
 
-        if should_skip_ohu8_until_refill(record):
+        if should_skip_ohu8_until_refill(record, shifthour=shifthour):
             mode = apply_cached_perk8(record)
             self._apply_perk8_mode(mode, record)
             eta = record.refill_at or "unknown"
@@ -255,7 +324,7 @@ class RollCycleEngine:
             self._notify()
             return
 
-        if not at_startup and not should_query_ohu8_on_refill(record):
+        if not at_startup and not should_query_ohu8_on_refill(record, shifthour=shifthour):
             mode = apply_cached_perk8(record)
             self._apply_perk8_mode(mode, record)
             return
@@ -274,10 +343,13 @@ class RollCycleEngine:
             self._notify()
             return
 
-        record, mode = update_record_from_ohu8(record, parsed.fields)
-        refresh_exhausted_if_refill_passed(record)
+        record, mode = update_record_from_ohu8(
+            record, parsed.fields, shifthour=shifthour
+        )
+        refresh_exhausted_if_refill_passed(record, shifthour=shifthour)
         self._save_daily_resets(save_perk8_record(daily, record))
         self._apply_perk8_mode(mode, record)
+        self._pending_perk8_refresh = False
 
         if mode is Perk8PriorityMode.DONE:
             self._log("$ohu8: perk 8 clicks done for today — equal kakera clicking")
@@ -297,15 +369,22 @@ class RollCycleEngine:
         """Re-query ``$ohu8`` when the daily perk-8 refill window has passed."""
         if not self._config.kakera_reaction.perk_8_budget_mode:
             return
+        shifthour = self._mudae_shifthour()
         daily = self._get_daily_resets()
         record = load_perk8_record(daily)
-        refresh_exhausted_if_refill_passed(record)
+        refresh_exhausted_if_refill_passed(record, shifthour=shifthour)
         self._save_daily_resets(save_perk8_record(daily, record))
-        if should_query_ohu8_on_refill(record):
-            await self._refresh_perk8_status()
-        else:
+        needs_query = self._pending_perk8_refresh or should_query_ohu8_on_refill(
+            record, shifthour=shifthour
+        )
+        if not needs_query:
             mode = apply_cached_perk8(record)
             self._apply_perk8_mode(mode, record)
+            return
+        if self._discord_commands_blocked():
+            self._pending_perk8_refresh = True
+            return
+        await self._refresh_perk8_status()
 
     async def _roll_hourly_normal_segment(
         self,
@@ -356,6 +435,10 @@ class RollCycleEngine:
 
     def stop(self) -> None:
         self._stop.set()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop.is_set()
         self._state.phase = MacroPhase.STOPPING
         self._notify()
         if self._task and not self._task.done():
@@ -424,6 +507,10 @@ class RollCycleEngine:
             self._actions.drain_queue()
             self._reset_roll_stop_tracker()
 
+            if not await self._restore_connection_for_notifications():
+                self._log("Notification mode: reconnect failed — stopping")
+                return
+
             await self._refresh_perk8_status(at_startup=True)
 
             cmd = self._config.normalized_roll_command()
@@ -433,6 +520,10 @@ class RollCycleEngine:
             self._log("Macro starting (continuous hourly mode)")
 
             while not self._stop.is_set():
+                if not await self._restore_connection_for_notifications():
+                    self._log("Notification mode: reconnect failed — stopping")
+                    break
+
                 if not tu_fresh:
                     if not await self.run_tu():
                         self._log("$tu failed — stopping")
@@ -1238,15 +1329,27 @@ class RollCycleEngine:
             if self._stop.is_set():
                 return False
             perk8_sec = self._seconds_until_perk8_refresh()
-            if perk8_sec is not None and perk8_sec <= 0:
+            if (
+                perk8_sec is not None
+                and perk8_sec <= 0
+                and not self._discord_commands_blocked()
+            ):
                 await self._maybe_refresh_perk8_status()
+            elif perk8_sec is not None and perk8_sec <= 0:
+                self._pending_perk8_refresh = True
             step = min(remaining, _STOP_CHECK_SEC)
             if perk8_sec is not None and 0 < perk8_sec < step:
                 step = min(step, perk8_sec)
             await asyncio.sleep(step)
             remaining -= step
-            if perk8_sec is not None and 0 < perk8_sec <= step:
+            if (
+                perk8_sec is not None
+                and 0 < perk8_sec <= step
+                and not self._discord_commands_blocked()
+            ):
                 await self._maybe_refresh_perk8_status()
+            elif perk8_sec is not None and 0 < perk8_sec <= step:
+                self._pending_perk8_refresh = True
         return True
 
     async def _wait_for_rolls_reset(self, margin: int) -> bool:
@@ -1284,10 +1387,18 @@ class RollCycleEngine:
                 self._log("No rolls reset time from $tu — stopping")
                 return False
 
+            if not await self._release_connection_for_notifications():
+                self._log("Notification mode: disconnect failed — stopping")
+                return False
+
             self._log(
                 f"No rolls remaining — waiting {reset_m}m until hourly refill"
             )
             if not await self._wait_for_scheduled_wake(self._seconds_until_rolls_reset()):
+                return False
+
+            if not await self._restore_connection_for_notifications():
+                self._log("Notification mode: reconnect failed — stopping")
                 return False
 
             await self._maybe_refresh_perk8_status()

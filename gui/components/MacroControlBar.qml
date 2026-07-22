@@ -7,6 +7,9 @@ ColumnLayout {
     id: bar
     property bool connected: false
     property bool macroRunning: false
+    property bool macroEngineRunning: false
+    property bool notificationStandby: false
+    property bool sessionActive: false
 
     signal connectClicked()
     signal disconnectClicked()
@@ -20,6 +23,15 @@ ColumnLayout {
 
     spacing: 10
 
+    Label {
+        visible: bar.notificationStandby
+        Layout.fillWidth: true
+        text: "Notification mode: temporarily disconnected while the macro waits for rolls. Use Stop to exit, or Disconnect to end the session."
+        color: Theme.warning
+        font.pixelSize: 11
+        wrapMode: Text.WordWrap
+    }
+
     RowLayout {
         spacing: 8
         Layout.fillWidth: true
@@ -27,7 +39,7 @@ ColumnLayout {
         ActionButton {
             text: "Connect"
             loading: App.connecting
-            enabled: !bar.connected && !App.connecting
+            enabled: !bar.sessionActive && !App.connecting
             Layout.fillWidth: true
             fillColor: Theme.accentPrimary
             textColor: Theme.bgDark
@@ -38,7 +50,7 @@ ColumnLayout {
         ActionButton {
             text: "Disconnect"
             loading: App.disconnecting
-            enabled: bar.connected && !App.disconnecting
+            enabled: bar.sessionActive && !App.disconnecting
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
@@ -53,7 +65,7 @@ ColumnLayout {
         ActionButton {
             text: "Run $tu"
             loading: App.runActionPending === "tu"
-            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "tu"
+            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "tu"
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
@@ -63,7 +75,7 @@ ColumnLayout {
         ActionButton {
             text: "Start macro"
             loading: App.runActionPending === "start"
-            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "start"
+            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "start"
             Layout.fillWidth: true
             fillColor: Theme.success
             textColor: Theme.bgDark
@@ -74,7 +86,7 @@ ColumnLayout {
         ActionButton {
             text: "Stop"
             loading: App.runActionPending === "stop"
-            enabled: bar.connected && bar.macroRunning && App.runActionPending !== "stop"
+            enabled: bar.macroEngineRunning && App.runActionPending !== "stop"
             Layout.fillWidth: true
             fillColor: Theme.error
             textColor: "#ffffff"
@@ -90,7 +102,7 @@ ColumnLayout {
         ActionButton {
             text: "Play $oh"
             loading: App.runActionPending === "oh"
-            enabled: bar.connected && !bar.macroRunning
+            enabled: bar.connected && !bar.macroEngineRunning
                      && App.runActionPending !== "oh"
                      && App.runActionPending !== "oc"
                      && App.runActionPending !== "oq"
@@ -103,7 +115,7 @@ ColumnLayout {
         ActionButton {
             text: "Play $oc"
             loading: App.runActionPending === "oc"
-            enabled: bar.connected && !bar.macroRunning
+            enabled: bar.connected && !bar.macroEngineRunning
                      && App.runActionPending !== "oh"
                      && App.runActionPending !== "oc"
                      && App.runActionPending !== "oq"
@@ -116,7 +128,7 @@ ColumnLayout {
         ActionButton {
             text: "Play $oq"
             loading: App.runActionPending === "oq"
-            enabled: bar.connected && !bar.macroRunning
+            enabled: bar.connected && !bar.macroEngineRunning
                      && App.runActionPending !== "oh"
                      && App.runActionPending !== "oc"
                      && App.runActionPending !== "oq"
@@ -129,7 +141,7 @@ ColumnLayout {
         ActionButton {
             text: "Roll $us"
             loading: App.runActionPending === "us"
-            enabled: bar.connected && !bar.macroRunning && App.runActionPending !== "us"
+            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "us"
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary

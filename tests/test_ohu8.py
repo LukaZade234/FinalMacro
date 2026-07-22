@@ -12,6 +12,8 @@ from macro.perk8_daily import (
     load_perk8_record,
     mark_perk8_exhausted,
     mode_from_ohu8_fields,
+    mudae_daily_date,
+    next_daily_reset,
     refresh_exhausted_if_refill_passed,
     save_perk8_record,
     should_query_ohu8_on_refill,
@@ -264,6 +266,45 @@ def test_mark_perk8_exhausted_sets_fallback_without_refill_minutes():
     record = mark_perk8_exhausted(Perk8DailyRecord(last_click_max=40), now=now)
     assert record.clicks_exhausted is True
     assert record.refill_at == "2026-06-24T00:00:00+00:00"
+
+
+def test_next_daily_reset_respects_shifthour():
+    now = dt.datetime(2026, 6, 23, 12, 0, tzinfo=dt.timezone.utc)
+    assert next_daily_reset(now, shifthour=14) == dt.datetime(
+        2026, 6, 23, 14, 0, tzinfo=dt.timezone.utc
+    )
+    after = dt.datetime(2026, 6, 23, 15, 0, tzinfo=dt.timezone.utc)
+    assert next_daily_reset(after, shifthour=14) == dt.datetime(
+        2026, 6, 24, 14, 0, tzinfo=dt.timezone.utc
+    )
+
+
+def test_mudae_daily_date_uses_shifthour_not_utc_midnight():
+    # 00:30 UTC is still "yesterday" in Mudae time when shifthour=14.
+    now = dt.datetime(2026, 7, 9, 0, 30, tzinfo=dt.timezone.utc)
+    assert mudae_daily_date(now, shifthour=0) == dt.date(2026, 7, 9)
+    assert mudae_daily_date(now, shifthour=14) == dt.date(2026, 7, 8)
+
+
+def test_mark_perk8_exhausted_uses_shifthour_for_fallback():
+    now = dt.datetime(2026, 6, 23, 12, 0, tzinfo=dt.timezone.utc)
+    record = mark_perk8_exhausted(
+        Perk8DailyRecord(last_click_max=40), now=now, shifthour=14
+    )
+    assert record.refill_at == "2026-06-23T14:00:00+00:00"
+
+
+def test_refresh_exhausted_waits_for_shifthour_day_boundary():
+    """UTC day rolled but Mudae daily reset (shifthour=14) has not."""
+    now = dt.datetime(2026, 7, 9, 0, 14, tzinfo=dt.timezone.utc)
+    record = Perk8DailyRecord(
+        clicks_exhausted=True,
+        refill_at="2026-07-09T14:00:00+00:00",
+        updated_at="2026-07-08T22:10:31+00:00",
+    )
+    refresh_exhausted_if_refill_passed(record, now=now, shifthour=14)
+    assert record.clicks_exhausted is True
+    assert should_skip_ohu8_until_refill(record, now=now, shifthour=14) is True
 
 
 def test_parse_refill_minutes_alternate_formats():

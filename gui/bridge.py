@@ -95,6 +95,8 @@ class AppBridge(QObject):
     connectedChanged = Signal(bool)
     connectingChanged = Signal()
     disconnectingChanged = Signal()
+    notificationStandbyChanged = Signal()
+    sessionActiveChanged = Signal()
     runActionPendingChanged = Signal()
     macroPhaseChanged = Signal(str)
     macroStateChanged = Signal()
@@ -139,6 +141,7 @@ class AppBridge(QObject):
         self._oh_running = False
         self._oc_running = False
         self._oq_running = False
+        self._notification_standby = False
         self._servers_emit_pending = False
         self._config_emit_pending = False
         self._run_guild_id: int | None = None
@@ -161,6 +164,18 @@ class AppBridge(QObject):
     @Property(bool, constant=False, notify=disconnectingChanged)
     def disconnecting(self) -> bool:
         return self._disconnecting
+
+    @Property(bool, constant=False, notify=notificationStandbyChanged)
+    def notificationStandby(self) -> bool:
+        return self._notification_standby
+
+    @Property(bool, constant=False, notify=sessionActiveChanged)
+    def sessionActive(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    @Property(bool, constant=False, notify=macroStateChanged)
+    def macroEngineRunning(self) -> bool:
+        return bool(self._engine and self._engine.is_running)
 
     @Property(str, constant=False, notify=runActionPendingChanged)
     def runActionPending(self) -> str:
@@ -315,6 +330,36 @@ class AppBridge(QObject):
             return
         self._disconnecting = value
         self.disconnectingChanged.emit()
+
+    def _set_notification_standby(self, value: bool) -> None:
+        if self._notification_standby == value:
+            return
+        self._notification_standby = value
+        self.notificationStandbyChanged.emit()
+        if value:
+            self._set_status(
+                "Disconnected for notifications — macro waiting for next rolls"
+            )
+        elif self._connected:
+            self._set_status("Connected")
+        elif not self._thread or not self._thread.is_alive():
+            self._set_status("Disconnected")
+
+    def _on_notification_standby(self, value: bool) -> None:
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_notification_standby",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(bool, value),
+        )
+
+    @Slot(bool)
+    def _deliver_notification_standby(self, value: bool) -> None:
+        self._set_notification_standby(value)
+
+    @Slot()
+    def _emit_session_active(self) -> None:
+        self.sessionActiveChanged.emit()
 
     def _set_run_action_pending(self, action: str) -> None:
         action = str(action or "").strip()
@@ -650,6 +695,7 @@ class AppBridge(QObject):
                     "roll_delay_sec": data["roll_delay_sec"],
                     "claim_expire_sec": data["claim_expire_sec"],
                     "claim_reset_margin_minutes": data["claim_reset_margin_minutes"],
+                    "notification_mode": data["notification_mode"],
                 },
                 "character_claim": data["character_claim"],
                 "kakera_reaction": data["kakera_reaction"],
@@ -680,6 +726,7 @@ class AppBridge(QObject):
                 "roll_delay_sec",
                 "claim_expire_sec",
                 "claim_reset_margin_minutes",
+                "notification_mode",
             ):
                 if key in basic_patch:
                     data[key] = basic_patch[key]
@@ -826,7 +873,7 @@ class AppBridge(QObject):
     @Slot(bool)
     def _deliver_connected(self, value: bool) -> None:
         self._set_connected(value)
-        if not value and self._status.startswith("Connected"):
+        if not value and not self._notification_standby and self._status.startswith("Connected"):
             self._set_status("Disconnected")
 
     @Slot()
@@ -1066,6 +1113,44 @@ class AppBridge(QObject):
         self._notify_config()
         self._persist()
 
+    async def _notification_disconnect(self) -> bool:
+        """Drop the Discord gateway between hourly sessions (notification mode)."""
+        if not self._monitor or not self._connected:
+            return True
+        await self._monitor.stop_background()
+        from mudae.kakera_log import flush_disk_log
+        from mudae.key_log import flush_disk_log as flush_key_log
+        from mudae.sphere_log import flush_disk_log as flush_sphere_log
+
+        flush_disk_log()
+        flush_key_log()
+        flush_sphere_log()
+        self._on_connected(False)
+        self._on_notification_standby(True)
+        return True
+
+    async def _notification_reconnect(self) -> bool:
+        """Restore the Discord gateway before the next hourly roll session."""
+        if not self._monitor:
+            return False
+        if self._engine and self._engine.is_running and self._engine.stop_requested:
+            return False
+        if self._monitor.is_connected:
+            self._on_notification_standby(False)
+            return True
+        ready = await self._monitor.start_background()
+        if ready:
+            self._macro_state.own_usernames = self._monitor.get_own_usernames()
+            own_id = self._monitor.get_own_user_id()
+            self._macro_state.own_user_ids = [own_id] if own_id is not None else []
+            self._on_connected(True)
+            self._on_notification_standby(False)
+            self._on_macro_state()
+        else:
+            self._on_status("Reconnect timed out (notification mode)")
+            self._on_connected(False)
+        return ready
+
     def _reader_thread_main(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -1137,15 +1222,12 @@ class AppBridge(QObject):
                 run_channel_profile_id,
                 daily,
             ),
+            notification_disconnect=self._notification_disconnect,
+            notification_reconnect=self._notification_reconnect,
         )
 
         async def runner() -> None:
-            connect_task = asyncio.create_task(self._monitor.connect())
-            ready = await self._monitor.wait_ready(timeout=30.0)
-            if connect_task.done():
-                exc = connect_task.exception()
-                if exc is not None:
-                    raise exc
+            ready = await self._monitor.start_background()
             if ready:
                 self._macro_state.own_usernames = self._monitor.get_own_usernames()
                 own_id = self._monitor.get_own_user_id()
@@ -1158,12 +1240,7 @@ class AppBridge(QObject):
             await self._stop_event.wait()
             if self._engine and self._engine.is_running:
                 self._engine.stop()
-            await self._monitor.disconnect()
-            connect_task.cancel()
-            try:
-                await connect_task
-            except asyncio.CancelledError:
-                pass
+            await self._monitor.stop_background()
             self._on_connected(False)
 
         try:
@@ -1196,6 +1273,12 @@ class AppBridge(QObject):
             self._run_account_name = ""
             loop.close()
             self._loop = None
+            self._on_notification_standby(False)
+            QMetaObject.invokeMethod(
+                self,
+                "_emit_session_active",
+                Qt.ConnectionType.QueuedConnection,
+            )
 
     @Slot()
     def connect(self) -> None:
@@ -1224,13 +1307,21 @@ class AppBridge(QObject):
             daemon=True,
         )
         self._thread.start()
+        self._emit_session_active()
 
     @Slot()
     def disconnect(self) -> None:
         if self._loop and self._stop_event:
             self._set_disconnecting(True)
             self._set_status("Disconnecting…")
-            self._loop.call_soon_threadsafe(self._stop_event.set)
+            self._set_notification_standby(False)
+
+            def _shutdown() -> None:
+                if self._engine and self._engine.is_running:
+                    self._engine.stop()
+                self._stop_event.set()
+
+            self._loop.call_soon_threadsafe(_shutdown)
         else:
             self._set_status("Not connected")
 
@@ -1327,9 +1418,17 @@ class AppBridge(QObject):
 
     @Slot()
     def stopMacro(self) -> None:
-        if self._engine and self._loop:
-            self._set_run_action_pending("stop")
-            self._loop.call_soon_threadsafe(self._engine.stop)
+        if not self._engine or not self._loop:
+            return
+        self._set_run_action_pending("stop")
+        release_session = self._notification_standby
+
+        def _stop() -> None:
+            self._engine.stop()
+            if release_session and self._stop_event:
+                self._stop_event.set()
+
+        self._loop.call_soon_threadsafe(_stop)
 
     @Slot()
     def playOhSphere(self) -> None:
