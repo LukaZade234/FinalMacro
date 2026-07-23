@@ -88,6 +88,12 @@ def is_us_response(content: str) -> bool:
     return "rolls stacked" in content.lower()
 
 
+def is_ohu_response(content: str) -> bool:
+    from mudae.parsers.ohu import is_ohu_response as _is_ohu
+
+    return _is_ohu(content)
+
+
 def is_ohu8_response(content: str) -> bool:
     from mudae.parsers.ohu8 import is_ohu8_response as _is_ohu8
 
@@ -125,6 +131,7 @@ RESPONSE_DETECTORS: list[tuple[str, ResponseDetector]] = [
     ("tu", is_tu_response),
     ("ku", is_ku_response),
     ("us", is_us_response),
+    ("ohu", is_ohu_response),
     ("ohu8", is_ohu8_response),
 ]
 

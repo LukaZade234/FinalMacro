@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from mudae.parsers.ohu import parse_minigame_availability
 from mudae.types import MessageKind, ParseResult
 
 _PERK8_CLICKED_RE = re.compile(
@@ -23,15 +24,15 @@ _PERK8_ROLLED_RE = re.compile(
     re.IGNORECASE,
 )
 _REFILL_HM_RE = re.compile(
-    r"(\d+)\s*h\s*(\d+)\s*min\s+before the refill",
+    r"\*{0,2}(\d+)\*{0,2}\s*h\s*\*{0,2}(\d+)\*{0,2}\s*min\s+before the refill",
     re.IGNORECASE,
 )
 _REFILL_H_RE = re.compile(
-    r"(\d+)\s*h(?:ours?)?\s+before the refill",
+    r"\*{0,2}(\d+)\*{0,2}\s*h(?:ours?)?\s+before the refill",
     re.IGNORECASE,
 )
 _REFILL_M_RE = re.compile(
-    r"(\d+)\s*min(?:ute)?s?\s+before the refill",
+    r"\*{0,2}(\d+)\*{0,2}\s*min(?:ute)?s?\s+before the refill",
     re.IGNORECASE,
 )
 
@@ -94,7 +95,7 @@ def is_ohu8_response(content: str) -> bool:
 
 def parse_ohu8(content: str) -> ParseResult:
     warnings: list[str] = []
-    fields: dict[str, int | None] = {}
+    fields: dict[str, int | None] = dict(parse_minigame_availability(content))
 
     clicked = parse_perk8_clicked(content)
     if clicked is not None:
@@ -113,6 +114,13 @@ def parse_ohu8(content: str) -> ParseResult:
         fields["perk8_refill_minutes"] = refill
 
     summary = "$ohu8"
+    if fields.get("oh_total") or fields.get("oc_total") or fields.get("oq_total"):
+        summary += (
+            f" · $oh {fields.get('oh_total', 0)}"
+            f" · $oc {fields.get('oc_total', 0)}"
+            f" · $oq {fields.get('oq_total', 0)}"
+            f" · $ot {fields.get('ot_total', 0)}"
+        )
     if clicked is not None:
         summary += f" · clicked {clicked[0]}/{clicked[1]}"
     if rolled is not None:

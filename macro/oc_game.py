@@ -15,6 +15,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from macro.minigame_util import minigame_command
 from macro.oc_solver import (
     choose_oc_click,
     emoji_to_oc_color,
@@ -93,18 +94,20 @@ class OcSphereGame:
         self._reward_content = ""
         self._observations: dict[int, str] = {}
 
-    async def play(self, *, prefix: str = "$") -> dict[str, Any]:
+    async def play(self, *, prefix: str = "$", uses: int = 1) -> dict[str, Any]:
         previously_active = getattr(self._monitor, "macro_active", False)
         self._monitor.macro_active = True
         clicks_spent = 0
         try:
             self._actions.drain_queue()
-            self._log("$oc: starting sphere game")
-            await self._actions.send_command("oc", prefix=prefix)
+            cmd = minigame_command("oc", uses)
+            label = f"${cmd}" if uses > 1 else "$oc"
+            self._log(f"{label}: starting sphere game")
+            await self._actions.send_command(cmd, prefix=prefix)
 
             grid = await self._wait_for_grid()
             if grid is None:
-                self._log("$oc: grid did not appear (timeout)")
+                self._log(f"{label}: grid did not appear (timeout)")
                 return {"clicks": 0, "reward": 0, "reason": "no grid"}
 
             grid_id = grid.message_id
@@ -112,7 +115,7 @@ class OcSphereGame:
             clicks_budget = parse_clicks_allowed(grid.content)
             self._observations = observations_from_buttons(buttons)
             self._log(
-                f"$oc: grid ready · {clicks_budget} clicks · {format_solver_stats(self._observations)}"
+                f"{label}: grid ready · {clicks_budget} clicks · {format_solver_stats(self._observations)}"
             )
 
             while not is_oc_game_over(buttons):
@@ -182,7 +185,7 @@ class OcSphereGame:
 
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
-            self._log(f"$oc: finished · {clicks_spent} clicks{reward_note}")
+            self._log(f"{label}: finished · {clicks_spent} clicks{reward_note}")
             return {
                 "clicks": clicks_spent,
                 "reward": reward,

@@ -24,6 +24,7 @@ from macro.roll_cycle import RollCycleEngine
 from macro.sphere_game import OhSphereGame
 from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
+from macro.minigames import PlayAllMinigames
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
@@ -141,6 +142,8 @@ class AppBridge(QObject):
         self._oh_running = False
         self._oc_running = False
         self._oq_running = False
+        self._minigames_running = False
+        self._minigame_availability: dict[str, int] = {}
         self._notification_standby = False
         self._servers_emit_pending = False
         self._config_emit_pending = False
@@ -395,11 +398,13 @@ class AppBridge(QObject):
                 self._tu_pending_active = True
             elif phase == MacroPhase.IDLE and self._tu_pending_active:
                 self._set_run_action_pending("")
-        elif pending == "oh" and not self._oh_running:
+        elif pending == "oh" and not self._oh_running and not self._minigames_running:
             self._set_run_action_pending("")
-        elif pending == "oc" and not self._oc_running:
+        elif pending == "oc" and not self._oc_running and not self._minigames_running:
             self._set_run_action_pending("")
-        elif pending == "oq" and not self._oq_running:
+        elif pending == "oq" and not self._oq_running and not self._minigames_running:
+            self._set_run_action_pending("")
+        elif pending == "minigames" and not self._minigames_running:
             self._set_run_action_pending("")
 
     def _notify_macro(self) -> None:
@@ -1403,7 +1408,7 @@ class AppBridge(QObject):
         if self._engine.is_running:
             self._set_status("Macro already running")
             return
-        if self._oh_running or self._oc_running or self._oq_running:
+        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
             self._set_status("Stop the minigame before rolling $us")
             return
         self._persist()
@@ -1438,7 +1443,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oh")
             return
-        if self._oh_running or self._oc_running or self._oq_running:
+        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
             self._set_status("Stop the minigame before playing $oh")
             return
 
@@ -1455,6 +1460,9 @@ class AppBridge(QObject):
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
                     self._record_minigame_spheres("oh", reward, clicks=clicks)
+                spheres_bonus = int(result.get("spheres_bonus") or 0)
+                if spheres_bonus > 0:
+                    self._record_minigame_spheres("oh", spheres_bonus, clicks=0)
             except Exception as exc:  # noqa: BLE001 - surface to the activity log
                 reason = "error"
                 activity.write(f"$oh error: {exc}")
@@ -1477,7 +1485,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oc")
             return
-        if self._oh_running or self._oc_running or self._oq_running:
+        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
             self._set_status("Stop the minigame before playing $oc")
             return
 
@@ -1516,7 +1524,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oq")
             return
-        if self._oh_running or self._oc_running or self._oq_running:
+        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
             self._set_status("Stop the minigame before playing $oq")
             return
 
@@ -1539,6 +1547,53 @@ class AppBridge(QObject):
             finally:
                 self._finish_minigame_session(activity, recorder, reason)
                 self._oq_running = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def playAllMinigames(self) -> None:
+        if not self._loop or not self._actions or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._engine and self._engine.is_running:
+            self._set_status("Stop the macro before playing minigames")
+            return
+        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
+            self._set_status("Stop the minigame before playing all")
+            return
+
+        activity, recorder = self._begin_minigame_session("minigames")
+        self._minigames_running = True
+        self._set_run_action_pending("minigames")
+
+        def _on_reward(game: str, amount: int, clicks: int) -> None:
+            self._record_minigame_spheres(game, amount, clicks=clicks)
+
+        runner = PlayAllMinigames(
+            self._actions,
+            self._monitor,
+            log=activity.write,
+            on_game_reward=_on_reward,
+        )
+
+        async def _run() -> None:
+            reason = "finished"
+            try:
+                result = await runner.play(prefix=self._macro_config.prefix)
+                self._minigame_availability = dict(result.get("availability") or {})
+                if result.get("reason") == "ohu failed":
+                    reason = "error"
+            except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                reason = "error"
+                activity.write(f"play-all error: {exc}")
+            finally:
+                self._finish_minigame_session(activity, recorder, reason)
+                self._minigames_running = False
                 QMetaObject.invokeMethod(
                     self,
                     "_clear_run_action_pending",

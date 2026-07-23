@@ -20,6 +20,7 @@ from mudae.parsers.settings import parse_settings
 from mudae.parsers.sphere import parse_sphere_click
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
+from mudae.parsers.ohu import parse_ohu
 from mudae.parsers.ohu8 import parse_ohu8
 from mudae.parsers.dk import parse_dk
 from mudae.parsers.reaction_power import parse_kakera_react_denied, parse_ku
@@ -32,6 +33,7 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "ku": parse_ku,
     "settings": parse_settings,
     "us": parse_us,
+    "ohu": parse_ohu,
     "ohu8": parse_ohu8,
 }
 _KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll"})

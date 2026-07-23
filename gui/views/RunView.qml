@@ -191,6 +191,7 @@ Item {
                         onPlayOhClicked: App.playOhSphere()
                         onPlayOcClicked: App.playOcSphere()
                         onPlayOqClicked: App.playOqSphere()
+                        onPlayAllMinigamesClicked: App.playAllMinigames()
                         onPlayUsClicked: App.startUsMode()
                     }
                 }

@@ -11,6 +11,12 @@ ColumnLayout {
     property bool notificationStandby: false
     property bool sessionActive: false
 
+    readonly property bool minigameBusy:
+        App.runActionPending === "oh"
+        || App.runActionPending === "oc"
+        || App.runActionPending === "oq"
+        || App.runActionPending === "minigames"
+
     signal connectClicked()
     signal disconnectClicked()
     signal runTuClicked()
@@ -19,6 +25,7 @@ ColumnLayout {
     signal playOhClicked()
     signal playOcClicked()
     signal playOqClicked()
+    signal playAllMinigamesClicked()
     signal playUsClicked()
 
     spacing: 10
@@ -102,10 +109,7 @@ ColumnLayout {
         ActionButton {
             text: "Play $oh"
             loading: App.runActionPending === "oh"
-            enabled: bar.connected && !bar.macroEngineRunning
-                     && App.runActionPending !== "oh"
-                     && App.runActionPending !== "oc"
-                     && App.runActionPending !== "oq"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
@@ -115,10 +119,7 @@ ColumnLayout {
         ActionButton {
             text: "Play $oc"
             loading: App.runActionPending === "oc"
-            enabled: bar.connected && !bar.macroEngineRunning
-                     && App.runActionPending !== "oh"
-                     && App.runActionPending !== "oc"
-                     && App.runActionPending !== "oq"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
@@ -128,10 +129,7 @@ ColumnLayout {
         ActionButton {
             text: "Play $oq"
             loading: App.runActionPending === "oq"
-            enabled: bar.connected && !bar.macroEngineRunning
-                     && App.runActionPending !== "oh"
-                     && App.runActionPending !== "oc"
-                     && App.runActionPending !== "oq"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
@@ -139,9 +137,20 @@ ColumnLayout {
         }
 
         ActionButton {
+            text: "Play all"
+            loading: App.runActionPending === "minigames"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
+            Layout.fillWidth: true
+            fillColor: Theme.accentPrimary
+            textColor: Theme.bgDark
+            labelWeight: Font.DemiBold
+            onClicked: bar.playAllMinigamesClicked()
+        }
+
+        ActionButton {
             text: "Roll $us"
             loading: App.runActionPending === "us"
-            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "us"
+            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "us" && !bar.minigameBusy
             Layout.fillWidth: true
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary

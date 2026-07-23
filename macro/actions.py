@@ -133,7 +133,21 @@ def is_dk_use_parse_result(snapshot: MudaeMessageSnapshot, parsed: ParseResult) 
     return False
 
 
+from mudae.parsers.ohu import is_ohu_response
 from mudae.parsers.ohu8 import is_ohu8_response
+
+
+def is_ohu_parse_result(parsed: ParseResult) -> bool:
+    if parsed.kind == MessageKind.COMMAND_RESPONSE:
+        cmd = (
+            parsed.fields.get("parser_command")
+            or parsed.fields.get("command")
+            or ""
+        ).lower()
+        if cmd in {"ohu", "ohu8"}:
+            return True
+    content = parsed.fields.get("content") or parsed.summary or ""
+    return is_ohu_response(content) or is_ohu8_response(content)
 
 
 def is_ohu8_parse_result(parsed: ParseResult) -> bool:
@@ -214,6 +228,15 @@ class DiscordActions:
     async def wait_for_tu(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(
             lambda _s, p: is_tu_parse_result(p),
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
+    async def wait_for_ohu(self, *, timeout: float = 12.0) -> ParseResult | None:
+        result = await self.wait_for(
+            lambda snapshot, parsed: is_ohu_parse_result(parsed)
+            or is_ohu_response(getattr(snapshot, "content", "") or "")
+            or is_ohu8_response(getattr(snapshot, "content", "") or ""),
             timeout=timeout,
         )
         return result[1] if result else None

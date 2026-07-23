@@ -13,6 +13,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from macro.minigame_util import minigame_command
 from macro.oq_solver import (
     CLICK_BUDGET,
     choose_oq_click,
@@ -97,18 +98,20 @@ class OqSphereGame:
         self._observations: dict[int, str] = {}
         self._paid_clicks = 0
 
-    async def play(self, *, prefix: str = "$") -> dict[str, Any]:
+    async def play(self, *, prefix: str = "$", uses: int = 1) -> dict[str, Any]:
         previously_active = getattr(self._monitor, "macro_active", False)
         self._monitor.macro_active = True
         paid_clicks = 0
         try:
             self._actions.drain_queue()
-            self._log("$oq: starting sphere game")
-            await self._actions.send_command("oq", prefix=prefix)
+            cmd = minigame_command("oq", uses)
+            label = f"${cmd}" if uses > 1 else "$oq"
+            self._log(f"{label}: starting sphere game")
+            await self._actions.send_command(cmd, prefix=prefix)
 
             grid = await self._wait_for_grid()
             if grid is None:
-                self._log("$oq: grid did not appear (timeout)")
+                self._log(f"{label}: grid did not appear (timeout)")
                 return {"clicks": 0, "reward": 0, "reason": "no grid"}
 
             grid_id = grid.message_id
@@ -117,7 +120,7 @@ class OqSphereGame:
             self._observations = observations_from_buttons(buttons)
             self._paid_clicks = 0
             self._log(
-                f"$oq: grid ready · {clicks_budget} paid clicks · "
+                f"{label}: grid ready · {clicks_budget} paid clicks · "
                 f"{format_solver_stats(self._observations)}"
             )
 
@@ -194,7 +197,7 @@ class OqSphereGame:
 
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
-            self._log(f"$oq: finished · {paid_clicks} paid clicks{reward_note}")
+            self._log(f"{label}: finished · {paid_clicks} paid clicks{reward_note}")
             return {
                 "clicks": paid_clicks,
                 "reward": reward,

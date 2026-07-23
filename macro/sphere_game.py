@@ -34,6 +34,10 @@ from mudae.constants import (
     SPHERE_REVEAL_EMOJIS,
     SPHERE_VALUE_RANK,
 )
+from mudae.parsers.ohu import parse_oh_invested_bonus
+
+from macro.minigame_util import minigame_command
+
 
 def sphere_value_rank(emoji: str) -> int:
     """Paid-click value for a revealed sphere emoji (higher = click first)."""
@@ -395,25 +399,41 @@ class OhSphereGame:
         self._click_delay = click_delay
         self._reward_content = ""
 
-    async def play(self, *, prefix: str = "$") -> dict[str, Any]:
+    async def play(self, *, prefix: str = "$", uses: int = 1) -> dict[str, Any]:
         previously_active = getattr(self._monitor, "macro_active", False)
         self._monitor.macro_active = True
         clicks_spent = 0
         free_clicks = 0
         try:
             self._actions.drain_queue()
-            self._log("$oh: starting sphere game")
-            await self._actions.send_command("oh", prefix=prefix)
+            cmd = minigame_command("oh", uses)
+            label = f"${cmd}" if uses > 1 else "$oh"
+            self._log(f"{label}: starting sphere game")
+            await self._actions.send_command(cmd, prefix=prefix)
 
             grid = await self._wait_for_grid()
             if grid is None:
-                self._log("$oh: grid did not appear (timeout)")
-                return {"clicks": 0, "free_clicks": 0, "reward": 0, "reason": "no grid"}
+                self._log(f"{label}: grid did not appear (timeout)")
+                return {
+                    "clicks": 0,
+                    "free_clicks": 0,
+                    "reward": 0,
+                    "oq_bonus": 0,
+                    "spheres_bonus": 0,
+                    "reason": "no grid",
+                }
+
+            bonus = parse_oh_invested_bonus(grid.content or "")
+            if bonus["oq_bonus"] or bonus["spheres_bonus"]:
+                self._log(
+                    f"{label}: invested bonus · +{bonus['oq_bonus']} $oq"
+                    f" · +{bonus['spheres_bonus']:,} sp"
+                )
 
             grid_id = grid.message_id
             buttons = list(grid.buttons)
             clicks_budget = parse_clicks_allowed(grid.content)
-            self._log(f"$oh: grid ready · {clicks_budget} paid clicks allowed")
+            self._log(f"{label}: grid ready · {clicks_budget} paid clicks allowed")
 
             while not is_oh_game_over(buttons):
                 choice = choose_oh_click(
@@ -485,7 +505,7 @@ class OhSphereGame:
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
             self._log(
-                f"$oh: finished · {clicks_spent} paid"
+                f"{label}: finished · {clicks_spent} paid"
                 + (f", {free_clicks} free" if free_clicks else "")
                 + reward_note
             )
@@ -493,6 +513,8 @@ class OhSphereGame:
                 "clicks": clicks_spent,
                 "free_clicks": free_clicks,
                 "reward": reward,
+                "oq_bonus": bonus["oq_bonus"],
+                "spheres_bonus": bonus["spheres_bonus"],
                 "reason": "done",
             }
         finally:
