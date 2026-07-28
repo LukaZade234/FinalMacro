@@ -10,6 +10,7 @@ from typing import Any
 import discord
 from discord import Client as DiscordClient
 
+from mudae.discord_errors import is_transient_discord_error
 from mudae.claim_context import ClaimContextTracker
 from mudae.command_context import CommandContextTracker
 from mudae.parsers.embed import get_character_owner, is_character_embed, is_ownership_footer
@@ -24,6 +25,8 @@ OnParsedCallback = Callable[[MudaeMessageSnapshot, ParseResult], None]
 # Keep only the most recent messages for button clicks; older ones can be
 # re-fetched on demand. Prevents unbounded memory growth in long sessions.
 _MESSAGE_CACHE_MAX = 300
+_SEND_ATTEMPTS = 3
+_SEND_RETRY_SEC = 2.0
 
 
 class ChannelMonitor:
@@ -107,11 +110,40 @@ class ChannelMonitor:
             self.on_parsed(snapshot, parsed)
 
     async def send_command(self, command: str, *, prefix: str | None = None) -> None:
-        channel = await self._get_text_channel()
         cmd = command.strip().lstrip("$")
         pre = prefix if prefix is not None else "$"
-        self._pending_macro_command = cmd.lower()
-        await channel.send(f"{pre}{cmd}")
+        payload = f"{pre}{cmd}"
+        last_exc: BaseException | None = None
+        for attempt in range(1, _SEND_ATTEMPTS + 1):
+            try:
+                channel = await self._get_text_channel()
+                self._pending_macro_command = cmd.lower()
+                await channel.send(payload)
+                return
+            except Exception as exc:
+                last_exc = exc
+                if not is_transient_discord_error(exc) or attempt >= _SEND_ATTEMPTS:
+                    raise
+                self._emit_status(
+                    f"Send failed ({exc}) — retry {attempt}/{_SEND_ATTEMPTS - 1}"
+                )
+                await asyncio.sleep(_SEND_RETRY_SEC * attempt)
+        if last_exc is not None:
+            raise last_exc
+
+    async def force_reconnect(self) -> bool:
+        """Close the gateway (if any) and open a fresh Discord connection."""
+        self._emit_status("Reconnecting to Discord…")
+        try:
+            await self.stop_background()
+        except Exception:
+            pass
+        ready = await self.start_background()
+        if ready:
+            self._emit_status("Reconnected")
+        else:
+            self._emit_status("Reconnect timed out")
+        return ready
 
     def _remember_message(self, message: discord.Message) -> None:
         self._messages[message.id] = message

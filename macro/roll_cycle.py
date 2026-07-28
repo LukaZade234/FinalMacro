@@ -14,6 +14,7 @@ from macro.activity_log import ActivityLog
 from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
+from mudae.discord_errors import is_fatal_runtime_error, is_transient_discord_error
 from macro.perk8_daily import (
     PERK8_MIN_ROLL_POOL,
     Perk8DailyRecord,
@@ -46,12 +47,18 @@ from mudae.buttons import is_kakera_button, is_sphere_button
 _MAX_FAILED_US_ADDS = 3
 # Stop $us mode after this many consecutive roll timeouts (no embed arrived).
 _MAX_ROLL_TIMEOUT_RETRIES = 5
+# How many Discord 503 / disconnect recoveries to attempt before giving up.
+_MAX_TRANSIENT_RECOVERIES = 3
+# After this many consecutive roll timeouts, force a Discord reconnect.
+_ROLL_TIMEOUT_RECONNECT_AFTER = 2
 
 # Timing knobs shared by the roll loops (seconds).
 _COMMAND_SETTLE_SEC = 2.5  # pause after $tu before polling for the reply
 _OHU8_SETTLE_SEC = 2.0  # pause after $ohu8 before polling for the reply
 _RESPONSE_TIMEOUT_SEC = 12.0  # max wait for a $tu / $ohu8 / $us text reply
-_ROLL_EMBED_TIMEOUT_SEC = 25.0  # max wait for a character embed after rolling
+# Progressive waits for a missed/slow roll embed (fast recover, then longer).
+_ROLL_EMBED_TIMEOUTS_SEC = (5.0, 10.0, 25.0)
+_ROLL_EMBED_TIMEOUT_SEC = _ROLL_EMBED_TIMEOUTS_SEC[-1]  # used in timeout log text
 _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($us mode)
 _ROLLS_RESET_BUFFER_SEC = 5.0  # pad after parsed reset time before re-checking $tu
 _STOP_CHECK_SEC = 1.0  # wake interval so Stop remains responsive during long waits
@@ -154,6 +161,56 @@ class RollCycleEngine:
 
     def _log_debug(self, text: str) -> None:
         self._activity.debug(text)
+
+    async def _force_discord_reconnect(self) -> bool:
+        """Force a fresh Discord gateway after a transport failure."""
+        if self._stop.is_set():
+            return False
+        reconnect = getattr(self._monitor, "force_reconnect", None)
+        if reconnect is None:
+            # Fall back to notification-mode reconnect hooks when available.
+            if not await self._release_connection_for_notifications():
+                return False
+            return await self._restore_connection_for_notifications()
+        result = reconnect()
+        if asyncio.iscoroutine(result):
+            return bool(await result)
+        return bool(result)
+
+    async def _recover_transient_connection(
+        self,
+        exc: BaseException,
+        *,
+        label: str,
+        recoveries: int,
+    ) -> int | None:
+        """Reconnect after a transient Discord error.
+
+        Returns the new recovery count on success, or ``None`` when the caller
+        should abort (fatal / too many failures / reconnect failed).
+        """
+        if is_fatal_runtime_error(exc):
+            self._log(f"{label}: fatal runtime error — {exc}")
+            return None
+        if not is_transient_discord_error(exc):
+            return None
+        recoveries += 1
+        if recoveries > _MAX_TRANSIENT_RECOVERIES:
+            self._log(
+                f"{label}: connection errors exhausted "
+                f"({recoveries - 1}/{_MAX_TRANSIENT_RECOVERIES}) — stopping"
+            )
+            return None
+        self._log(
+            f"{label}: connection error ({exc}) — reconnecting "
+            f"({recoveries}/{_MAX_TRANSIENT_RECOVERIES})"
+        )
+        if not await self._force_discord_reconnect():
+            self._log(f"{label}: reconnect failed — stopping")
+            return None
+        self._actions.drain_queue()
+        await asyncio.sleep(2.0)
+        return recoveries
 
     def begin_session(self, mode: str, meta: dict[str, Any]) -> None:
         if self._session and self._session.active:
@@ -519,52 +576,64 @@ class RollCycleEngine:
 
             self._log("Macro starting (continuous hourly mode)")
 
+            transient_recoveries = 0
             while not self._stop.is_set():
-                if not await self._restore_connection_for_notifications():
-                    self._log("Notification mode: reconnect failed — stopping")
-                    break
-
-                if not tu_fresh:
-                    if not await self.run_tu():
-                        self._log("$tu failed — stopping")
+                try:
+                    if not await self._restore_connection_for_notifications():
+                        self._log("Notification mode: reconnect failed — stopping")
                         break
-                tu_fresh = False
 
-                await self._maybe_refresh_perk8_status()
+                    if not tu_fresh:
+                        if not await self.run_tu():
+                            self._log("$tu failed — stopping")
+                            break
+                    tu_fresh = False
 
-                normal_rolls = self._state.rolls_left or 0
-                if normal_rolls <= 0:
+                    await self._maybe_refresh_perk8_status()
+
+                    normal_rolls = self._state.rolls_left or 0
+                    if normal_rolls <= 0:
+                        if not await self._wait_for_hourly_refill():
+                            break
+                        tu_fresh = True
+                        continue
+
+                    # Fresh record list per hourly batch: claim-best runs inside the
+                    # segment, and keeping every hour's records would grow forever
+                    # on multi-day runs.
+                    session_records: list[RollRecord] = []
+                    done, claimed, roll_index = await self._roll_hourly_normal_segment(
+                        cmd,
+                        session_records,
+                        roll_index,
+                        normal_rolls=normal_rolls,
+                    )
+                    if claimed:
+                        break
+                    if done == 0:
+                        self._log("Roll failed — stopping")
+                        break
+
                     if not await self._wait_for_hourly_refill():
                         break
                     tu_fresh = True
-                    continue
-
-                # Fresh record list per hourly batch: claim-best runs inside the
-                # segment, and keeping every hour's records would grow forever
-                # on multi-day runs.
-                session_records: list[RollRecord] = []
-                done, claimed, roll_index = await self._roll_hourly_normal_segment(
-                    cmd,
-                    session_records,
-                    roll_index,
-                    normal_rolls=normal_rolls,
-                )
-                if claimed:
-                    break
-                if done == 0:
-                    self._log("Roll failed — stopping")
-                    break
-
-                if not await self._wait_for_hourly_refill():
-                    break
-                tu_fresh = True
+                except Exception as exc:
+                    recovered = await self._recover_transient_connection(
+                        exc,
+                        label="Macro",
+                        recoveries=transient_recoveries,
+                    )
+                    if recovered is None:
+                        raise
+                    transient_recoveries = recovered
+                    tu_fresh = False
 
             self._log("Macro finished")
         except asyncio.CancelledError:
             session_reason = "stopped"
             self._log("Macro stopped")
         except Exception as exc:  # noqa: BLE001 - surface to the activity log
-            session_reason = "error"
+            session_reason = "stopped" if is_fatal_runtime_error(exc) else "error"
             self._log(f"Macro error: {exc}")
         finally:
             if self._stop.is_set() and session_reason == "finished":
@@ -599,14 +668,25 @@ class RollCycleEngine:
         self._log(f"Roll {roll_index}: ${cmd}")
         self._log_debug(f"roll {roll_index}: sending ${cmd} · queue={qsize}")
         await self._actions.send_command(cmd, prefix=self._config.prefix)
-        result = await self._actions.wait_for_roll(
-            roll_command=cmd,
-            timeout=_ROLL_EMBED_TIMEOUT_SEC,
-        )
+        result = None
+        waited = 0.0
+        for stage, timeout in enumerate(_ROLL_EMBED_TIMEOUTS_SEC, start=1):
+            result = await self._actions.wait_for_roll(
+                roll_command=cmd,
+                timeout=timeout,
+            )
+            if result is not None:
+                break
+            waited += timeout
+            if stage < len(_ROLL_EMBED_TIMEOUTS_SEC):
+                self._log_debug(
+                    f"roll {roll_index}: no embed after {waited:g}s — "
+                    f"waiting up to {_ROLL_EMBED_TIMEOUTS_SEC[stage]:g}s more"
+                )
         if result is None:
             self._log("Roll embed timeout")
             self._log_debug(
-                f"roll {roll_index}: embed timeout · "
+                f"roll {roll_index}: embed timeout after {waited:g}s · "
                 f"queue={getattr(self._actions, 'queue_size', lambda: 0)()}"
             )
             return _RollOutcome(ok=False)
@@ -1084,154 +1164,170 @@ class RollCycleEngine:
 
             await self._refresh_perk8_status(at_startup=True)
 
+            transient_recoveries = 0
             while not self._stop.is_set():
-                if not await self.run_tu():
-                    self._log("$us mode: $tu failed — stopping")
-                    break
-
-                await self._maybe_refresh_perk8_status()
-
-                normal_rolls = self._state.rolls_left or 0
-                us_bonus = self._state.rolls_us_bonus or 0
-                reset_m = self._state.rolls_reset_minutes
-
-                if reset_m is not None and reset_m <= margin:
-                    if normal_rolls > 0 or us_bonus > 0:
-                        self._log(
-                            f"$us mode: rolls reset in {reset_m}m — rolling out "
-                            f"{normal_rolls + us_bonus} usable roll(s) before they reset"
-                        )
-                        if normal_rolls > 0:
-                            self._reset_roll_stop_tracker()
-                            segment_start = len(session_records)
-                            done, claimed = await self._run_normal_roll_segment(
-                                cmd,
-                                session_records,
-                                roll_index,
-                                respect_roll_stop=False,
-                                max_rolls=normal_rolls,
-                            )
-                            roll_index += done
-                            claimed_any = claimed_any or claimed
-                            await self._claim_best_at_session_end(
-                                session_records[segment_start:],
-                                claimed,
-                            )
-                            keep, roll_timeouts = await self._handle_us_roll_timeout(
-                                done, normal_rolls, roll_timeouts
-                            )
-                            if not keep:
-                                break
-                            if done < normal_rolls:
-                                continue
-                        if us_bonus > 0:
-                            done, claimed = await self._roll_us_batch(
-                                cmd,
-                                us_bonus,
-                                session_records,
-                                roll_index,
-                                us_roll=True,
-                            )
-                            roll_index += done
-                            claimed_any = claimed_any or claimed
-                            keep, roll_timeouts = await self._handle_us_roll_timeout(
-                                done, us_bonus, roll_timeouts
-                            )
-                            if not keep:
-                                break
-                            if done < us_bonus:
-                                continue
-                    if not await self._wait_for_rolls_reset(margin):
+                try:
+                    if not await self.run_tu():
+                        self._log("$us mode: $tu failed — stopping")
                         break
+
+                    await self._maybe_refresh_perk8_status()
+
+                    normal_rolls = self._state.rolls_left or 0
+                    us_bonus = self._state.rolls_us_bonus or 0
+                    reset_m = self._state.rolls_reset_minutes
+
+                    if reset_m is not None and reset_m <= margin:
+                        if normal_rolls > 0 or us_bonus > 0:
+                            self._log(
+                                f"$us mode: rolls reset in {reset_m}m — rolling out "
+                                f"{normal_rolls + us_bonus} usable roll(s) before they reset"
+                            )
+                            if normal_rolls > 0:
+                                self._reset_roll_stop_tracker()
+                                segment_start = len(session_records)
+                                done, claimed = await self._run_normal_roll_segment(
+                                    cmd,
+                                    session_records,
+                                    roll_index,
+                                    respect_roll_stop=False,
+                                    max_rolls=normal_rolls,
+                                )
+                                roll_index += done
+                                claimed_any = claimed_any or claimed
+                                await self._claim_best_at_session_end(
+                                    session_records[segment_start:],
+                                    claimed,
+                                )
+                                keep, roll_timeouts = await self._handle_us_roll_timeout(
+                                    done, normal_rolls, roll_timeouts
+                                )
+                                if not keep:
+                                    break
+                                if done < normal_rolls:
+                                    continue
+                            if us_bonus > 0:
+                                done, claimed = await self._roll_us_batch(
+                                    cmd,
+                                    us_bonus,
+                                    session_records,
+                                    roll_index,
+                                    us_roll=True,
+                                )
+                                roll_index += done
+                                claimed_any = claimed_any or claimed
+                                keep, roll_timeouts = await self._handle_us_roll_timeout(
+                                    done, us_bonus, roll_timeouts
+                                )
+                                if not keep:
+                                    break
+                                if done < us_bonus:
+                                    continue
+                        if not await self._wait_for_rolls_reset(margin):
+                            break
+                        us_stack = None
+                        last_request = 0
+                        failed_adds = 0
+                        self._reset_roll_stop_tracker()
+                        continue
+
+                    if self._should_roll_normal_in_us_mode():
+                        self._log(
+                            f"$us mode: {normal_rolls} normal roll(s) — "
+                            "standard macro rules"
+                        )
+                        segment_start = len(session_records)
+                        done, claimed = await self._run_normal_roll_segment(
+                            cmd,
+                            session_records,
+                            roll_index,
+                        )
+                        roll_index += done
+                        claimed_any = claimed_any or claimed
+                        if done == 0 and not claimed:
+                            self._log("$us mode: normal roll failed — stopping")
+                            break
+                        await self._claim_best_at_session_end(
+                            session_records[segment_start:],
+                            claimed,
+                        )
+                        continue
+
+                    if us_bonus > 0:
+                        if last_request > 0 and us_stack is not None:
+                            us_stack -= last_request
+                        last_request = 0
+                        failed_adds = 0
+
+                        done, claimed = await self._roll_us_batch(
+                            cmd,
+                            us_bonus,
+                            session_records,
+                            roll_index,
+                            us_roll=True,
+                        )
+                        roll_index += done
+                        claimed_any = claimed_any or claimed
+                        keep, roll_timeouts = await self._handle_us_roll_timeout(
+                            done, us_bonus, roll_timeouts
+                        )
+                        if not keep:
+                            break
+                        if done < us_bonus:
+                            continue
+                        continue
+
+                    # Usable pool is empty. A previous "$us N" that left us at zero
+                    # means Mudae ignored it — re-read the authoritative stack and
+                    # count the miss so we don't loop forever.
+                    just_read_stack = False
+                    if us_stack is None or failed_adds > 0:
+                        fresh = await self._read_us_stack()
+                        if fresh is None:
+                            self._log("$us mode: could not read $us stack — stopping")
+                            break
+                        us_stack = fresh
+                        just_read_stack = True
+
+                    if us_stack < 1:
+                        self._log("$us mode: no $us rolls left in the stack — stopping")
+                        break
+
+                    request = min(max_request, int(us_stack))
+                    if just_read_stack:
+                        self._log(
+                            f"$us mode: waiting {read_before_add_delay:g}s after "
+                            f"$us read before adding rolls"
+                        )
+                        await asyncio.sleep(read_before_add_delay)
+                    self._log(
+                        f"$us mode: {us_stack:g} stacked — adding "
+                        f"{self._config.prefix}us {request}"
+                    )
+                    await self._actions.send_command(
+                        f"us {request}", prefix=self._config.prefix
+                    )
+                    last_request = request
+                    failed_adds += 1
+                    if failed_adds >= _MAX_FAILED_US_ADDS:
+                        self._log(
+                            f"$us mode: ${self._config.prefix}us {request} not registering "
+                            f"after {failed_adds} attempts — stopping (Mudae ignored it)"
+                        )
+                        break
+                    await asyncio.sleep(add_delay)
+                except Exception as exc:
+                    recovered = await self._recover_transient_connection(
+                        exc,
+                        label="$us mode",
+                        recoveries=transient_recoveries,
+                    )
+                    if recovered is None:
+                        raise
+                    transient_recoveries = recovered
                     us_stack = None
                     last_request = 0
-                    failed_adds = 0
-                    self._reset_roll_stop_tracker()
                     continue
-
-                if self._should_roll_normal_in_us_mode():
-                    self._log(
-                        f"$us mode: {normal_rolls} normal roll(s) — "
-                        "standard macro rules"
-                    )
-                    segment_start = len(session_records)
-                    done, claimed = await self._run_normal_roll_segment(
-                        cmd,
-                        session_records,
-                        roll_index,
-                    )
-                    roll_index += done
-                    claimed_any = claimed_any or claimed
-                    if done == 0 and not claimed:
-                        self._log("$us mode: normal roll failed — stopping")
-                        break
-                    await self._claim_best_at_session_end(
-                        session_records[segment_start:],
-                        claimed,
-                    )
-                    continue
-
-                if us_bonus > 0:
-                    if last_request > 0 and us_stack is not None:
-                        us_stack -= last_request
-                    last_request = 0
-                    failed_adds = 0
-
-                    done, claimed = await self._roll_us_batch(
-                        cmd,
-                        us_bonus,
-                        session_records,
-                        roll_index,
-                        us_roll=True,
-                    )
-                    roll_index += done
-                    claimed_any = claimed_any or claimed
-                    keep, roll_timeouts = await self._handle_us_roll_timeout(
-                        done, us_bonus, roll_timeouts
-                    )
-                    if not keep:
-                        break
-                    if done < us_bonus:
-                        continue
-                    continue
-
-                # Usable pool is empty. A previous "$us N" that left us at zero
-                # means Mudae ignored it — re-read the authoritative stack and
-                # count the miss so we don't loop forever.
-                just_read_stack = False
-                if us_stack is None or failed_adds > 0:
-                    fresh = await self._read_us_stack()
-                    if fresh is None:
-                        self._log("$us mode: could not read $us stack — stopping")
-                        break
-                    us_stack = fresh
-                    just_read_stack = True
-
-                if us_stack < 1:
-                    self._log("$us mode: no $us rolls left in the stack — stopping")
-                    break
-
-                request = min(max_request, int(us_stack))
-                if just_read_stack:
-                    self._log(
-                        f"$us mode: waiting {read_before_add_delay:g}s after "
-                        f"$us read before adding rolls"
-                    )
-                    await asyncio.sleep(read_before_add_delay)
-                self._log(
-                    f"$us mode: {us_stack:g} stacked — adding "
-                    f"{self._config.prefix}us {request}"
-                )
-                await self._actions.send_command(f"us {request}", prefix=self._config.prefix)
-                last_request = request
-                failed_adds += 1
-                if failed_adds >= _MAX_FAILED_US_ADDS:
-                    self._log(
-                        f"$us mode: ${self._config.prefix}us {request} not registering "
-                        f"after {failed_adds} attempts — stopping (Mudae ignored it)"
-                    )
-                    break
-                await asyncio.sleep(add_delay)
 
             await self._claim_best_at_session_end(session_records, claimed_any)
             self._log(f"$us mode: finished ({roll_index} roll(s))")
@@ -1239,7 +1335,7 @@ class RollCycleEngine:
             session_reason = "stopped"
             self._log("$us mode stopped")
         except Exception as exc:  # noqa: BLE001 - surface to the activity log
-            session_reason = "error"
+            session_reason = "stopped" if is_fatal_runtime_error(exc) else "error"
             self._log(f"$us mode error: {exc}")
         finally:
             if self._stop.is_set() and session_reason == "finished":
@@ -1267,14 +1363,24 @@ class RollCycleEngine:
         if roll_timeouts >= _MAX_ROLL_TIMEOUT_RETRIES:
             self._log(
                 f"$us mode: roll timeout after {done}/{planned} roll(s) — "
-                f"no Mudae character embed within {_ROLL_EMBED_TIMEOUT_SEC:g}s; "
+                f"no Mudae character embed after progressive wait; "
                 f"stopped after {roll_timeouts} retries"
             )
             return False, roll_timeouts
+        if roll_timeouts >= _ROLL_TIMEOUT_RECONNECT_AFTER:
+            self._log(
+                f"$us mode: {roll_timeouts} consecutive roll timeouts — "
+                "forcing Discord reconnect"
+            )
+            if not await self._force_discord_reconnect():
+                self._log("$us mode: reconnect after roll timeout failed — stopping")
+                return False, roll_timeouts
+            self._actions.drain_queue()
         delay = self._config.us_roll_timeout_retry_delay()
+        stages = "/".join(f"{t:g}s" for t in _ROLL_EMBED_TIMEOUTS_SEC)
         self._log(
             f"$us mode: roll timeout after {done}/{planned} roll(s) — "
-            f"no character embed within {_ROLL_EMBED_TIMEOUT_SEC:g}s; "
+            f"no character embed ({stages}); "
             f"waiting {delay:g}s then resuming "
             f"({roll_timeouts}/{_MAX_ROLL_TIMEOUT_RETRIES})"
         )

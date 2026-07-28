@@ -24,6 +24,7 @@ from macro.oq_solver import (
     observations_from_buttons,
 )
 from macro.sphere_game import (
+    FIRST_CLICK_DELAY_SEC,
     _MIN_GRID_BUTTONS,
     _disable_button,
     grid_signature,
@@ -123,6 +124,7 @@ class OqSphereGame:
                 f"{label}: grid ready · {clicks_budget} paid clicks · "
                 f"{format_solver_stats(self._observations)}"
             )
+            await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
 
             while not is_oq_game_over(buttons):
                 try:

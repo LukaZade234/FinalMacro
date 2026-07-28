@@ -60,6 +60,9 @@ _DEFAULT_CLICKS_ALLOWED = 5
 # Minimum sphere buttons that distinguishes the $oh grid from a roll's lone
 # sphere react button.
 _MIN_GRID_BUTTONS = 10
+# Pause after the grid message lands before the first button click — clicking
+# immediately often fails to register with Mudae.
+FIRST_CLICK_DELAY_SEC = 1.0
 
 
 def _emoji(button: dict[str, Any]) -> str:
@@ -434,6 +437,7 @@ class OhSphereGame:
             buttons = list(grid.buttons)
             clicks_budget = parse_clicks_allowed(grid.content)
             self._log(f"{label}: grid ready · {clicks_budget} paid clicks allowed")
+            await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
 
             while not is_oh_game_over(buttons):
                 choice = choose_oh_click(
