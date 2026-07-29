@@ -190,8 +190,22 @@ class DiscordActions:
     def queue_size(self) -> int:
         return self._queue.qsize()
 
-    async def send_command(self, command: str, *, prefix: str | None = None) -> None:
-        await self._monitor.send_command(command, prefix=prefix)
+    async def send_command(self, command: str, *, prefix: str | None = None) -> int | None:
+        return await self._monitor.send_command(command, prefix=prefix)
+
+    async def wait_for_mudae_tick(
+        self,
+        message_id: int,
+        *,
+        timeout: float = 5.0,
+    ) -> bool:
+        wait = getattr(self._monitor, "wait_for_mudae_tick", None)
+        if wait is None:
+            return False
+        result = wait(message_id, timeout=timeout)
+        if asyncio.iscoroutine(result):
+            return bool(await result)
+        return bool(result)
 
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         return await self._monitor.click_button(message_id, custom_id)

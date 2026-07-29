@@ -56,7 +56,7 @@ _ROLL_TIMEOUT_RECONNECT_AFTER = 2
 _COMMAND_SETTLE_SEC = 2.5  # pause after $tu before polling for the reply
 _OHU8_SETTLE_SEC = 2.0  # pause after $ohu8 before polling for the reply
 _RESPONSE_TIMEOUT_SEC = 12.0  # max wait for a $tu / $ohu8 / $us text reply
-# Progressive waits for a missed/slow roll embed (fast recover, then longer).
+# Progressive waits for a missed roll embed; resend the roll command between stages.
 _ROLL_EMBED_TIMEOUTS_SEC = (5.0, 10.0, 25.0)
 _ROLL_EMBED_TIMEOUT_SEC = _ROLL_EMBED_TIMEOUTS_SEC[-1]  # used in timeout log text
 _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($us mode)
@@ -65,6 +65,7 @@ _STOP_CHECK_SEC = 1.0  # wake interval so Stop remains responsive during long wa
 _PERK6_SPAWN_WAIT_SEC = 0.5  # brief poll; queue drain catches late spawns
 _PERK6_SPAWN_POLL_SEC = 0.25
 _PERK6_POST_SETTLE_SEC = 1.2  # pause after spawn reactions before next roll
+_US_ADD_SETTLE_SEC = 1.0  # pause after $us N before the first $wa
 
 
 @dataclass
@@ -679,10 +680,15 @@ class RollCycleEngine:
                 break
             waited += timeout
             if stage < len(_ROLL_EMBED_TIMEOUTS_SEC):
+                self._log(
+                    f"Roll {roll_index}: no embed after {timeout:g}s — "
+                    f"resending ${cmd}"
+                )
                 self._log_debug(
                     f"roll {roll_index}: no embed after {waited:g}s — "
-                    f"waiting up to {_ROLL_EMBED_TIMEOUTS_SEC[stage]:g}s more"
+                    f"resending ${cmd} before {_ROLL_EMBED_TIMEOUTS_SEC[stage]:g}s wait"
                 )
+                await self._actions.send_command(cmd, prefix=self._config.prefix)
         if result is None:
             self._log("Roll embed timeout")
             self._log_debug(
@@ -1152,13 +1158,13 @@ class RollCycleEngine:
             claimed_any = False
             roll_index = 0
 
-            # Track the stack locally so the steady state is just
-            # "$tu -> $us N -> roll", with no extra bare "$us" between adds — two
-            # commands back to back is what Mudae was ignoring.
+            # Track the stack locally so steady state can be "$us N -> roll" once the
+            # pool size is known, using Mudae's tick reaction to skip extra $tu polls.
             us_stack: float | None = None
             last_request = 0
             failed_adds = 0
             roll_timeouts = 0
+            skip_tu = False
 
             self._log("$us mode: starting")
 
@@ -1167,11 +1173,14 @@ class RollCycleEngine:
             transient_recoveries = 0
             while not self._stop.is_set():
                 try:
-                    if not await self.run_tu():
-                        self._log("$us mode: $tu failed — stopping")
-                        break
+                    if not skip_tu:
+                        if not await self.run_tu():
+                            self._log("$us mode: $tu failed — stopping")
+                            break
 
-                    await self._maybe_refresh_perk8_status()
+                        await self._maybe_refresh_perk8_status()
+                    else:
+                        skip_tu = False
 
                     normal_rolls = self._state.rolls_left or 0
                     us_bonus = self._state.rolls_us_bonus or 0
@@ -1275,11 +1284,85 @@ class RollCycleEngine:
                             break
                         if done < us_bonus:
                             continue
+                        if done >= us_bonus:
+                            self._state.rolls_us_bonus = 0
+                            self._notify()
+                        if us_stack is not None and us_stack < 1:
+                            break
+                        if (
+                            us_stack is not None
+                            and us_stack >= 1
+                            and failed_adds == 0
+                        ):
+                            skip_tu = True
                         continue
 
-                    # Usable pool is empty. A previous "$us N" that left us at zero
-                    # means Mudae ignored it — re-read the authoritative stack and
-                    # count the miss so we don't loop forever.
+                    # Usable pool is empty — add more from the $us stack.
+                    if (
+                        us_stack is not None
+                        and us_stack >= 1
+                        and failed_adds == 0
+                    ):
+                        request = min(max_request, int(us_stack))
+                        self._log(
+                            f"$us mode: {us_stack:g} stacked — adding "
+                            f"{self._config.prefix}us {request}"
+                        )
+                        message_id = await self._actions.send_command(
+                            f"us {request}", prefix=self._config.prefix
+                        )
+                        last_request = request
+                        ticked = bool(
+                            message_id
+                            and await self._actions.wait_for_mudae_tick(
+                                message_id,
+                                timeout=add_delay,
+                            )
+                        )
+                        if ticked:
+                            us_stack -= request
+                            self._state.rolls_us_bonus = request
+                            failed_adds = 0
+                            last_request = 0
+                            self._log(
+                                f"$us mode: ${self._config.prefix}us {request} "
+                                "acknowledged — rolling"
+                            )
+                            self._notify()
+                            await asyncio.sleep(_US_ADD_SETTLE_SEC)
+                            skip_tu = True
+                            continue
+
+                        self._log(
+                            f"$us mode: no Mudae tick on "
+                            f"${self._config.prefix}us {request} — checking $tu"
+                        )
+                        if not await self.run_tu():
+                            self._log("$us mode: $tu failed — stopping")
+                            break
+                        await self._maybe_refresh_perk8_status()
+                        confirmed = self._state.rolls_us_bonus or 0
+                        if confirmed > 0:
+                            us_stack -= request
+                            failed_adds = 0
+                            last_request = 0
+                            skip_tu = True
+                            continue
+
+                        failed_adds += 1
+                        if failed_adds >= _MAX_FAILED_US_ADDS:
+                            self._log(
+                                f"$us mode: ${self._config.prefix}us {request} "
+                                f"not registering after {failed_adds} attempts — "
+                                "stopping (Mudae ignored it)"
+                            )
+                            break
+                        us_stack = None
+                        last_request = 0
+                        await asyncio.sleep(add_delay)
+                        continue
+
+                    # Slow path: read the stack (if needed), pause, add, then $tu.
                     just_read_stack = False
                     if us_stack is None or failed_adds > 0:
                         fresh = await self._read_us_stack()

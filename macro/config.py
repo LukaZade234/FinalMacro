@@ -240,7 +240,8 @@ class MacroConfig:
     us_reset_margin_minutes: int = 2
     # Seconds to wait after a bare "$us" stack read before sending "$us N".
     us_read_before_add_delay_sec: float = 2.0
-    # Seconds to wait after "$us N" before re-checking $tu.
+    # Seconds to wait for Mudae's tick reaction after "$us N" before falling back
+    # to $tu. Also used as the slow-path pause after an unacknowledged add.
     us_add_delay_sec: float = 5.0
     # Seconds to wait after a roll timeout before resuming $us mode.
     us_roll_timeout_retry_sec: float = 5.0

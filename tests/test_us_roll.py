@@ -56,12 +56,19 @@ class _FakeActions:
         self._rolls = deque(roll_script)
         self._stack = deque(stack_script or [])
         self.sent: list[tuple[str, str | None]] = []
+        self._message_id = 1000
+        self.tick_ack = True
 
     def drain_queue(self) -> None:
         pass
 
-    async def send_command(self, command: str, *, prefix: str | None = None) -> None:
+    async def send_command(self, command: str, *, prefix: str | None = None) -> int | None:
         self.sent.append((command, prefix))
+        self._message_id += 1
+        return self._message_id
+
+    async def wait_for_mudae_tick(self, message_id: int, *, timeout: float = 5.0) -> bool:
+        return self.tick_ack
 
     async def wait_for_tu(self, *, timeout: float = 12.0):
         return self._tu.popleft() if self._tu else None
@@ -118,25 +125,24 @@ def _run_us(engine: RollCycleEngine) -> None:
 
 def test_us_mode_adds_from_stack_until_exhausted():
     # Reads the stack once (35), then tracks it locally: add 20 -> roll 20 ->
-    # add 15 -> roll 15 -> local stack hits 0 -> stop. No bare "$us" between adds.
+    # add 15 -> roll 15 -> local stack hits 0 -> stop. Second add skips $tu.
     actions = _FakeActions(
         tu_script=[
             _tu(0, 30),
             _tu(0, 30, us_bonus=20),
-            _tu(0, 30),
-            _tu(0, 30, us_bonus=15),
-            _tu(0, 30),
         ],
         roll_script=[_roll(i) for i in range(1, 36)],
         stack_script=[_us_stack(35)],
     )
-    engine, _ = _make_engine(actions)
+    engine, state = _make_engine(actions)
 
     _run_us(engine)
 
     assert actions.us_adds() == ["us 20", "us 15"]
-    assert actions.us_reads() == ["us"]  # stack read once, then tracked locally
+    assert actions.us_reads() == ["us"]
     assert len(actions.roll_commands()) == 35
+    assert sum(1 for entry in state.activity_log if entry.text.startswith("Sent $tu")) == 2
+    assert any("acknowledged — rolling" in entry.text for entry in state.activity_log)
 
 
 def test_us_mode_counts_us_bonus_as_usable():
@@ -157,7 +163,7 @@ def test_us_mode_counts_us_bonus_as_usable():
 def test_us_mode_requests_floored_to_stack_when_below_20():
     # Only 7 stacked -> request "$us 7" (capped at 20, floored to the stack).
     actions = _FakeActions(
-        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=7), _tu(0, 30)],
+        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=7)],
         roll_script=[_roll(i) for i in range(1, 8)],
         stack_script=[_us_stack(7)],
     )
@@ -169,6 +175,37 @@ def test_us_mode_requests_floored_to_stack_when_below_20():
     assert len(actions.roll_commands()) == 7
 
 
+def test_us_mode_fast_add_skips_tu_when_tick_received():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=20)],
+        roll_script=[_roll(i) for i in range(1, 36)],
+        stack_script=[_us_stack(35)],
+    )
+    engine, state = _make_engine(actions)
+
+    _run_us(engine)
+
+    tu_sends = sum(1 for entry in state.activity_log if entry.text == "Sent $tu")
+    assert tu_sends == 2
+    assert actions.us_adds() == ["us 20", "us 15"]
+    assert any("acknowledged — rolling" in entry.text for entry in state.activity_log)
+
+
+def test_us_mode_falls_back_to_tu_when_tick_missing():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=20), _tu(0, 30, us_bonus=15)],
+        roll_script=[_roll(i) for i in range(1, 36)],
+        stack_script=[_us_stack(35)],
+    )
+    actions.tick_ack = False
+    engine, state = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert any("no Mudae tick" in entry.text for entry in state.activity_log)
+    assert len(actions.roll_commands()) == 35
+
+
 def test_us_mode_stops_when_adds_not_registering():
     # Mudae ignores every "$us 20" (usable stays 0) -> stop after the cap instead
     # of looping forever re-adding against the same stack.
@@ -177,6 +214,7 @@ def test_us_mode_stops_when_adds_not_registering():
         roll_script=[],
         stack_script=[_us_stack(50), _us_stack(50), _us_stack(50), _us_stack(50)],
     )
+    actions.tick_ack = False
     engine, _ = _make_engine(actions)
 
     _run_us(engine)
@@ -186,7 +224,7 @@ def test_us_mode_stops_when_adds_not_registering():
 
 
 class _TimeoutOnceActions(_FakeActions):
-    """Returns None once mid-batch, then serves the remaining roll script."""
+    """Returns None for every embed-wait stage on one roll, then serves the rest."""
 
     def __init__(
         self,
@@ -196,24 +234,21 @@ class _TimeoutOnceActions(_FakeActions):
         stack_script: list | None = None,
     ) -> None:
         super().__init__(tu_script, [], stack_script)
-        self._rolls_before = deque(rolls_before_timeout)
-        self._rolls_after = deque(rolls_after_timeout)
-        self._after_timeout = False
+        wait_script: list = []
+        for item in rolls_before_timeout:
+            if item is None:
+                wait_script.extend([None, None, None])
+            else:
+                wait_script.append(item)
+        wait_script.extend(rolls_after_timeout)
+        self._roll_waits = deque(wait_script)
 
     async def wait_for_roll(self, *, roll_command: str, timeout: float = 20.0):
-        if not self._after_timeout and self._rolls_before:
-            item = self._rolls_before.popleft()
-            if item is None:
-                self._after_timeout = True
-                return None
-            return item
-        if self._after_timeout and self._rolls_after:
-            return self._rolls_after.popleft()
-        return None
+        return self._roll_waits.popleft() if self._roll_waits else None
 
 
 def test_us_mode_retries_after_roll_timeout():
-    # Two rolls succeed, third times out; after wait, $tu shows 3 left and they roll out.
+    # Two rolls succeed, third times out on all resend stages; after wait, $tu shows 3 left.
     actions = _TimeoutOnceActions(
         tu_script=[_tu(0, 30, us_bonus=5), _tu(0, 30, us_bonus=3), _tu(0, 30)],
         rolls_before_timeout=[_roll(1), _roll(2), None],
@@ -224,8 +259,9 @@ def test_us_mode_retries_after_roll_timeout():
 
     _run_us(engine)
 
-    # Six $wa sends: roll 3 in the first batch times out after the command is sent.
-    assert len(actions.roll_commands()) == 6
+    # Eight $wa sends: roll 3 uses initial + 2 resends before timing out (3 sends).
+    assert len(actions.roll_commands()) == 8
+    assert any("resending $wa" in entry.text for entry in state.activity_log)
     assert any("resuming" in entry.text for entry in state.activity_log)
     assert any("finished (5 roll(s))" in entry.text for entry in state.activity_log)
 

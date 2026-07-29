@@ -10,7 +10,7 @@ from typing import Any
 import discord
 from discord import Client as DiscordClient
 
-from mudae.discord_errors import is_transient_discord_error
+from mudae.command_ack import message_has_mudae_command_ack, reaction_is_mudae_command_ack
 from mudae.claim_context import ClaimContextTracker
 from mudae.command_context import CommandContextTracker
 from mudae.parsers.embed import get_character_owner, is_character_embed, is_ownership_footer
@@ -27,7 +27,6 @@ OnParsedCallback = Callable[[MudaeMessageSnapshot, ParseResult], None]
 _MESSAGE_CACHE_MAX = 300
 _SEND_ATTEMPTS = 3
 _SEND_RETRY_SEC = 2.0
-
 
 class ChannelMonitor:
     """Connect with a user token and capture every message in a channel."""
@@ -54,6 +53,7 @@ class ChannelMonitor:
         self._pending_macro_command: str | None = None
         self.macro_active = False
         self._connect_task: asyncio.Task[None] | None = None
+        self._tick_waiters: dict[int, asyncio.Future[bool]] = {}
 
     async def start_background(self) -> bool:
         """Connect in a background task; return True when the gateway is ready."""
@@ -109,7 +109,7 @@ class ChannelMonitor:
         if self.on_parsed:
             self.on_parsed(snapshot, parsed)
 
-    async def send_command(self, command: str, *, prefix: str | None = None) -> None:
+    async def send_command(self, command: str, *, prefix: str | None = None) -> int | None:
         cmd = command.strip().lstrip("$")
         pre = prefix if prefix is not None else "$"
         payload = f"{pre}{cmd}"
@@ -118,8 +118,9 @@ class ChannelMonitor:
             try:
                 channel = await self._get_text_channel()
                 self._pending_macro_command = cmd.lower()
-                await channel.send(payload)
-                return
+                message = await channel.send(payload)
+                self._remember_message(message)
+                return int(message.id)
             except Exception as exc:
                 last_exc = exc
                 if not is_transient_discord_error(exc) or attempt >= _SEND_ATTEMPTS:
@@ -130,6 +131,7 @@ class ChannelMonitor:
                 await asyncio.sleep(_SEND_RETRY_SEC * attempt)
         if last_exc is not None:
             raise last_exc
+        return None
 
     async def force_reconnect(self) -> bool:
         """Close the gateway (if any) and open a fresh Discord connection."""
@@ -151,6 +153,40 @@ class ChannelMonitor:
             # dicts preserve insertion order; drop the oldest entries.
             for stale_id in list(self._messages)[: len(self._messages) - _MESSAGE_CACHE_MAX]:
                 del self._messages[stale_id]
+
+        return None
+
+    def _resolve_tick_waiter(self, message_id: int, *, acknowledged: bool) -> None:
+        future = self._tick_waiters.pop(message_id, None)
+        if future is not None and not future.done():
+            future.set_result(acknowledged)
+
+    async def wait_for_mudae_tick(
+        self,
+        message_id: int,
+        *,
+        timeout: float = 5.0,
+    ) -> bool:
+        """Wait until Mudae reacts with a tick on ``message_id``, or time out."""
+        cached = self._messages.get(message_id)
+        if cached is not None and message_has_mudae_command_ack(cached):
+            return True
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[bool] = loop.create_future()
+        self._tick_waiters[message_id] = future
+        try:
+            return bool(await asyncio.wait_for(future, timeout=max(0.0, timeout)))
+        except asyncio.TimeoutError:
+            try:
+                channel = await self._get_text_channel()
+                message = await channel.fetch_message(message_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+            self._remember_message(message)
+            return message_has_mudae_command_ack(message)
+        finally:
+            self._tick_waiters.pop(message_id, None)
 
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         message = self._messages.get(message_id)
@@ -257,6 +293,16 @@ class ChannelMonitor:
         self._emit_parsed(snapshot, parsed)
         self._emit_entry(format_entry_for_gui(snapshot, parsed))
 
+    async def _handle_reaction_add(self, reaction: discord.Reaction, user: discord.User | discord.Member) -> None:
+        message = reaction.message
+        if message.channel.id != self.channel_id:
+            return
+        if message.id not in self._tick_waiters:
+            return
+        if not reaction_is_mudae_command_ack(reaction, getattr(user, "id", None)):
+            return
+        self._resolve_tick_waiter(message.id, acknowledged=True)
+
     async def connect(self) -> None:
         discord_logger = logging.getLogger("discord")
         discord_logger.setLevel(logging.WARNING)
@@ -287,6 +333,10 @@ class ChannelMonitor:
         @self._client.event
         async def on_message_edit(_before: discord.Message, after: discord.Message) -> None:
             await self._handle_message(after, edited=True)
+
+        @self._client.event
+        async def on_reaction_add(reaction: discord.Reaction, user: discord.User | discord.Member) -> None:
+            await self._handle_reaction_add(reaction, user)
 
         self._emit_status("Connecting…")
         await self._client.start(self.token)

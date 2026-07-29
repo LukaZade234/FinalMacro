@@ -146,6 +146,35 @@ def test_normal_macro_stops_on_roll_limit_message():
     assert any("Hourly roll limit reached" in entry.text for entry in state.activity_log)
 
 
+class _ResendRollActions(_FakeActions):
+    """Returns None for the first two embed waits, then a roll on the third."""
+
+    def __init__(self) -> None:
+        super().__init__(tu_script=[], roll_script=[_roll(1, 4)])
+        self.roll_waits: list[float] = []
+
+    async def wait_for_roll(self, *, roll_command: str, timeout: float = 20.0):
+        self.roll_waits.append(timeout)
+        if len(self.roll_waits) < 3:
+            return None
+        return self._rolls.popleft() if self._rolls else None
+
+
+def test_perform_roll_resends_after_embed_timeouts():
+    actions = _ResendRollActions()
+    engine, state = _make_engine(actions)
+
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        outcome = asyncio.run(
+            engine._perform_roll("wa", 1, [], us_roll=False, stop_on_interrupt=True)
+        )
+
+    assert outcome.ok is True
+    assert actions.roll_commands() == ["wa", "wa", "wa"]
+    assert actions.roll_waits == [5.0, 10.0, 25.0]
+    assert any("resending $wa" in entry.text for entry in state.activity_log)
+
+
 def test_normal_macro_waits_and_rolls_next_hour():
     actions = _FakeActions(
         tu_script=[_tu(5, 30), _tu(0, 30), _tu(8, 55)],
