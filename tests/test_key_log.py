@@ -151,6 +151,18 @@ def test_log_marceline_one_bronze():
     assert entries[0]["amount"] == 1
 
 
+def test_log_reze_comma_separated_chaos_keys():
+    desc = (
+        ":chaoskey: (1,004) +5% kakera value\n"
+        ":chaoskey: (1,005) +5% kakera value\n"
+    )
+    keys = parse_keys(desc)
+    assert keys == [
+        {"type": "chaos", "level": 1004},
+        {"type": "chaos", "level": 1005},
+    ]
+
+
 def test_log_reze_two_chaos():
     desc = (
         ":chaoskey: (714) +5% kakera value\n"

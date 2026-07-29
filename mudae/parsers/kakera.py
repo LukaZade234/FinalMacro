@@ -145,10 +145,10 @@ def parse_individual_kakera(description: str) -> dict[str, int]:
 
 
 _KEY_LEVEL_PATTERNS: tuple[str, ...] = (
-    # Discord markup: <:chaoskey:690110264166842421> (**77**)
-    r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}\s*(\d+)\*{0,2}\)",
-    # Plain/static emoji text: :chaoskey: (98) or :chaoskey: (**98**)
-    r":(bronze|silver|gold|chaos)key:\s*\(\*{0,2}\s*(\d+)\*{0,2}\)",
+    # Discord markup: <:chaoskey:690110264166842421> (**77**) or (**1,004**)
+    r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}\s*([\d,]+)\*{0,2}\)",
+    # Plain/static emoji text: :chaoskey: (98) or :chaoskey: (1,004)
+    r":(bronze|silver|gold|chaos)key:\s*\(\*{0,2}\s*([\d,]+)\*{0,2}\)",
 )
 
 _OMEGA_GAIN_PATTERNS: tuple[str, ...] = (
@@ -168,7 +168,12 @@ def parse_keys(description: str) -> list[dict[str, Any]]:
             if any(not (span[1] <= start or span[0] >= end) for start, end in seen_spans):
                 continue
             seen_spans.append(span)
-            keys.append({"type": match.group(1).lower(), "level": int(match.group(2))})
+            keys.append(
+                {
+                    "type": match.group(1).lower(),
+                    "level": int(match.group(2).replace(",", "")),
+                }
+            )
     return keys
 
 

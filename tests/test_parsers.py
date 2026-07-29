@@ -1583,6 +1583,53 @@ def test_parse_perk_6_akame_spawned_by_power():
     assert perk6_spawner_matches("POWER", "Akame") is False
 
 
+def test_parse_keys_supports_comma_separated_levels():
+    from macro.rule_eval import passes_kakera_reaction
+    from macro.config import KakeraReactionRules
+    from macro.state import AccountState
+    from mudae.parsers.kakera import parse_keys
+
+    desc = (
+        "Chainsaw Man\n"
+        ":chaoskey: (1,004) +5% kakera value\n"
+        ":chaoskey: (1,005) +5% kakera value\n"
+        "Claims: #34\n"
+        "Likes: #47\n"
+        "76,363:kakera:\n"
+    )
+    keys = parse_keys(desc)
+    assert keys == [
+        {"type": "chaos", "level": 1004},
+        {"type": "chaos", "level": 1005},
+    ]
+
+    embed = {
+        "author": "Reze",
+        "description": desc,
+        "footer": "23🔴 ☑️  (⭐1,005)  · Belongs to lukazade234",
+    }
+    fields = {
+        "character_name": embed["author"],
+        "keys": keys,
+        "buttons": [
+            {
+                "emoji": "kakeraR",
+                "is_kakera": True,
+                "disabled": False,
+                "custom_id": "k1",
+            }
+        ],
+    }
+
+    rules = KakeraReactionRules(enabled=True, require_chaos_key=True)
+    decision = passes_kakera_reaction(
+        fields,
+        rules,
+        AccountState(),
+    )
+    assert decision.should_click
+
+
 def test_perk6_spawner_name_matching():
     from mudae.parsers.roll import perk6_spawner_matches
 
