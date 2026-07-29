@@ -151,6 +151,7 @@ class AppBridge(QObject):
         self._run_guild_name: str | None = None
         self._run_channel_name: str | None = None
         self._run_account_name: str = ""
+        self._run_preset_id: str = ""
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -296,10 +297,24 @@ class AppBridge(QObject):
         self.configChanged.emit()
         self.serversChanged.emit()
 
-    def _apply_active_preset_to_engine(self) -> None:
-        self._macro_config = self._presets.active_preset()
+    def _sync_engine_config(self) -> None:
+        """Reload the active run-target preset and push it to a live engine."""
+        resolved = resolve_run_target(
+            self._accounts,
+            self._profiles,
+            self._presets,
+            self._targets,
+        )
+        if resolved:
+            self._macro_config = resolved.macro_config
+            self._run_preset_id = resolved.preset_id
+        else:
+            self._macro_config = self._presets.active_preset()
         if self._engine:
             self._engine.update_config(self._macro_config)
+
+    def _apply_active_preset_to_engine(self) -> None:
+        self._sync_engine_config()
 
     def _ensure_target_for_active(self) -> None:
         account = self._accounts.active_account()
@@ -679,8 +694,7 @@ class AppBridge(QObject):
         else:
             data[key] = value
         self._presets.update_preset(preset_id, MacroConfig.from_dict(data))
-        if preset_id == self._presets.active_preset_id:
-            self._apply_active_preset_to_engine()
+        self._sync_engine_config()
         self._notify_config()
         self._persist()
 
@@ -745,8 +759,7 @@ class AppBridge(QObject):
                 data[block] = _deep_merge(current, block_patch)
 
         self._presets.update_preset(preset_id, MacroConfig.from_dict(data))
-        if preset_id == self._presets.active_preset_id:
-            self._apply_active_preset_to_engine()
+        self._sync_engine_config()
         self._notify_config()
         self._persist()
 
@@ -1276,6 +1289,7 @@ class AppBridge(QObject):
             self._run_guild_name = None
             self._run_channel_name = None
             self._run_account_name = ""
+            self._run_preset_id = ""
             loop.close()
             self._loop = None
             self._on_notification_standby(False)
@@ -1302,6 +1316,7 @@ class AppBridge(QObject):
 
         self._ensure_target_for_active()
         self._macro_config = resolved.macro_config
+        self._run_preset_id = resolved.preset_id
         self._persist()
         self._macro_state = AccountState()
         self._set_connecting(True)

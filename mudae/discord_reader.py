@@ -11,6 +11,7 @@ import discord
 from discord import Client as DiscordClient
 
 from mudae.command_ack import message_has_mudae_command_ack, reaction_is_mudae_command_ack
+from mudae.discord_errors import is_transient_discord_error
 from mudae.claim_context import ClaimContextTracker
 from mudae.command_context import CommandContextTracker
 from mudae.parsers.embed import get_character_owner, is_character_embed, is_ownership_footer

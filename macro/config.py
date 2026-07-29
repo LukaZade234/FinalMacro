@@ -278,9 +278,25 @@ class MacroConfig:
             return base
         if policy.skip_kakera:
             return KakeraReactionRules(enabled=False)
+        us_types = list(policy.types_allowed)
+        if us_types:
+            # Explicit $us colors win — do not inherit base low_power / perk-8
+            # lists that could re-allow colors excluded from the $us preset.
+            return KakeraReactionRules(
+                enabled=base.enabled,
+                types_allowed=us_types,
+                require_chaos_key=base.require_chaos_key,
+                require_perk_8=base.require_perk_8,
+                min_spheres=base.min_spheres,
+                low_power=None,
+                perk_8_budget_mode=base.perk_8_budget_mode,
+                perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
+                perk_8_types_allowed=us_types,
+                auto_use_dk=base.auto_use_dk,
+            )
         return KakeraReactionRules(
             enabled=base.enabled,
-            types_allowed=list(policy.types_allowed),
+            types_allowed=[],
             require_chaos_key=base.require_chaos_key,
             require_perk_8=base.require_perk_8,
             min_spheres=base.min_spheres,

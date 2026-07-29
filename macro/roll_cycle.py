@@ -114,8 +114,13 @@ class RollCycleEngine:
         self._pending_perk8_refresh = False
 
     def _notify(self) -> None:
-        if self._on_state:
+        if not self._on_state:
+            return
+        try:
             self._on_state()
+        except RuntimeError:
+            # GUI may already be torn down while a macro task finishes.
+            pass
 
     def _notify_keys(self) -> None:
         if self._on_keys:
@@ -212,6 +217,32 @@ class RollCycleEngine:
         self._actions.drain_queue()
         await asyncio.sleep(2.0)
         return recoveries
+
+    async def _send_command_with_reconnect(
+        self,
+        command: str,
+        *,
+        label: str,
+    ) -> int | None:
+        """Send a command; reconnect once on a transient Discord transport error."""
+        try:
+            return await self._actions.send_command(
+                command,
+                prefix=self._config.prefix,
+            )
+        except Exception as exc:
+            if is_fatal_runtime_error(exc) or not is_transient_discord_error(exc):
+                raise
+            self._log(f"{label}: connection error ({exc}) — reconnecting")
+            if not await self._force_discord_reconnect():
+                self._log(f"{label}: reconnect failed")
+                raise
+            self._actions.drain_queue()
+            await asyncio.sleep(2.0)
+            return await self._actions.send_command(
+                command,
+                prefix=self._config.prefix,
+            )
 
     def begin_session(self, mode: str, meta: dict[str, Any]) -> None:
         if self._session and self._session.active:
@@ -489,7 +520,8 @@ class RollCycleEngine:
         return self._task is not None and not self._task.done()
 
     def update_config(self, config: MacroConfig) -> None:
-        self._config = config
+        # Copy so live preset edits always replace the running snapshot.
+        self._config = MacroConfig.from_dict(config.to_dict())
 
     def stop(self) -> None:
         self._stop.set()
@@ -668,7 +700,7 @@ class RollCycleEngine:
         qsize = getattr(self._actions, "queue_size", lambda: 0)()
         self._log(f"Roll {roll_index}: ${cmd}")
         self._log_debug(f"roll {roll_index}: sending ${cmd} · queue={qsize}")
-        await self._actions.send_command(cmd, prefix=self._config.prefix)
+        await self._send_command_with_reconnect(cmd, label=f"Roll {roll_index}")
         result = None
         waited = 0.0
         for stage, timeout in enumerate(_ROLL_EMBED_TIMEOUTS_SEC, start=1):
@@ -688,7 +720,10 @@ class RollCycleEngine:
                     f"roll {roll_index}: no embed after {waited:g}s — "
                     f"resending ${cmd} before {_ROLL_EMBED_TIMEOUTS_SEC[stage]:g}s wait"
                 )
-                await self._actions.send_command(cmd, prefix=self._config.prefix)
+                await self._send_command_with_reconnect(
+                    cmd,
+                    label=f"Roll {roll_index} retry",
+                )
         if result is None:
             self._log("Roll embed timeout")
             self._log_debug(
@@ -1308,8 +1343,9 @@ class RollCycleEngine:
                             f"$us mode: {us_stack:g} stacked — adding "
                             f"{self._config.prefix}us {request}"
                         )
-                        message_id = await self._actions.send_command(
-                            f"us {request}", prefix=self._config.prefix
+                        message_id = await self._send_command_with_reconnect(
+                            f"us {request}",
+                            label="$us mode",
                         )
                         last_request = request
                         ticked = bool(
@@ -1325,7 +1361,7 @@ class RollCycleEngine:
                             failed_adds = 0
                             last_request = 0
                             self._log(
-                                f"$us mode: ${self._config.prefix}us {request} "
+                                f"$us mode: {self._config.prefix}us {request} "
                                 "acknowledged — rolling"
                             )
                             self._notify()
@@ -1352,7 +1388,7 @@ class RollCycleEngine:
                         failed_adds += 1
                         if failed_adds >= _MAX_FAILED_US_ADDS:
                             self._log(
-                                f"$us mode: ${self._config.prefix}us {request} "
+                                f"$us mode: {self._config.prefix}us {request} "
                                 f"not registering after {failed_adds} attempts — "
                                 "stopping (Mudae ignored it)"
                             )

@@ -363,3 +363,42 @@ def test_us_kakera_rules_for_us_rolls():
     migrated = cfg3.us_roll_kakera
     assert migrated.override is True
     assert migrated.types_allowed == ["kakeraG"]
+
+
+def test_us_kakera_override_ignores_base_low_power_colors():
+    from macro.config import LowPowerOverride
+    from macro.rule_eval import passes_kakera_reaction
+    from macro.state import AccountState
+
+    cfg = MacroConfig(
+        kakera_reaction=KakeraReactionRules(
+            enabled=True,
+            types_allowed=["kakeraR", "kakeraC"],
+            low_power=LowPowerOverride(below_percent=50, types_allowed=["kakeraC"]),
+        ),
+        us_roll_kakera=UsRollKakeraRules(
+            override=True,
+            types_allowed=["kakeraP", "kakeraR"],
+        ),
+    )
+    rules = cfg.kakera_rules_for_roll(us_roll=True)
+    assert rules.low_power is None
+    assert rules.perk_8_types_allowed == ["kakeraP", "kakeraR"]
+
+    fields = {
+        "buttons": [
+            {
+                "is_kakera": True,
+                "emoji": "kakeraC",
+                "disabled": False,
+                "custom_id": "k1",
+            }
+        ],
+    }
+    decision = passes_kakera_reaction(
+        fields,
+        rules,
+        AccountState(power_percent=10.0),
+    )
+    assert not decision.should_click
+    assert "kakeraC" not in (decision.reason or "")
