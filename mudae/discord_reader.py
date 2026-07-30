@@ -170,7 +170,7 @@ class ChannelMonitor:
     ) -> bool:
         """Wait until Mudae reacts with a tick on ``message_id``, or time out."""
         cached = self._messages.get(message_id)
-        if cached is not None and message_has_mudae_command_ack(cached):
+        if cached is not None and await message_has_mudae_command_ack(cached):
             return True
 
         loop = asyncio.get_running_loop()
@@ -185,7 +185,7 @@ class ChannelMonitor:
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 return False
             self._remember_message(message)
-            return message_has_mudae_command_ack(message)
+            return await message_has_mudae_command_ack(message)
         finally:
             self._tick_waiters.pop(message_id, None)
 

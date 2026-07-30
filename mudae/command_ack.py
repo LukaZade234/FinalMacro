@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 from mudae.constants import MUDAE_BOT_IDS
 
 # Mudae reacts with a checkmark on accepted $commands (including ``$us N``).
@@ -38,33 +40,39 @@ def is_mudae_command_ack_emoji(emoji: object) -> bool:
     return key.lower() in _MUDAE_ACK_NAMES
 
 
-def message_has_mudae_command_ack(message: object) -> bool:
-    """True when a cached Discord message already has Mudae's tick reaction."""
-    reactions = getattr(message, "reactions", None) or []
-    for reaction in reactions:
-        if not is_mudae_command_ack_emoji(getattr(reaction, "emoji", None)):
-            continue
-        users = getattr(reaction, "users", None)
-        if users is None:
-            return True
-        try:
-            mudae_reacted = any(
-                getattr(user, "id", None) in MUDAE_BOT_IDS
-                async for user in users
-            )
-        except TypeError:
-            # Sync iterators in tests / stubs.
-            mudae_reacted = any(
-                getattr(user, "id", None) in MUDAE_BOT_IDS
-                for user in users
-            )
-        if mudae_reacted:
-            return True
-    return False
-
-
 def reaction_is_mudae_command_ack(reaction: object, user_id: int | None) -> bool:
     """True when Mudae added an acknowledgement reaction."""
     if user_id not in MUDAE_BOT_IDS:
         return False
     return is_mudae_command_ack_emoji(getattr(reaction, "emoji", None))
+
+
+async def _reaction_has_mudae_user(reaction: object) -> bool:
+    """True when a tick reaction on a command message came from Mudae."""
+    users = getattr(reaction, "users", None)
+    if users is None:
+        return int(getattr(reaction, "count", 0) or 0) > 0
+    if callable(users):
+        users = users()
+    if inspect.isawaitable(users):
+        users = await users
+    try:
+        async for user in users:
+            if getattr(user, "id", None) in MUDAE_BOT_IDS:
+                return True
+    except TypeError:
+        for user in users:
+            if getattr(user, "id", None) in MUDAE_BOT_IDS:
+                return True
+    return False
+
+
+async def message_has_mudae_command_ack(message: object) -> bool:
+    """True when a message already has Mudae's tick reaction."""
+    reactions = getattr(message, "reactions", None) or []
+    for reaction in reactions:
+        if not is_mudae_command_ack_emoji(getattr(reaction, "emoji", None)):
+            continue
+        if await _reaction_has_mudae_user(reaction):
+            return True
+    return False
