@@ -224,6 +224,11 @@ Item {
         updatePreviewText()
     }
 
+    readonly property int workspaceHeight: Math.max(
+        360,
+        Math.min(560, Math.floor(height - 40))
+    )
+
     Connections {
         target: App
         function onServersChanged() {
@@ -236,13 +241,15 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 560
+            Layout.preferredHeight: serversRoot.workspaceHeight
+            Layout.minimumHeight: 360
             spacing: 16
 
         PanelCard {
             Layout.preferredWidth: 240
             Layout.maximumWidth: 280
-            Layout.preferredHeight: 560
+            Layout.minimumWidth: 200
+            Layout.fillHeight: true
             title: "Servers"
             titleSize: 14
             fillContentVertically: true
@@ -275,8 +282,7 @@ Item {
                     id: serverList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 120
-                    Layout.preferredHeight: 320
+                    Layout.minimumHeight: 100
                     clip: true
                     model: serversRoot.serverListCount
                     onCurrentIndexChanged: serversRoot.onServerSelectionChanged()
@@ -308,7 +314,8 @@ Item {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 560
+            Layout.fillHeight: true
+            Layout.minimumWidth: 280
             spacing: 12
 
             PanelCard {
@@ -381,7 +388,7 @@ Item {
                         }
                     }
 
-                    RowLayout {
+                    Flow {
                         Layout.fillWidth: true
                         spacing: 8
                         ThemedButton {
@@ -422,12 +429,13 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 220
+                Layout.fillHeight: true
+                Layout.minimumHeight: 160
                 spacing: 12
 
                 PanelCard {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 220
+                    Layout.fillHeight: true
                     Layout.preferredWidth: 100
                     title: "$settings"
                     titleSize: 13
@@ -455,7 +463,7 @@ Item {
 
                 PanelCard {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 220
+                    Layout.fillHeight: true
                     Layout.preferredWidth: 100
                     title: "$bonus"
                     titleSize: 13

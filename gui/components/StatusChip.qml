@@ -8,12 +8,23 @@ Rectangle {
     property string label: ""
     property string value: "—"
     property bool highlighted: false
+    property string tone: "neutral"  // neutral | good | warn | active
+
+    readonly property bool toneGood: tone === "good"
+    readonly property bool toneWarn: tone === "warn"
+    readonly property bool toneActive: tone === "active" || highlighted
 
     implicitHeight: chipRow.implicitHeight + 16
-    implicitWidth: Math.max(100, chipRow.implicitWidth + 24)
+    implicitWidth: Math.max(88, chipRow.implicitWidth + 24)
     radius: 8
-    color: chip.highlighted ? Theme.bgLight : Theme.bgDark
-    border.color: chip.highlighted ? Theme.accentPrimary : Theme.border
+    color: chip.toneActive ? Qt.rgba(0.48, 0.64, 0.97, 0.12)
+          : chip.toneGood ? Qt.rgba(0.62, 0.81, 0.42, 0.12)
+          : chip.toneWarn ? Qt.rgba(0.88, 0.69, 0.41, 0.12)
+          : Theme.bgDark
+    border.color: chip.toneActive ? Theme.accentPrimary
+                : chip.toneGood ? Theme.success
+                : chip.toneWarn ? Theme.warning
+                : Theme.border
     border.width: 1
 
     RowLayout {
@@ -28,7 +39,10 @@ Rectangle {
         }
         Text {
             text: chip.value
-            color: chip.highlighted ? Theme.accentPrimary : Theme.fgPrimary
+            color: chip.toneActive ? Theme.accentPrimary
+                  : chip.toneGood ? Theme.success
+                  : chip.toneWarn ? Theme.warning
+                  : Theme.fgPrimary
             font.pixelSize: 12
             font.weight: Font.DemiBold
             elide: Text.ElideRight

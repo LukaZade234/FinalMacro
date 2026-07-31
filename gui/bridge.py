@@ -21,6 +21,7 @@ from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
+from macro.us_stop import UsModeStopOptions
 from macro.sphere_game import OhSphereGame
 from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
@@ -99,6 +100,7 @@ class AppBridge(QObject):
     notificationStandbyChanged = Signal()
     sessionActiveChanged = Signal()
     runActionPendingChanged = Signal()
+    usModeOptionsChanged = Signal()
     macroPhaseChanged = Signal(str)
     macroStateChanged = Signal()
     macroLogChanged = Signal()
@@ -152,6 +154,10 @@ class AppBridge(QObject):
         self._run_channel_name: str | None = None
         self._run_account_name: str = ""
         self._run_preset_id: str = ""
+        us_opts_raw = saved.get("us_mode_options")
+        self._us_mode_options = UsModeStopOptions.from_dict(
+            us_opts_raw if isinstance(us_opts_raw, dict) else None
+        )
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -214,6 +220,23 @@ class AppBridge(QObject):
         from macro.reaction_power import display_reaction_power
 
         return display_reaction_power(self._macro_state.power_percent)
+
+    @Property(int, constant=False, notify=macroStateChanged)
+    def macroDkStock(self) -> int:
+        stock = self._macro_state.dk_stock
+        return int(stock) if stock is not None else -1
+
+    @Property(bool, constant=False, notify=usModeOptionsChanged)
+    def usStopOnPowerExhausted(self) -> bool:
+        return self._us_mode_options.stop_on_power_exhausted
+
+    @Property(bool, constant=False, notify=usModeOptionsChanged)
+    def usStopAfterRollsEnabled(self) -> bool:
+        return self._us_mode_options.stop_after_rolls_enabled
+
+    @Property(int, constant=False, notify=usModeOptionsChanged)
+    def usStopAfterRolls(self) -> int:
+        return self._us_mode_options.stop_after_rolls
 
     @Property(str, constant=False, notify=serversChanged)
     def serversJson(self) -> str:
@@ -769,7 +792,26 @@ class AppBridge(QObject):
             presets=self._presets.to_settings_fragment(),
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
+            run_ui={"us_mode_options": self._us_mode_options.to_dict()},
         )
+
+    @Slot(bool)
+    def setUsStopOnPowerExhausted(self, enabled: bool) -> None:
+        self._us_mode_options.stop_on_power_exhausted = bool(enabled)
+        self.usModeOptionsChanged.emit()
+        self._persist()
+
+    @Slot(bool)
+    def setUsStopAfterRollsEnabled(self, enabled: bool) -> None:
+        self._us_mode_options.stop_after_rolls_enabled = bool(enabled)
+        self.usModeOptionsChanged.emit()
+        self._persist()
+
+    @Slot(int)
+    def setUsStopAfterRolls(self, count: int) -> None:
+        self._us_mode_options.stop_after_rolls = max(1, int(count))
+        self.usModeOptionsChanged.emit()
+        self._persist()
 
     def _get_daily_resets_for(
         self,
@@ -1359,6 +1401,30 @@ class AppBridge(QObject):
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
 
+    @Slot()
+    def runUsCheck(self) -> None:
+        if not self._loop or not self._engine:
+            self._set_status("Connect first")
+            return
+        if self._engine.is_running:
+            self._set_status("Stop the macro first")
+            return
+        self._persist()
+        self._engine.update_config(self._macro_config)
+        self._set_run_action_pending("us_check")
+
+        async def _run() -> None:
+            try:
+                await self._engine.run_us_check()
+            finally:
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
     def _session_meta(self) -> dict[str, str]:
         channel = self._run_channel_name or self._profiles.active_label() or "?"
         guild = self._run_guild_name or "?"
@@ -1432,7 +1498,10 @@ class AppBridge(QObject):
         meta = self._session_meta()
 
         def _start() -> None:
-            self._engine.start_us_mode(session_meta=meta)
+            self._engine.start_us_mode(
+                session_meta=meta,
+                us_stop=self._us_mode_options,
+            )
 
         self._loop.call_soon_threadsafe(_start)
 

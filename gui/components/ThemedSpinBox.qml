@@ -8,16 +8,23 @@ SpinBox {
     editable: true
 
     implicitHeight: 32
+    implicitWidth: 120
 
     contentItem: TextInput {
         z: 2
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.leftMargin: 28
+        anchors.right: parent.right
+        anchors.rightMargin: 28
         text: control.textFromValue(control.value, control.locale)
         font.pixelSize: 12
         color: control.enabled ? Theme.fgPrimary : Theme.fgMuted
         selectionColor: Theme.accentPrimary
         selectedTextColor: Theme.bgDark
         horizontalAlignment: Qt.AlignHCenter
-        verticalAlignment: Qt.AlignVCenter
+        verticalAlignment: Text.AlignVCenter
         readOnly: !control.editable
         validator: control.validator
         inputMethodHints: Qt.ImhFormattedNumbersOnly

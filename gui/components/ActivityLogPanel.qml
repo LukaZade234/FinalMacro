@@ -93,48 +93,53 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 6
 
-        Repeater {
-            model: [
-                { id: "all", label: "All" },
-                { id: "claim", label: "Claim" },
-                { id: "click", label: "Click" },
-                { id: "skip", label: "Skip" },
-                { id: "error", label: "Error" },
-                { id: "info", label: "Info" }
-            ]
-            delegate: Rectangle {
-                required property var modelData
+        Flow {
+            Layout.fillWidth: true
+            spacing: 6
 
-                implicitHeight: 28
-                implicitWidth: chipLabel.implicitWidth + 18
-                radius: 14
-                color: root.filter === modelData.id ? Theme.bgLight : Theme.bgDark
-                border.color: root.filter === modelData.id ? Theme.accentPrimary : Theme.border
-                border.width: 1
+            Repeater {
+                model: [
+                    { id: "all", label: "All" },
+                    { id: "claim", label: "Claim" },
+                    { id: "click", label: "Click" },
+                    { id: "skip", label: "Skip" },
+                    { id: "error", label: "Error" },
+                    { id: "info", label: "Info" }
+                ]
+                delegate: Rectangle {
+                    required property var modelData
 
-                Label {
-                    id: chipLabel
-                    anchors.centerIn: parent
-                    text: modelData.label + " (" + root.countForFilter(modelData.id) + ")"
-                    color: root.filter === modelData.id ? Theme.fgPrimary : Theme.fgMuted
-                    font.pixelSize: 11
-                    font.weight: root.filter === modelData.id ? Font.DemiBold : Font.Normal
-                }
+                    implicitHeight: 28
+                    implicitWidth: chipLabel.implicitWidth + 18
+                    radius: 14
+                    color: root.filter === modelData.id ? Theme.bgLight : Theme.bgDark
+                    border.color: root.filter === modelData.id ? Theme.accentPrimary : Theme.border
+                    border.width: 1
 
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.filter = modelData.id
+                    Label {
+                        id: chipLabel
+                        anchors.centerIn: parent
+                        text: modelData.label + " (" + root.countForFilter(modelData.id) + ")"
+                        color: root.filter === modelData.id ? Theme.fgPrimary : Theme.fgMuted
+                        font.pixelSize: 11
+                        font.weight: root.filter === modelData.id ? Font.DemiBold : Font.Normal
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.filter = modelData.id
+                    }
                 }
             }
         }
-
-        Item { Layout.fillWidth: true }
 
         Label {
             text: "Drag to select · Ctrl+C to copy"
             color: Theme.fgMuted
             font.pixelSize: 10
+            Layout.alignment: Qt.AlignVCenter
+            visible: root.width >= 520
         }
     }
 
@@ -142,6 +147,7 @@ ColumnLayout {
         id: logScroll
         Layout.fillWidth: true
         Layout.fillHeight: true
+        Layout.minimumHeight: 160
         clip: true
         ScrollBar.vertical.policy: ScrollBar.AsNeeded
 

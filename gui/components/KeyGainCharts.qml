@@ -12,6 +12,8 @@ Item {
     property var omegaDailySeries: []
     property int rangeDays: 30
     property string emptyText: "No key gains in this range."
+    // -1 = show all charts; 0 daily; 1 monthly; 2 omega
+    property int showOnly: -1
 
     readonly property var keyColors: ({
         bronze: "#cd7f32",
@@ -94,6 +96,7 @@ Item {
     onMonthlySeriesChanged: repaintCharts()
     onOmegaDailySeriesChanged: repaintCharts()
     onRangeDaysChanged: repaintCharts()
+    onShowOnlyChanged: Qt.callLater(repaintCharts)
     onWidthChanged: if (width > 0) repaintCharts()
 
     Component.onCompleted: Qt.callLater(repaintCharts)
@@ -108,6 +111,7 @@ Item {
         spacing: 14
 
         Label {
+            visible: root.showOnly < 0
             text: "Daily key gains (stacked)"
             color: Theme.fgPrimary
             font.pixelSize: 12
@@ -116,8 +120,9 @@ Item {
         }
 
         Rectangle {
+            visible: root.showOnly < 0 || root.showOnly === 0
             Layout.fillWidth: true
-            Layout.preferredHeight: 120
+            Layout.preferredHeight: root.showOnly === 0 ? 160 : 120
             radius: 8
             color: Theme.bgDark
             border.color: Theme.border
@@ -183,6 +188,7 @@ Item {
         }
 
         Label {
+            visible: root.showOnly < 0
             text: "Monthly totals (stacked)"
             color: Theme.fgPrimary
             font.pixelSize: 12
@@ -191,8 +197,9 @@ Item {
         }
 
         Rectangle {
+            visible: root.showOnly < 0 || root.showOnly === 1
             Layout.fillWidth: true
-            Layout.preferredHeight: 120
+            Layout.preferredHeight: root.showOnly === 1 ? 160 : 120
             radius: 8
             color: Theme.bgDark
             border.color: Theme.border
@@ -261,6 +268,7 @@ Item {
         }
 
         Label {
+            visible: root.showOnly < 0
             text: "Omega keys (daily)"
             color: Theme.fgPrimary
             font.pixelSize: 12
@@ -269,8 +277,9 @@ Item {
         }
 
         Rectangle {
+            visible: root.showOnly < 0 || root.showOnly === 2
             Layout.fillWidth: true
-            Layout.preferredHeight: 100
+            Layout.preferredHeight: root.showOnly === 2 ? 160 : 100
             radius: 8
             color: Theme.bgDark
             border.color: Theme.border
@@ -342,6 +351,7 @@ Item {
         }
 
         Flow {
+            visible: root.showOnly !== 2
             Layout.fillWidth: true
             spacing: 10
 

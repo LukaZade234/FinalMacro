@@ -113,3 +113,123 @@ def test_events_for_client_newest_first(tmp_path, monkeypatch):
     assert rows[1]["character_name"] == "First"
     assert rows[1]["account_name"] == "Primary"
     assert rows[1]["account_inferred"] is True
+
+
+def _sample_snapshot(**overrides) -> MudaeMessageSnapshot:
+    base = dict(
+        message_id=1,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=42,
+        guild_name="Test Guild",
+        author_id=1,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[],
+        buttons=[],
+        created_at="12:00:00",
+    )
+    base.update(overrides)
+    return MudaeMessageSnapshot(**base)
+
+
+def test_record_new_soulmate_dedupes_same_message(tmp_path, monkeypatch):
+    import mudae.soulmate_log as soulmate_log
+
+    monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
+    soulmate_log._events = []
+    snapshot = _sample_snapshot(message_id=777)
+    fields = {"character_name": "Alice", "series": "Test"}
+
+    first = record_new_soulmate(snapshot, fields)
+    second = record_new_soulmate(snapshot, fields)
+
+    assert first is not second
+    assert first == second
+    assert len(soulmate_log._events) == 1
+
+
+def test_record_new_soulmate_dedupes_same_character_per_guild(tmp_path, monkeypatch):
+    import mudae.soulmate_log as soulmate_log
+
+    monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
+    soulmate_log._events = []
+    fields = {"character_name": "Alice", "series": "Test"}
+
+    first = record_new_soulmate(_sample_snapshot(message_id=1), fields)
+    second = record_new_soulmate(_sample_snapshot(message_id=2), fields)
+
+    assert first["character_name"] == "Alice"
+    assert second["message_id"] == first["message_id"]
+    assert len(soulmate_log._events) == 1
+
+
+def test_record_new_soulmate_allows_same_character_on_other_guilds(tmp_path, monkeypatch):
+    import mudae.soulmate_log as soulmate_log
+
+    monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
+    soulmate_log._events = []
+    fields = {"character_name": "Alice", "series": "Test"}
+
+    record_new_soulmate(_sample_snapshot(message_id=1, guild_id=10), fields)
+    record_new_soulmate(_sample_snapshot(message_id=2, guild_id=20), fields)
+
+    assert len(soulmate_log._events) == 2
+
+
+def test_dedupe_stored_events(tmp_path, monkeypatch):
+    import mudae.soulmate_log as soulmate_log
+
+    monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
+    soulmate_log._events = [
+        {
+            "guild_id": 1,
+            "character_name": "Alice",
+            "message_id": 100,
+            "time": "01:00:00",
+        },
+        {
+            "guild_id": 1,
+            "character_name": "Alice",
+            "message_id": 100,
+            "time": "01:00:00",
+        },
+        {
+            "guild_id": 1,
+            "character_name": "Bob",
+            "message_id": 101,
+            "time": "02:00:00",
+        },
+    ]
+    removed = soulmate_log.dedupe_stored_events()
+    assert removed == 1
+    assert len(soulmate_log._events) == 2
+
+
+def test_parse_roll_skips_soulmate_log_on_embed_edit(tmp_path, monkeypatch):
+    import mudae.soulmate_log as soulmate_log
+    from mudae.parsers.roll import parse_roll
+
+    monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
+    soulmate_log._events = []
+
+    description = (
+        "**Series** · 100 <:kakera:123> (**100**)\n"
+        ":chaoskey: (10) +5% kakera value\n"
+        "Now your **SOULMATE**!"
+    )
+    snapshot = _sample_snapshot(
+        message_id=99,
+        edited=True,
+        embeds=[{
+            "author": "Alice",
+            "description": description,
+            "footer": "(🔑10) · Belongs to **Tester**",
+        }],
+    )
+
+    result = parse_roll(snapshot)
+
+    assert result.fields["new_soulmate"] is True
+    assert soulmate_log._events == []

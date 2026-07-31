@@ -18,24 +18,24 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 88
+            Layout.preferredHeight: 60
 
             Column {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 2
+                spacing: 0
 
                 Text {
                     text: "Final"
                     color: Theme.accentPrimary
-                    font.pixelSize: 28
+                    font.pixelSize: 22
                     font.weight: Font.Bold
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
                 Text {
                     text: "Macro"
                     color: Theme.fgSecondary
-                    font.pixelSize: 16
+                    font.pixelSize: 13
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
             }
@@ -70,12 +70,12 @@ Rectangle {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.margins: 10
-            spacing: 8
+            Layout.margins: 8
+            spacing: 6
 
             Button {
                 Layout.fillWidth: true
-                implicitHeight: 40
+                implicitHeight: 36
                 text: "Exit"
                 background: Rectangle {
                     radius: 8

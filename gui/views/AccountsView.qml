@@ -15,6 +15,7 @@ Item {
 
     property var accountData: ({ accounts: [] })
     property int selectedIndex: 0
+    property bool showToken: false
 
     function reload() {
         try {
@@ -40,26 +41,6 @@ Item {
         return list[selectedIndex]
     }
 
-    function allChannels() {
-        try {
-            var srv = JSON.parse(App.serversJson)
-            var out = []
-            var servers = srv.servers || []
-            for (var i = 0; i < servers.length; i++) {
-                var chs = servers[i].channels || []
-                for (var j = 0; j < chs.length; j++) {
-                    out.push({
-                        id: chs[j].id,
-                        label: servers[i].name + " · #" + chs[j].name
-                    })
-                }
-            }
-            return out
-        } catch (e) {
-            return []
-        }
-    }
-
     function loadEditor() {
         var acc = currentAccount()
         if (!acc) {
@@ -71,21 +52,6 @@ Item {
         nameField.text = acc.name
         tokenField.text = acc.token
         typeCombo.currentIndex = acc.type === "Alt" ? 1 : 0
-        refreshChannelChecks()
-    }
-
-    function refreshChannelChecks() {
-        channelModel.clear()
-        var acc = currentAccount()
-        var enabled = acc ? (acc.enabled_channel_ids || []) : []
-        var channels = allChannels()
-        for (var i = 0; i < channels.length; i++) {
-            channelModel.append({
-                channelId: channels[i].id,
-                label: channels[i].label,
-                enabled: enabled.indexOf(channels[i].id) >= 0
-            })
-        }
     }
 
     function saveCurrent() {
@@ -98,16 +64,8 @@ Item {
             tokenField.text,
             typeCombo.currentText
         )
-        var ids = []
-        for (var i = 0; i < channelModel.count; i++) {
-            if (channelModel.get(i).enabled)
-                ids.push(channelModel.get(i).channelId)
-        }
-        App.setAccountEnabledChannels(acc.id, JSON.stringify(ids))
         reload()
     }
-
-    ListModel { id: channelModel }
 
     Connections {
         target: App
@@ -116,18 +74,14 @@ Item {
         }
     }
 
-    ScrollablePage {
+    RowLayout {
         anchors.fill: parent
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 520
-            spacing: 16
+        spacing: 16
 
         PanelCard {
             Layout.preferredWidth: 220
             Layout.maximumWidth: 260
-            Layout.preferredHeight: 520
+            Layout.fillHeight: true
             title: "Accounts"
             titleSize: 14
             fillContentVertically: true
@@ -162,8 +116,7 @@ Item {
                     id: accountList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 120
-                    Layout.preferredHeight: 320
+                    Layout.minimumHeight: 80
                     clip: true
                     model: accounts().length
                     currentIndex: selectedIndex
@@ -197,64 +150,76 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
-            Layout.preferredHeight: 520
+            Layout.fillHeight: true
+            Layout.maximumHeight: detailsCol.implicitHeight + 48
+            Layout.alignment: Qt.AlignTop
             title: currentAccount() ? currentAccount().name : "Account details"
             titleSize: 14
-            fillContentVertically: true
 
             ColumnLayout {
+                id: detailsCol
                 Layout.fillWidth: true
                 spacing: 10
 
                 GridLayout {
                     Layout.fillWidth: true
-                    columns: 4
+                    columns: 2
                     columnSpacing: 10
                     rowSpacing: 8
 
                     Label { text: "Name"; color: Theme.fgSecondary; font.pixelSize: 11 }
                     ThemedTextField {
                         id: nameField
-                        Layout.columnSpan: 3
                         Layout.fillWidth: true
                     }
 
                     Label { text: "Type"; color: Theme.fgSecondary; font.pixelSize: 11 }
                     ThemedComboBox {
                         id: typeCombo
-                        Layout.columnSpan: 3
-                        model: ["Main", "Alt"]
-                    }
-
-                    Label { text: "Token"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                    ThemedTextField {
-                        id: tokenField
-                        Layout.columnSpan: 3
                         Layout.fillWidth: true
-                        echoMode: TextInput.Password
+                        model: ["Main", "Alt"]
                     }
                 }
 
                 Label {
-                    text: "Enabled channels (used for quick filtering; Run can use any channel)"
-                    color: Theme.fgMuted
-                    font.pixelSize: 10
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
+                    text: "Token"
+                    color: Theme.fgSecondary
+                    font.pixelSize: 11
                 }
 
-                ListView {
+                // Always constrained to panel width; wrap when shown, mask when hidden.
+                TextField {
+                    id: tokenField
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.min(200, Math.max(60, channelModel.count * 32))
-                    clip: true
-                    model: channelModel
-                    delegate: ThemedCheckBox {
-                        width: parent.width
-                        text: model.label
-                        textSize: 11
-                        checked: model.enabled
-                        onToggled: channelModel.setProperty(index, "enabled", checked)
+                    Layout.preferredHeight: accountsRoot.showToken ? 72 : 36
+                    wrapMode: accountsRoot.showToken ? TextInput.WrapAnywhere : TextInput.NoWrap
+                    verticalAlignment: accountsRoot.showToken ? TextInput.AlignTop : TextInput.AlignVCenter
+                    selectByMouse: true
+                    echoMode: accountsRoot.showToken ? TextInput.Normal : TextInput.Password
+                    font.family: "Consolas, monospace"
+                    font.pixelSize: 11
+                    color: Theme.fgPrimary
+                    placeholderText: "Discord user token"
+                    placeholderTextColor: Theme.fgMuted
+                    selectionColor: Theme.accentPrimary
+                    selectedTextColor: Theme.bgDark
+                    leftPadding: 10
+                    rightPadding: 10
+                    topPadding: accountsRoot.showToken ? 8 : 0
+                    bottomPadding: accountsRoot.showToken ? 8 : 0
+                    background: Rectangle {
+                        radius: 6
+                        color: Theme.inputBg
+                        border.color: tokenField.activeFocus ? Theme.accentPrimary : Theme.border
+                        border.width: 1
                     }
+                }
+
+                ThemedCheckBox {
+                    text: "Show token"
+                    textSize: 11
+                    checked: accountsRoot.showToken
+                    onToggled: accountsRoot.showToken = checked
                 }
 
                 Label {
@@ -265,16 +230,12 @@ Item {
                     wrapMode: Text.WordWrap
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    ThemedButton {
-                        text: "Save"
-                        accent: true
-                        onClicked: saveCurrent()
-                    }
+                ThemedButton {
+                    text: "Save"
+                    accent: true
+                    onClicked: saveCurrent()
                 }
             }
-        }
         }
     }
 

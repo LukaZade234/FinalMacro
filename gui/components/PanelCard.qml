@@ -14,6 +14,8 @@ Item {
     implicitHeight: innerLayout.implicitHeight + contentMargins * 2
     implicitWidth: innerLayout.implicitWidth + contentMargins * 2
 
+    clip: true
+
     Rectangle {
         anchors.fill: parent
         radius: 10

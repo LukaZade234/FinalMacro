@@ -6,8 +6,8 @@ Button {
     id: nav
     property bool navActive: false
 
-    width: parent ? parent.width : 230
-    height: 45
+    width: parent ? parent.width : 168
+    height: 38
     flat: true
     hoverEnabled: true
     padding: 0
@@ -21,7 +21,7 @@ Button {
     contentItem: Text {
         text: nav.text
         color: nav.navActive ? Theme.fgPrimary : Theme.fgSecondary
-        font.pixelSize: 14
+        font.pixelSize: 13
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
     }

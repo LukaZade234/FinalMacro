@@ -26,6 +26,7 @@ Item {
     property string keyTypeFilter: "all"
     property string sourceFilter: "all"
     property int trendRangeDays: 30
+    property int chartMode: 0  // 0 daily, 1 monthly, 2 omega
 
     readonly property var keyCards: [
         { label: "Bronze", key: "bronze", color: "#cd7f32" },
@@ -110,30 +111,6 @@ Item {
                 label: entries()[i].key_type_label || id
             })
         }
-        return out
-    }
-
-    function typeBreakdown() {
-        var list = filteredEntries()
-        var totals = {}
-        for (var i = 0; i < list.length; i++) {
-            var key = list[i].key_type || "unknown"
-            totals[key] = (totals[key] || 0) + Number(list[i].amount || 0)
-        }
-        var out = []
-        var keys = Object.keys(totals)
-        for (var j = 0; j < keys.length; j++) {
-            var typeId = keys[j]
-            var label = typeId
-            for (var k = 0; k < uniqueKeyTypes().length; k++) {
-                if (uniqueKeyTypes()[k].id === typeId) {
-                    label = uniqueKeyTypes()[k].label
-                    break
-                }
-            }
-            out.push({ id: typeId, label: label, amount: totals[typeId] })
-        }
-        out.sort(function(a, b) { return b.amount - a.amount })
         return out
     }
 
@@ -281,8 +258,7 @@ Item {
     function displayTotalsForType(keyType) {
         if (accountFilter === "all" && serverFilter === "all"
                 && keyTypeFilter === "all" && sourceFilter === "all") {
-            var stored = totalsByType()[keyType] || {}
-            return stored
+            return totalsByType()[keyType] || {}
         }
         return filteredTotalsForType(keyType)
     }
@@ -327,6 +303,24 @@ Item {
         serverFilter = "all"
     }
 
+    function keyColor(typeId) {
+        for (var i = 0; i < keyCards.length; i++) {
+            if (keyCards[i].key === typeId)
+                return keyCards[i].color
+        }
+        return Theme.accentPrimary
+    }
+
+    function recentEntries() {
+        var list = filteredEntries().slice()
+        list.sort(function(a, b) {
+            var da = (a.date_key || "") + " " + (a.time || "")
+            var db = (b.date_key || "") + " " + (b.time || "")
+            return db.localeCompare(da)
+        })
+        return list.slice(0, 80)
+    }
+
     Component.onCompleted: reload()
 
     Connections {
@@ -338,350 +332,363 @@ Item {
 
     ScrollablePage {
         anchors.fill: parent
+        contentSpacing: 14
 
-        Label {
-            text: "Keys gained on each roll: count key lines on the embed (1 line = 1 key), omega from explicit +N. Logged while the macro is connected."
-            color: Theme.fgMuted
-            font.pixelSize: 11
-            wrapMode: Text.WordWrap
+        // Summary totals
+        Flow {
             Layout.fillWidth: true
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
+            spacing: 10
 
             Repeater {
                 model: keyCards
 
-                delegate: PanelCard {
+                delegate: Rectangle {
                     required property var modelData
+                    width: Math.max(120, (keysRoot.width - 40) / 5 - 10)
+                    height: 78
+                    radius: 10
+                    color: Theme.bgMedium
+                    border.color: Theme.border
+                    border.width: 1
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 2
+
+                        Label {
+                            text: modelData.label
+                            color: Theme.fgMuted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            text: "+" + formatAmount(displayTotalsForType(modelData.key).all_time || 0)
+                            color: modelData.color
+                            font.pixelSize: 20
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            text: "today +" + formatAmount(displayTotalsForType(modelData.key).today || 0)
+                            color: Theme.fgSecondary
+                            font.pixelSize: 10
+                        }
+                    }
+                }
+            }
+        }
+
+        // Filters
+        Rectangle {
+            Layout.fillWidth: true
+            radius: 10
+            color: Theme.bgMedium
+            border.color: Theme.border
+            border.width: 1
+            implicitHeight: filterCol.implicitHeight + 20
+
+            ColumnLayout {
+                id: filterCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 10
+                spacing: 8
+
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 88
-                    Layout.preferredHeight: 72
-                    contentMargins: 10
-                    title: modelData.label
-                    titleSize: 10
+                    spacing: 8
 
                     Label {
-                        text: "+" + formatAmount(displayTotalsForType(modelData.key).all_time || 0)
-                        color: modelData.color
-                        font.pixelSize: 16
+                        text: "Filters"
+                        color: Theme.fgPrimary
+                        font.pixelSize: 12
                         font.weight: Font.DemiBold
                     }
+                    Item { Layout.fillWidth: true }
                     Label {
-                        text: "today " + formatAmount(displayTotalsForType(modelData.key).today || 0)
+                        text: filteredEntries().length + " events"
+                        color: Theme.fgMuted
+                        font.pixelSize: 11
+                    }
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    ThemedComboBox {
+                        implicitWidth: 170
+                        model: ["All accounts"].concat(uniqueAccounts().map(function(a) { return a.label }))
+                        onActivated: function(index) {
+                            accountFilter = index <= 0 ? "all" : uniqueAccounts()[index - 1].id
+                        }
+                    }
+                    ThemedComboBox {
+                        implicitWidth: 180
+                        model: ["All servers"].concat(uniqueServers().map(function(s) { return s.label }))
+                        onActivated: function(index) {
+                            serverFilter = index <= 0 ? "all" : uniqueServers()[index - 1].id
+                        }
+                    }
+                    ThemedComboBox {
+                        implicitWidth: 130
+                        model: ["All types"].concat(uniqueKeyTypes().map(function(t) { return t.label }))
+                        onActivated: function(index) {
+                            keyTypeFilter = index <= 0 ? "all" : uniqueKeyTypes()[index - 1].id
+                        }
+                    }
+                    ThemedComboBox {
+                        implicitWidth: 150
+                        model: ["All sources"].concat(uniqueSources().map(function(s) { return s.label }))
+                        onActivated: function(index) {
+                            sourceFilter = index <= 0 ? "all" : uniqueSources()[index - 1].id
+                        }
+                    }
+                    ThemedComboBox {
+                        implicitWidth: 110
+                        model: ["7 days", "30 days", "90 days", "1 year", "All"]
+                        currentIndex: 1
+                        onActivated: function(index) {
+                            trendRangeDays = [7, 30, 90, 365, 0][index]
+                        }
+                    }
+                }
+            }
+        }
+
+        // Chart + sources side by side when wide enough
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 2
+                Layout.preferredHeight: chartInner.implicitHeight + 24
+                radius: 10
+                color: Theme.bgMedium
+                border.color: Theme.border
+                border.width: 1
+
+                ColumnLayout {
+                    id: chartInner
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 12
+                    spacing: 10
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Label {
+                            text: "Trends"
+                            color: Theme.fgPrimary
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                        }
+                        Item { Layout.fillWidth: true }
+
+                        Repeater {
+                            model: [
+                                { label: "Daily", mode: 0 },
+                                { label: "Monthly", mode: 1 },
+                                { label: "Omega", mode: 2 }
+                            ]
+                            delegate: Rectangle {
+                                required property var modelData
+                                implicitHeight: 26
+                                implicitWidth: modeLabel.implicitWidth + 16
+                                radius: 13
+                                color: keysRoot.chartMode === modelData.mode ? Theme.accentPrimary : Theme.bgDark
+                                border.color: keysRoot.chartMode === modelData.mode ? Theme.accentPrimary : Theme.border
+                                border.width: 1
+
+                                Label {
+                                    id: modeLabel
+                                    anchors.centerIn: parent
+                                    text: modelData.label
+                                    color: keysRoot.chartMode === modelData.mode ? Theme.bgDark : Theme.fgSecondary
+                                    font.pixelSize: 11
+                                    font.weight: keysRoot.chartMode === modelData.mode ? Font.DemiBold : Font.Normal
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: keysRoot.chartMode = modelData.mode
+                                }
+                            }
+                        }
+                    }
+
+                    KeyGainCharts {
+                        Layout.fillWidth: true
+                        dailySeries: keysRoot.chartMode === 0 ? filteredDailySeries() : []
+                        monthlySeries: keysRoot.chartMode === 1 ? filteredMonthlySeries() : []
+                        omegaDailySeries: keysRoot.chartMode === 2 ? filteredOmegaDailySeries() : []
+                        rangeDays: trendRangeDays
+                        emptyText: "No key gains in this range."
+                        showOnly: keysRoot.chartMode
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.preferredWidth: 220
+                Layout.maximumWidth: 260
+                Layout.fillHeight: true
+                Layout.minimumHeight: 180
+                radius: 10
+                color: Theme.bgMedium
+                border.color: Theme.border
+                border.width: 1
+                visible: keysRoot.width >= 900
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    Label {
+                        text: "By source"
+                        color: Theme.fgPrimary
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: sourceBreakdown()
+                        spacing: 6
+
+                        delegate: RowLayout {
+                            required property var modelData
+                            width: ListView.view.width
+                            spacing: 8
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.label
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: "+" + formatAmount(modelData.amount)
+                                color: Theme.accentSecondary
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                            }
+                        }
+
+                        Label {
+                            anchors.centerIn: parent
+                            visible: sourceBreakdown().length === 0
+                            text: "No data yet"
+                            color: Theme.fgMuted
+                            font.pixelSize: 12
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recent activity as clean cards instead of a dense table
+        Rectangle {
+            Layout.fillWidth: true
+            radius: 10
+            color: Theme.bgMedium
+            border.color: Theme.border
+            border.width: 1
+            implicitHeight: Math.min(420, recentHeader.implicitHeight + recentList.contentHeight + 36)
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                RowLayout {
+                    id: recentHeader
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Recent gains"
+                        color: Theme.fgPrimary
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: "Newest first · up to 80"
                         color: Theme.fgMuted
                         font.pixelSize: 10
                     }
                 }
-            }
-        }
 
-        Item {
-            Layout.fillWidth: true
-            implicitHeight: keyFilterFlow.implicitHeight
-
-            Flow {
-                id: keyFilterFlow
-                width: parent.width
-                spacing: 8
-
-                ThemedComboBox {
-                    width: 200
-                    model: ["All accounts"].concat(uniqueAccounts().map(function(a) { return a.label }))
-                    onActivated: function(index) {
-                        accountFilter = index <= 0 ? "all" : uniqueAccounts()[index - 1].id
-                    }
-                }
-
-                ThemedComboBox {
-                    width: 220
-                    model: ["All servers"].concat(uniqueServers().map(function(s) { return s.label }))
-                    onActivated: function(index) {
-                        serverFilter = index <= 0 ? "all" : uniqueServers()[index - 1].id
-                    }
-                }
-
-                ThemedComboBox {
-                    width: 140
-                    model: ["All key types"].concat(uniqueKeyTypes().map(function(t) { return t.label }))
-                    onActivated: function(index) {
-                        keyTypeFilter = index <= 0 ? "all" : uniqueKeyTypes()[index - 1].id
-                    }
-                }
-
-                ThemedComboBox {
-                    width: 160
-                    model: ["All sources"].concat(uniqueSources().map(function(s) { return s.label }))
-                    onActivated: function(index) {
-                        sourceFilter = index <= 0 ? "all" : uniqueSources()[index - 1].id
-                    }
-                }
-
-                ThemedComboBox {
-                    width: 120
-                    model: ["7 days", "30 days", "90 days", "1 year", "All"]
-                    currentIndex: 1
-                    onActivated: function(index) {
-                        trendRangeDays = [7, 30, 90, 365, 0][index]
-                    }
-                }
-
-                Label {
-                    width: Math.max(160, keyFilterFlow.width)
-                    text: filteredEntries().length + " events"
-                    color: Theme.fgSecondary
-                    font.pixelSize: 12
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 10
-
-            PanelCard {
-                Layout.fillWidth: true
-                title: "By key type"
-                titleSize: 14
-
-                Flow {
-                    width: parent.width
-                    spacing: 8
-
-                    Repeater {
-                        model: typeBreakdown()
-
-                        delegate: Rectangle {
-                            required property var modelData
-                            radius: 8
-                            color: Theme.bgDark
-                            border.color: Theme.border
-                            border.width: 1
-                            implicitHeight: 52
-                            implicitWidth: typeLabel.implicitWidth + amountLabel.implicitWidth + 24
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 2
-                                Label {
-                                    id: typeLabel
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.label
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 10
-                                }
-                                Label {
-                                    id: amountLabel
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: "+" + formatAmount(modelData.amount)
-                                    color: Theme.accentPrimary
-                                    font.pixelSize: 13
-                                    font.weight: Font.DemiBold
-                                }
-                            }
-                        }
-                    }
-
-                    Label {
-                        visible: typeBreakdown().length === 0
-                        text: "No keys logged yet."
-                        color: Theme.fgMuted
-                        font.pixelSize: 12
-                    }
-                }
-            }
-
-            PanelCard {
-                Layout.fillWidth: true
-                title: "By source"
-                titleSize: 14
-
-                Flow {
-                    width: parent.width
-                    spacing: 8
-
-                    Repeater {
-                        model: sourceBreakdown()
-
-                        delegate: Rectangle {
-                            required property var modelData
-                            radius: 8
-                            color: Theme.bgDark
-                            border.color: Theme.border
-                            border.width: 1
-                            implicitHeight: 52
-                            implicitWidth: srcLabel.implicitWidth + srcAmount.implicitWidth + 24
-
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 2
-                                Label {
-                                    id: srcLabel
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.label
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 10
-                                }
-                                Label {
-                                    id: srcAmount
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: "+" + formatAmount(modelData.amount)
-                                    color: Theme.accentSecondary
-                                    font.pixelSize: 13
-                                    font.weight: Font.DemiBold
-                                }
-                            }
-                        }
-                    }
-
-                    Label {
-                        visible: sourceBreakdown().length === 0
-                        text: "No source data yet."
-                        color: Theme.fgMuted
-                        font.pixelSize: 12
-                    }
-                }
-            }
-        }
-
-        PanelCard {
-            Layout.fillWidth: true
-            title: "Key gain charts"
-            titleSize: 14
-
-            KeyGainCharts {
-                Layout.fillWidth: true
-                dailySeries: filteredDailySeries()
-                monthlySeries: filteredMonthlySeries()
-                omegaDailySeries: filteredOmegaDailySeries()
-                rangeDays: trendRangeDays
-                emptyText: "No key gains in this range."
-            }
-        }
-
-        PanelCard {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 280
-            title: "Key log"
-            titleSize: 14
-            fillContentVertically: true
-
-            ColumnLayout {
-                width: parent.width
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: 0
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    implicitHeight: 32
-                    color: Theme.bgDark
-                    radius: 6
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 10
-                        spacing: 8
-
-                        Label { Layout.preferredWidth: 88; text: "Date"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 64; text: "Time"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 96; text: "Account"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 100; text: "Server"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 64; text: "Type"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 56; text: "Gain"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 96; text: "Source"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.fillWidth: true; text: "Character"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                    }
-                }
-
-                ScrollView {
+                ListView {
+                    id: recentList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.preferredHeight: Math.min(340, Math.max(80, contentHeight))
                     clip: true
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    model: recentEntries()
+                    spacing: 4
 
-                    ListView {
-                        id: keyList
-                        width: parent.width
-                        model: filteredEntries()
-                        spacing: 2
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: recentList.width
+                        height: 44
+                        radius: 8
+                        color: Theme.bgDark
 
-                        delegate: Rectangle {
-                            required property var modelData
-                            required property int index
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 10
 
-                            width: keyList.width
-                            implicitHeight: 34
-                            color: index % 2 === 0 ? "transparent" : Theme.bgDark
-                            radius: 4
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: keyColor(modelData.key_type)
+                            }
 
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 10
-                                spacing: 8
-
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 1
                                 Label {
-                                    Layout.preferredWidth: 88
-                                    text: modelData.date_key || "—"
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.preferredWidth: 64
-                                    text: modelData.time || "—"
-                                    color: Theme.fgMuted
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.preferredWidth: 96
-                                    text: modelData.account_name || "Main"
-                                    color: modelData.account_inferred ? Theme.fgMuted : Theme.accentPrimary
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.preferredWidth: 100
-                                    text: modelData.guild_name || String(modelData.guild_id || "—")
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.preferredWidth: 64
-                                    text: modelData.key_type_label || modelData.key_type || "—"
+                                    Layout.fillWidth: true
+                                    text: (modelData.character_name || "Unknown") + " · +"
+                                          + formatAmount(modelData.amount) + " "
+                                          + (modelData.key_type_label || modelData.key_type || "")
                                     color: Theme.fgPrimary
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                }
-                                Label {
-                                    Layout.preferredWidth: 56
-                                    text: "+" + formatAmount(modelData.amount)
-                                    color: Theme.success
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                }
-                                Label {
-                                    Layout.preferredWidth: 96
-                                    text: modelData.source_label || modelData.source || "—"
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                                 Label {
                                     Layout.fillWidth: true
-                                    text: modelData.character_name || "—"
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
+                                    text: (modelData.date_key || "") + " "
+                                          + (modelData.time || "") + " · "
+                                          + (modelData.account_name || "Main") + " · "
+                                          + (modelData.guild_name || modelData.guild_id || "—") + " · "
+                                          + (modelData.source_label || modelData.source || "—")
+                                    color: Theme.fgMuted
+                                    font.pixelSize: 10
                                     elide: Text.ElideRight
                                 }
                             }
                         }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        visible: recentEntries().length === 0
+                        text: "No key gains logged yet."
+                        color: Theme.fgMuted
+                        font.pixelSize: 12
                     }
                 }
             }

@@ -9,8 +9,8 @@ ApplicationWindow {
     id: win
     width: 1200
     height: 1000
-    minimumWidth: 1140
-    minimumHeight: 720
+    minimumWidth: 980
+    minimumHeight: 680
     visible: true
     title: "FinalMacro"
     color: Theme.bgDark
@@ -52,8 +52,8 @@ ApplicationWindow {
 
         Sidebar {
             id: sidebar
-            Layout.preferredWidth: 250
-            Layout.maximumWidth: 250
+            Layout.preferredWidth: 188
+            Layout.maximumWidth: 188
             Layout.fillHeight: true
             currentIndex: win.currentPage
             navModel: win.pages

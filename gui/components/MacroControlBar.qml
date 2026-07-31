@@ -10,6 +10,11 @@ ColumnLayout {
     property bool macroEngineRunning: false
     property bool notificationStandby: false
     property bool sessionActive: false
+    property bool connectionOnly: false
+    property bool actionsOnly: false
+
+    readonly property bool showConnection: !bar.actionsOnly
+    readonly property bool showActions: !bar.connectionOnly
 
     readonly property bool minigameBusy:
         App.runActionPending === "oh"
@@ -17,9 +22,14 @@ ColumnLayout {
         || App.runActionPending === "oq"
         || App.runActionPending === "minigames"
 
+    readonly property bool checkBusy:
+        App.runActionPending === "tu"
+        || App.runActionPending === "us_check"
+
     signal connectClicked()
     signal disconnectClicked()
     signal runTuClicked()
+    signal runUsCheckClicked()
     signal startClicked()
     signal stopClicked()
     signal playOhClicked()
@@ -31,7 +41,7 @@ ColumnLayout {
     spacing: 10
 
     Label {
-        visible: bar.notificationStandby
+        visible: bar.notificationStandby && bar.showConnection
         Layout.fillWidth: true
         text: "Notification mode: temporarily disconnected while the macro waits for rolls. Use Stop to exit, or Disconnect to end the session."
         color: Theme.warning
@@ -40,14 +50,16 @@ ColumnLayout {
     }
 
     RowLayout {
-        spacing: 8
+        spacing: 6
         Layout.fillWidth: true
+        visible: bar.showConnection
 
         ActionButton {
             text: "Connect"
             loading: App.connecting
             enabled: !bar.sessionActive && !App.connecting
             Layout.fillWidth: true
+            buttonHeight: 34
             fillColor: Theme.accentPrimary
             textColor: Theme.bgDark
             labelWeight: Font.DemiBold
@@ -59,58 +71,175 @@ ColumnLayout {
             loading: App.disconnecting
             enabled: bar.sessionActive && !App.disconnecting
             Layout.fillWidth: true
+            buttonHeight: 34
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
             onClicked: bar.disconnectClicked()
         }
     }
 
-    RowLayout {
-        spacing: 8
+    ActionButton {
+        visible: bar.showConnection
+        text: "Stop"
+        loading: App.runActionPending === "stop"
+        enabled: bar.macroEngineRunning && App.runActionPending !== "stop"
         Layout.fillWidth: true
+        buttonHeight: 34
+        fillColor: Theme.error
+        textColor: "#ffffff"
+        labelWeight: Font.Bold
+        onClicked: bar.stopClicked()
+    }
+
+    RowLayout {
+        spacing: 6
+        Layout.fillWidth: true
+        visible: bar.showActions
 
         ActionButton {
             text: "Run $tu"
             loading: App.runActionPending === "tu"
-            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "tu"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.checkBusy && !bar.minigameBusy
             Layout.fillWidth: true
+            buttonHeight: 34
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
             onClicked: bar.runTuClicked()
         }
 
         ActionButton {
-            text: "Start macro"
-            loading: App.runActionPending === "start"
-            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "start"
+            text: "Run $us"
+            loading: App.runActionPending === "us_check"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.checkBusy && !bar.minigameBusy
             Layout.fillWidth: true
-            fillColor: Theme.success
-            textColor: Theme.bgDark
-            labelWeight: Font.Bold
-            onClicked: bar.startClicked()
+            buttonHeight: 34
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
+            onClicked: bar.runUsCheckClicked()
         }
+    }
 
-        ActionButton {
-            text: "Stop"
-            loading: App.runActionPending === "stop"
-            enabled: bar.macroEngineRunning && App.runActionPending !== "stop"
-            Layout.fillWidth: true
-            fillColor: Theme.error
-            textColor: "#ffffff"
-            labelWeight: Font.Bold
-            onClicked: bar.stopClicked()
+    Label {
+        visible: bar.showActions
+        Layout.fillWidth: true
+        text: "Hourly macro"
+        color: Theme.fgMuted
+        font.pixelSize: 11
+        font.weight: Font.DemiBold
+    }
+
+    ActionButton {
+        visible: bar.showActions
+        text: "Start hourly macro"
+        loading: App.runActionPending === "start"
+        enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "start"
+                 && !bar.checkBusy && !bar.minigameBusy
+        Layout.fillWidth: true
+        buttonHeight: 36
+        fillColor: Theme.success
+        textColor: Theme.bgDark
+        labelWeight: Font.Bold
+        onClicked: bar.startClicked()
+    }
+
+    Label {
+        visible: bar.showActions
+        Layout.fillWidth: true
+        text: "$us"
+        color: Theme.fgMuted
+        font.pixelSize: 11
+        font.weight: Font.DemiBold
+    }
+
+    ActionButton {
+        visible: bar.showActions
+        text: "Roll $us"
+        loading: App.runActionPending === "us"
+        enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "us"
+                 && !bar.checkBusy && !bar.minigameBusy
+        Layout.fillWidth: true
+        buttonHeight: 34
+        fillColor: Theme.bgLight
+        textColor: Theme.fgPrimary
+        onClicked: bar.playUsClicked()
+    }
+
+    ThemedCheckBox {
+        visible: bar.showActions
+        Layout.fillWidth: true
+        text: "Stop when out of power ($dk counted)"
+        textSize: 10
+        enabled: !bar.macroEngineRunning
+        checked: App.usStopOnPowerExhausted
+        onToggled: {
+            if (checked !== App.usStopOnPowerExhausted)
+                App.setUsStopOnPowerExhausted(checked)
         }
     }
 
     RowLayout {
-        spacing: 8
+        spacing: 6
         Layout.fillWidth: true
+        visible: bar.showActions
+
+        ThemedCheckBox {
+            id: stopAfterRollsCheck
+            text: "Stop after"
+            textSize: 10
+            enabled: !bar.macroEngineRunning
+            checked: App.usStopAfterRollsEnabled
+            onToggled: {
+                if (checked !== App.usStopAfterRollsEnabled)
+                    App.setUsStopAfterRollsEnabled(checked)
+            }
+        }
+
+        ThemedSpinBox {
+            id: stopAfterRollsSpin
+            Layout.preferredWidth: 120
+            Layout.minimumWidth: 120
+            from: 1
+            to: 999999
+            stepSize: 10
+            enabled: !bar.macroEngineRunning && stopAfterRollsCheck.checked
+
+            Component.onCompleted: value = App.usStopAfterRolls
+
+            onValueModified: {
+                if (value !== App.usStopAfterRolls)
+                    App.setUsStopAfterRolls(value)
+            }
+        }
+
+        Label {
+            text: "rolls"
+            color: Theme.fgMuted
+            font.pixelSize: 10
+        }
+
+        Item { Layout.fillWidth: true }
+    }
+
+    Label {
+        visible: bar.showActions
+        Layout.fillWidth: true
+        text: "Minigames"
+        color: Theme.fgMuted
+        font.pixelSize: 11
+        font.weight: Font.DemiBold
+    }
+
+    RowLayout {
+        spacing: 6
+        Layout.fillWidth: true
+        visible: bar.showActions
 
         ActionButton {
             text: "Play $oh"
             loading: App.runActionPending === "oh"
-            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy && !bar.checkBusy
             Layout.fillWidth: true
+            buttonHeight: 32
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
             onClicked: bar.playOhClicked()
@@ -119,8 +248,9 @@ ColumnLayout {
         ActionButton {
             text: "Play $oc"
             loading: App.runActionPending === "oc"
-            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy && !bar.checkBusy
             Layout.fillWidth: true
+            buttonHeight: 32
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
             onClicked: bar.playOcClicked()
@@ -129,32 +259,44 @@ ColumnLayout {
         ActionButton {
             text: "Play $oq"
             loading: App.runActionPending === "oq"
-            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy && !bar.checkBusy
             Layout.fillWidth: true
+            buttonHeight: 32
             fillColor: Theme.bgLight
             textColor: Theme.fgPrimary
             onClicked: bar.playOqClicked()
         }
+    }
 
-        ActionButton {
-            text: "Play all"
-            loading: App.runActionPending === "minigames"
-            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy
-            Layout.fillWidth: true
-            fillColor: Theme.accentPrimary
-            textColor: Theme.bgDark
-            labelWeight: Font.DemiBold
-            onClicked: bar.playAllMinigamesClicked()
-        }
+    ActionButton {
+        visible: bar.showActions
+        text: "Play all minigames available"
+        loading: App.runActionPending === "minigames"
+        enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy && !bar.checkBusy
+        Layout.fillWidth: true
+        buttonHeight: 34
+        fillColor: Theme.accentPrimary
+        textColor: Theme.bgDark
+        labelWeight: Font.DemiBold
+        onClicked: bar.playAllMinigamesClicked()
+    }
 
-        ActionButton {
-            text: "Roll $us"
-            loading: App.runActionPending === "us"
-            enabled: bar.connected && !bar.macroEngineRunning && App.runActionPending !== "us" && !bar.minigameBusy
-            Layout.fillWidth: true
-            fillColor: Theme.bgLight
-            textColor: Theme.fgPrimary
-            onClicked: bar.playUsClicked()
+    Label {
+        visible: bar.showActions
+        Layout.fillWidth: true
+        text: "Single play buttons run one minigame each. Play all uses every minigame you have available."
+        color: Theme.fgMuted
+        font.pixelSize: 10
+        wrapMode: Text.WordWrap
+    }
+
+    Connections {
+        target: App
+        function onUsModeOptionsChanged() {
+            if (!bar.showActions)
+                return
+            if (stopAfterRollsSpin.value !== App.usStopAfterRolls)
+                stopAfterRollsSpin.value = App.usStopAfterRolls
         }
     }
 }

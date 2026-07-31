@@ -350,7 +350,8 @@ def parse_roll(
         summary += f" · wished by {len(wished_by)}"
     if new_soulmate:
         summary += " · new soulmate"
-        record_new_soulmate(snapshot, fields)
+        if not snapshot.edited:
+            record_new_soulmate(snapshot, fields)
     if fields.get("bku_reset"):
         summary += " · bku reset"
     elif fields.get("bku") is not None:

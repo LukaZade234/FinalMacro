@@ -16,6 +16,7 @@ ColumnLayout {
     property int channelIndex: 0
     property int presetIndex: 0
     property bool updating: false
+    property bool compact: false
 
     function reload() {
         updating = true
@@ -89,9 +90,13 @@ ColumnLayout {
             }
         }
         accountCombo.currentIndex = accountIndex
+        accountComboCompact.currentIndex = accountIndex
         serverCombo.currentIndex = serverIndex
+        serverComboCompact.currentIndex = serverIndex
         channelCombo.currentIndex = channelIndex
+        channelComboCompact.currentIndex = channelIndex
         presetCombo.currentIndex = presetIndex
+        presetComboCompact.currentIndex = presetIndex
     }
 
     function syncChannelIndex() {
@@ -141,6 +146,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 10
+        visible: !root.compact
 
         Label { text: "Account"; color: Theme.fgSecondary; font.pixelSize: 11 }
         ThemedComboBox {
@@ -161,6 +167,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 10
+        visible: !root.compact
 
         Label { text: "Server"; color: Theme.fgSecondary; font.pixelSize: 11 }
         ThemedComboBox {
@@ -199,6 +206,109 @@ ColumnLayout {
         }
     }
 
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 8
+        visible: root.compact
+
+        Label {
+            text: "Account"
+            color: Theme.fgMuted
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+        }
+        ThemedComboBox {
+            id: accountComboCompact
+            Layout.preferredWidth: 140
+            Layout.fillWidth: true
+            model: root.accounts().map(function(a) { return a.name + " (" + a.type + ")" })
+            enabled: model.length > 0
+            onActivated: function(index) {
+                if (root.updating)
+                    return
+                root.accountIndex = index
+                accountCombo.currentIndex = index
+                root.applyRunTarget()
+            }
+        }
+
+        Label {
+            text: "Preset"
+            color: Theme.fgMuted
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+        }
+        ThemedComboBox {
+            id: presetComboCompact
+            Layout.preferredWidth: 120
+            Layout.fillWidth: true
+            model: root.presets().map(function(p) { return p.id })
+            enabled: model.length > 0
+            onActivated: function(index) {
+                if (root.updating)
+                    return
+                root.presetIndex = index
+                presetCombo.currentIndex = index
+                root.applyRunTarget()
+            }
+        }
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        spacing: 8
+        visible: root.compact
+
+        Label {
+            text: "Server"
+            color: Theme.fgMuted
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+        }
+        ThemedComboBox {
+            id: serverComboCompact
+            Layout.preferredWidth: 120
+            Layout.fillWidth: true
+            model: root.servers().map(function(s) { return s.name })
+            enabled: model.length > 0
+            onActivated: function(index) {
+                if (root.updating)
+                    return
+                root.serverIndex = index
+                serverCombo.currentIndex = index
+                root.syncChannelIndex()
+                channelCombo.currentIndex = root.channelIndex
+                channelComboCompact.currentIndex = root.channelIndex
+                root.applyRunTarget()
+            }
+        }
+
+        Label {
+            text: "Channel"
+            color: Theme.fgMuted
+            font.pixelSize: 10
+            font.weight: Font.DemiBold
+        }
+        ThemedComboBox {
+            id: channelComboCompact
+            Layout.preferredWidth: 120
+            Layout.fillWidth: true
+            property var channelList: {
+                var chs = root.channelsForServer()
+                return chs.map(function(c) { return "#" + c.name })
+            }
+            model: channelList
+            enabled: channelList.length > 0
+            onActivated: function(index) {
+                if (root.updating)
+                    return
+                root.channelIndex = index
+                channelCombo.currentIndex = index
+                root.applyRunTarget()
+            }
+        }
+    }
+
     Label {
         Layout.fillWidth: true
         visible: root.servers().length === 0
@@ -220,6 +330,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: 10
+        visible: !root.compact
 
         Label { text: "Preset"; color: Theme.fgSecondary; font.pixelSize: 11 }
         ThemedComboBox {

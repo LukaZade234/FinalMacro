@@ -78,6 +78,30 @@ def enrich_entry(
     return out
 
 
+def _normalize_character_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return str(name).strip().lower()
+
+
+def _soulmate_identity(guild_id: int | None, character_name: str | None) -> tuple[str, str]:
+    return (str(guild_id or ""), _normalize_character_name(character_name))
+
+
+def _find_logged_soulmate(
+    guild_id: int | None,
+    character_name: str | None,
+) -> dict[str, Any] | None:
+    """Return an existing row for this character on this server, if any."""
+    target = _soulmate_identity(guild_id, character_name)
+    if not target[1]:
+        return None
+    for entry in reversed(_events):
+        if _soulmate_identity(entry.get("guild_id"), entry.get("character_name")) == target:
+            return dict(entry)
+    return None
+
+
 def record_new_soulmate(
     snapshot: MudaeMessageSnapshot,
     fields: dict[str, Any],
@@ -86,6 +110,15 @@ def record_new_soulmate(
     account_name: str | None = None,
 ) -> dict[str, Any]:
     """Append a soulmate event and return the stored entry."""
+    if snapshot.message_id:
+        for entry in _events:
+            if entry.get("message_id") == snapshot.message_id:
+                return dict(entry)
+
+    existing = _find_logged_soulmate(snapshot.guild_id, fields.get("character_name"))
+    if existing is not None:
+        return existing
+
     acc_id = str(account_id if account_id is not None else _recording_account_id).strip()
     acc_name = str(
         account_name if account_name is not None else _recording_account_name or _DEFAULT_ACCOUNT_NAME
@@ -106,6 +139,41 @@ def record_new_soulmate(
     _events.append(entry)
     _save_disk_log()
     return entry
+
+
+def dedupe_stored_events() -> int:
+    """Remove duplicate rows; keep the first entry per message and per server+character."""
+    global _events
+    seen_messages: set[int] = set()
+    seen_identities: set[tuple[str, str]] = set()
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for entry in _events:
+        message_id = entry.get("message_id")
+        if message_id is not None:
+            try:
+                mid = int(message_id)
+            except (TypeError, ValueError):
+                mid = None
+            if mid is not None and mid in seen_messages:
+                removed += 1
+                continue
+        identity = _soulmate_identity(entry.get("guild_id"), entry.get("character_name"))
+        if identity[1] and identity in seen_identities:
+            removed += 1
+            continue
+        if message_id is not None:
+            try:
+                seen_messages.add(int(message_id))
+            except (TypeError, ValueError):
+                pass
+        if identity[1]:
+            seen_identities.add(identity)
+        kept.append(entry)
+    _events = kept
+    if removed:
+        _save_disk_log()
+    return removed
 
 
 def get_soulmate_events() -> list[dict[str, Any]]:

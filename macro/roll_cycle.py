@@ -14,6 +14,7 @@ from macro.activity_log import ActivityLog
 from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
+from macro.us_stop import UsModeStopOptions, us_stop_reason
 from mudae.discord_errors import is_fatal_runtime_error, is_transient_discord_error
 from macro.perk8_daily import (
     PERK8_MIN_ROLL_POOL,
@@ -108,6 +109,8 @@ class RollCycleEngine:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._roll_stop = RollStopTracker()
+        self._us_stop = UsModeStopOptions()
+        self._us_rolls_done = 0
         self._activity = ActivityLog(self._state, on_update=self._notify)
         self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
@@ -574,6 +577,23 @@ class RollCycleEngine:
         self._notify()
         return True
 
+    async def run_us_check(self) -> bool:
+        """Send bare ``$us`` and report stacked rolls. Returns False on timeout."""
+        if self.is_running:
+            return False
+        self._actions.drain_queue()
+        self._log("Sent $us")
+        self._notify()
+        stacked = await self._read_us_stack()
+        if stacked is None:
+            self._log("$us timeout")
+            self._notify()
+            return False
+        self._state.us_stacked = stacked
+        self._log(f"$us OK · {stacked:g} stacked")
+        self._notify()
+        return True
+
     def start(self, *, session_meta: dict[str, Any] | None = None) -> None:
         if self.is_running:
             return
@@ -582,11 +602,18 @@ class RollCycleEngine:
         self._stop.clear()
         self._task = asyncio.create_task(self._run_cycle(), name="roll-cycle")
 
-    def start_us_mode(self, *, session_meta: dict[str, Any] | None = None) -> None:
+    def start_us_mode(
+        self,
+        *,
+        session_meta: dict[str, Any] | None = None,
+        us_stop: UsModeStopOptions | None = None,
+    ) -> None:
         if self.is_running:
             return
         if session_meta:
             self.begin_session("us", session_meta)
+        self._us_stop = us_stop or UsModeStopOptions()
+        self._us_rolls_done = 0
         self._stop.clear()
         self._task = asyncio.create_task(self._run_us_cycle(), name="us-roll-cycle")
 
@@ -1100,6 +1127,15 @@ class RollCycleEngine:
             return False
         return int(rl) > self._roll_stop.threshold
 
+    def _check_us_stop(self) -> str | None:
+        rules = self._config.kakera_rules_for_roll(us_roll=True)
+        return us_stop_reason(
+            options=self._us_stop,
+            state=self._state,
+            rules=rules,
+            us_rolls_done=self._us_rolls_done,
+        )
+
     async def _run_normal_roll_segment(
         self,
         cmd: str,
@@ -1192,6 +1228,7 @@ class RollCycleEngine:
             session_records: list[RollRecord] = []
             claimed_any = False
             roll_index = 0
+            self._us_rolls_done = 0
 
             # Track the stack locally so steady state can be "$us N -> roll" once the
             # pool size is known, using Mudae's tick reaction to skip extra $tu polls.
@@ -1201,6 +1238,13 @@ class RollCycleEngine:
             roll_timeouts = 0
             skip_tu = False
 
+            stop_bits: list[str] = []
+            if self._us_stop.stop_on_power_exhausted:
+                stop_bits.append("power")
+            if self._us_stop.stop_after_rolls_enabled:
+                stop_bits.append(f"after {self._us_stop.stop_after_rolls} rolls")
+            if stop_bits:
+                self._log(f"$us mode: stop when {' · '.join(stop_bits)}")
             self._log("$us mode: starting")
 
             await self._refresh_perk8_status(at_startup=True)
@@ -1251,7 +1295,7 @@ class RollCycleEngine:
                                 if done < normal_rolls:
                                     continue
                             if us_bonus > 0:
-                                done, claimed = await self._roll_us_batch(
+                                done, claimed, us_stopped = await self._roll_us_batch(
                                     cmd,
                                     us_bonus,
                                     session_records,
@@ -1260,6 +1304,8 @@ class RollCycleEngine:
                                 )
                                 roll_index += done
                                 claimed_any = claimed_any or claimed
+                                if us_stopped:
+                                    break
                                 keep, roll_timeouts = await self._handle_us_roll_timeout(
                                     done, us_bonus, roll_timeouts
                                 )
@@ -1303,7 +1349,7 @@ class RollCycleEngine:
                         last_request = 0
                         failed_adds = 0
 
-                        done, claimed = await self._roll_us_batch(
+                        done, claimed, us_stopped = await self._roll_us_batch(
                             cmd,
                             us_bonus,
                             session_records,
@@ -1312,6 +1358,8 @@ class RollCycleEngine:
                         )
                         roll_index += done
                         claimed_any = claimed_any or claimed
+                        if us_stopped:
+                            break
                         keep, roll_timeouts = await self._handle_us_roll_timeout(
                             done, us_bonus, roll_timeouts
                         )
@@ -1669,12 +1717,12 @@ class RollCycleEngine:
         start_index: int,
         *,
         us_roll: bool = True,
-    ) -> tuple[int, bool]:
-        """Roll ``count`` times. Returns ``(rolls_done, claimed_any)``.
+    ) -> tuple[int, bool, bool]:
+        """Roll ``count`` times. Returns ``(rolls_done, claimed_any, stopped_early)``.
 
         Unlike the normal cycle, an interrupt claim does not end the run — the
         claim is consumed but mass rolling continues so the whole ``$us`` pool
-        is used.
+        is used unless a user stop limit triggers.
         """
         claimed_any = False
         done = 0
@@ -1691,10 +1739,16 @@ class RollCycleEngine:
             if not outcome.ok:
                 break
             done += 1
+            if us_roll:
+                self._us_rolls_done += 1
+                reason = self._check_us_stop()
+                if reason:
+                    self._log(f"$us mode: stopping — {reason}")
+                    return done, claimed_any, True
             if outcome.claimed:
                 claimed_any = True
             await asyncio.sleep(self._config.roll_delay())
-        return done, claimed_any
+        return done, claimed_any, False
 
     def apply_settings_fields(self, fields: dict[str, Any]) -> None:
         """Update claim timer from parsed $settings (``settimer``)."""

@@ -57,12 +57,21 @@ Item {
         var us = stateData.rolls_us_bonus
         if (us !== undefined && us !== null && us > 0)
             base += " (+" + us + " $us)"
+        var stacked = stateData.us_stacked
+        if (stacked !== undefined && stacked !== null)
+            base += " · " + stacked + " stacked"
         return base
     }
 
     function powerText() {
         if (App.macroPowerPercent >= 0)
             return App.macroPowerPercent + "%"
+        return "—"
+    }
+
+    function dkText() {
+        if (App.macroDkStock >= 0)
+            return App.macroDkStock.toString()
         return "—"
     }
 
@@ -73,206 +82,219 @@ Item {
         return "—"
     }
 
+    function rollsTone() {
+        return App.macroEngineRunning ? "active" : "neutral"
+    }
+
+    function claimTone() {
+        var s = App.macroClaimStatus
+        if (s === "can claim")
+            return "good"
+        if (s.indexOf("cooldown") >= 0)
+            return "warn"
+        return "neutral"
+    }
+
+    function powerTone() {
+        if (App.macroPowerPercent >= 0 && App.macroPowerPercent < 30)
+            return "warn"
+        return "neutral"
+    }
+
+    function dkTone() {
+        return App.macroDkStock > 0 ? "good" : "neutral"
+    }
+
+    function syncControlBars() {
+        var bars = [connectionBar, actionBar]
+        for (var i = 0; i < bars.length; i++) {
+            bars[i].connected = App.connected
+            bars[i].macroRunning = runRoot.macroIsRunning()
+            bars[i].macroEngineRunning = App.macroEngineRunning
+            bars[i].notificationStandby = App.notificationStandby
+            bars[i].sessionActive = App.sessionActive
+        }
+    }
+
+    function refreshStatusBar() {
+        statusBar.rollsValue = runRoot.rollsLeftText()
+        statusBar.claimValue = App.macroClaimStatus
+        statusBar.powerValue = runRoot.powerText()
+        statusBar.dkValue = runRoot.dkText()
+        statusBar.resetValue = runRoot.resetText()
+        statusBar.phase = App.macroPhase
+        statusBar.rollsTone = runRoot.rollsTone()
+        statusBar.claimTone = runRoot.claimTone()
+        statusBar.powerTone = runRoot.powerTone()
+        statusBar.dkTone = runRoot.dkTone()
+    }
+
     Connections {
         target: App
         function onConnectedChanged() {
-            controlBar.connected = App.connected
+            syncControlBars()
         }
         function onNotificationStandbyChanged() {
-            controlBar.notificationStandby = App.notificationStandby
+            syncControlBars()
         }
         function onSessionActiveChanged() {
-            controlBar.sessionActive = App.sessionActive
+            syncControlBars()
         }
         function onConfigChanged() {
             runRoot.refreshActiveRules()
         }
         function onMacroPhaseChanged() {
-            controlBar.macroRunning = runRoot.macroIsRunning()
-            phaseStepper.currentPhase = App.macroPhase
+            syncControlBars()
+            refreshStatusBar()
         }
         function onMacroStateChanged() {
-            controlBar.macroEngineRunning = App.macroEngineRunning
+            syncControlBars()
             runRoot.refreshState()
-            rollsChip.value = runRoot.rollsLeftText()
-            claimChip.value = App.macroClaimStatus
-            powerChip.value = runRoot.powerText()
-            resetChip.value = runRoot.resetText()
+            refreshStatusBar()
         }
         function onMacroLogChanged() {
             runRoot.refreshActivityLog()
         }
     }
 
-    ScrollablePage {
+    ColumnLayout {
         anchors.fill: parent
+        spacing: 12
 
         PanelCard {
             Layout.fillWidth: true
-            title: "Run target"
+            title: "Session"
             titleSize: 14
 
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 10
 
                 RunTargetSelectors {
                     Layout.fillWidth: true
+                    compact: true
                 }
 
-                Label {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: App.runTargetLabel
-                        ? App.runTargetLabel
-                        : "Add an account (Accounts), channels (Servers), and a preset (Presets)."
-                    color: Theme.fgMuted
-                    font.pixelSize: 10
-                    wrapMode: Text.WordWrap
+                    spacing: 10
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: App.runTargetLabel
+                            ? App.runTargetLabel
+                            : "Add an account, server channel, and preset to run."
+                        color: Theme.fgMuted
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
+                        elide: Text.ElideRight
+                    }
+
+                    PresetRulePill {
+                        label: "Claim"
+                        enabled: runRoot.blockEnabled("character_claim")
+                    }
+                    PresetRulePill {
+                        label: "Kakera"
+                        enabled: runRoot.blockEnabled("kakera_reaction")
+                    }
+                    PresetRulePill {
+                        label: "Spheres"
+                        enabled: runRoot.blockEnabled("sphere_reaction")
+                    }
                 }
             }
         }
 
-        RowLayout {
+        RunStatusBar {
+            id: statusBar
             Layout.fillWidth: true
-            spacing: 8
-
-            StatusChip {
-                id: rollsChip
-                label: "Rolls"
-                value: runRoot.rollsLeftText()
-            }
-            StatusChip {
-                id: claimChip
-                label: "Claim"
-                value: App.macroClaimStatus
-            }
-            StatusChip {
-                id: powerChip
-                label: "Power"
-                value: runRoot.powerText()
-            }
-            StatusChip {
-                id: resetChip
-                label: "Reset"
-                value: runRoot.resetText()
-            }
-            Item { Layout.fillWidth: true }
+            rollsValue: runRoot.rollsLeftText()
+            claimValue: App.macroClaimStatus
+            powerValue: runRoot.powerText()
+            dkValue: runRoot.dkText()
+            resetValue: runRoot.resetText()
+            phase: App.macroPhase
+            rollsTone: runRoot.rollsTone()
+            claimTone: runRoot.claimTone()
+            powerTone: runRoot.powerTone()
+            dkTone: runRoot.dkTone()
         }
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 560
+            Layout.fillHeight: true
+            Layout.minimumHeight: 160
             spacing: 16
 
-            ColumnLayout {
-                Layout.preferredWidth: 340
-                Layout.maximumWidth: 380
+            PanelCard {
+                title: "Controls"
+                Layout.preferredWidth: 268
+                Layout.maximumWidth: 288
+                Layout.minimumWidth: 220
                 Layout.fillWidth: false
                 Layout.fillHeight: true
-                spacing: 12
+                fillContentVertically: true
 
-                PanelCard {
-                    title: "Controls"
-                    Layout.fillWidth: true
-
-                    MacroControlBar {
-                        id: controlBar
-                        Layout.fillWidth: true
-                        connected: App.connected
-                        macroRunning: runRoot.macroIsRunning()
-                        macroEngineRunning: App.macroEngineRunning
-                        notificationStandby: App.notificationStandby
-                        sessionActive: App.sessionActive
-                        onConnectClicked: App.connect()
-                        onDisconnectClicked: App.disconnect()
-                        onRunTuClicked: App.runTu()
-                        onStartClicked: App.startMacro()
-                        onStopClicked: App.stopMacro()
-                        onPlayOhClicked: App.playOhSphere()
-                        onPlayOcClicked: App.playOcSphere()
-                        onPlayOqClicked: App.playOqSphere()
-                        onPlayAllMinigamesClicked: App.playAllMinigames()
-                        onPlayUsClicked: App.startUsMode()
-                    }
-                }
-
-                PanelCard {
-                    title: "Preset"
+                ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    spacing: 8
 
-                    ColumnLayout {
+                    MacroControlBar {
+                        id: connectionBar
                         Layout.fillWidth: true
-                        spacing: 6
+                        connectionOnly: true
+                        onConnectClicked: App.connect()
+                        onDisconnectClicked: App.disconnect()
+                        onStopClicked: App.stopMacro()
+                    }
 
-                        Repeater {
-                            model: [
-                                { label: "Character claim", block: "character_claim" },
-                                { label: "Kakera reaction", block: "kakera_reaction" },
-                                { label: "Sphere reaction", block: "sphere_reaction" }
-                            ]
-                            delegate: RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: Theme.border
+                    }
 
-                                Rectangle {
-                                    width: 8; height: 8; radius: 4
-                                    color: runRoot.blockEnabled(modelData.block) ? Theme.success : Theme.bgHover
-                                }
-                                Label {
-                                    text: modelData.label
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
-                                    Layout.fillWidth: true
-                                }
-                                Label {
-                                    text: runRoot.blockEnabled(modelData.block) ? "On" : "Off"
-                                    color: runRoot.blockEnabled(modelData.block) ? Theme.success : Theme.fgMuted
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                }
-                            }
-                        }
+                    ScrollView {
+                        id: controlsScroll
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                        Label {
-                            Layout.fillWidth: true
-                            text: "Edit these under Presets. The active preset is selected above."
-                            color: Theme.fgMuted
-                            font.pixelSize: 10
-                            wrapMode: Text.WordWrap
+                        MacroControlBar {
+                            id: actionBar
+                            width: controlsScroll.availableWidth
+                            actionsOnly: true
+                            onRunTuClicked: App.runTu()
+                            onRunUsCheckClicked: App.runUsCheck()
+                            onStartClicked: App.startMacro()
+                            onStopClicked: App.stopMacro()
+                            onPlayOhClicked: App.playOhSphere()
+                            onPlayOcClicked: App.playOcSphere()
+                            onPlayOqClicked: App.playOqSphere()
+                            onPlayAllMinigamesClicked: App.playAllMinigames()
+                            onPlayUsClicked: App.startUsMode()
                         }
                     }
                 }
             }
 
-            ColumnLayout {
+            PanelCard {
+                title: "Activity"
+                fillContentVertically: true
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 12
+                Layout.minimumWidth: 260
+                Layout.minimumHeight: 120
 
-                PanelCard {
-                    title: "Pipeline"
-                    Layout.fillWidth: true
-
-                    PhaseStepper {
-                        id: phaseStepper
-                        Layout.fillWidth: true
-                        currentPhase: App.macroPhase
-                    }
-                }
-
-                PanelCard {
-                    title: "Activity"
-                    fillContentVertically: true
+                ActivityLogPanel {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 420
-
-                    ActivityLogPanel {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        entries: runRoot.activityEntries
-                    }
+                    entries: runRoot.activityEntries
                 }
             }
         }
@@ -282,11 +304,7 @@ Item {
         refreshState()
         refreshActivityLog()
         refreshActiveRules()
-        controlBar.connected = App.connected
-        controlBar.macroRunning = macroIsRunning()
-        controlBar.macroEngineRunning = App.macroEngineRunning
-        controlBar.notificationStandby = App.notificationStandby
-        controlBar.sessionActive = App.sessionActive
-        phaseStepper.currentPhase = App.macroPhase
+        syncControlBars()
+        refreshStatusBar()
     }
 }

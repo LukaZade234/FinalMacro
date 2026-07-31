@@ -22,6 +22,7 @@ class MacroPhase(str, Enum):
 class AccountState:
     rolls_left: int | None = None
     rolls_us_bonus: int | None = None  # stacked rolls added via $us, usable now
+    us_stacked: float | None = None  # full stacked pool from bare $us
     claim_available: bool | None = None
     claim_cooldown_minutes: int | None = None
     power_percent: float | None = None
@@ -45,6 +46,7 @@ class AccountState:
         return {
             "rolls_left": self.rolls_left,
             "rolls_us_bonus": self.rolls_us_bonus,
+            "us_stacked": self.us_stacked,
             "claim_available": self.claim_available,
             "claim_cooldown_minutes": self.claim_cooldown_minutes,
             "power_percent": display_reaction_power(self.power_percent)
