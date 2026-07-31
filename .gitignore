@@ -1,6 +1,8 @@
 data/settings.json
-data/session_logs/*.json
-data/session_logs/*.log
+data/channel_cache.json
+data/*_log.json
+data/session_logs/*
+!data/session_logs/.gitkeep
 .venv/
 __pycache__/
 *.pyc
