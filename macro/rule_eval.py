@@ -224,8 +224,6 @@ def passes_kakera_reaction(
     if not kakera_buttons:
         return ReactionDecision(reason="no kakera buttons")
 
-    if rules.require_chaos_key and not _has_chaos_key(fields):
-        return ReactionDecision(reason="needs chaos key")
     if (
         rules.require_perk_8
         and not fields.get("perk_8")
@@ -266,6 +264,13 @@ def passes_kakera_reaction(
     if not selected:
         filter_label = ",".join(types_allowed) if types_allowed else "any"
         return ReactionDecision(reason=f"no kakera button matched filter [{filter_label}]")
+
+    if rules.require_chaos_key and not has_chaos:
+        bypass = chaos_key_bypass_types(rules)
+        chaos_ok = [b for b in selected if _kakera_emoji(b) in bypass]
+        if not chaos_ok:
+            return ReactionDecision(reason="needs chaos key")
+        selected = chaos_ok
 
     affordable: list[dict[str, Any]] = []
     for button in selected:
@@ -344,6 +349,13 @@ def perk8_budget_bypass_types(rules: KakeraReactionRules) -> frozenset[str]:
     """Kakera emojis that ignore perk-8 daily budget saving."""
     if rules.perk_8_budget_bypass_types:
         return frozenset(rules.perk_8_budget_bypass_types)
+    return frozenset({"kakeraP"})
+
+
+def chaos_key_bypass_types(rules: KakeraReactionRules) -> frozenset[str]:
+    """Kakera emojis that ignore the chaos-key requirement."""
+    if rules.require_chaos_key_bypass_types:
+        return frozenset(rules.require_chaos_key_bypass_types)
     return frozenset({"kakeraP"})
 
 

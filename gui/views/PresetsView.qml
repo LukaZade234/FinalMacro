@@ -450,6 +450,19 @@ Item {
                             onToggled: patch("kakera_reaction", "require_chaos_key", checked)
                         }
 
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            visible: rules.kakera_reaction && !!rules.kakera_reaction.require_chaos_key
+                            title: "Ignore chaos key requirement for"
+                            options: kakeraOptions
+                            selected: rules.kakera_reaction
+                                ? (rules.kakera_reaction.require_chaos_key_bypass_types || ["kakeraP"])
+                                : ["kakeraP"]
+                            onSelectionChanged: function(ids) {
+                                patch("kakera_reaction", "require_chaos_key_bypass_types", ids)
+                            }
+                        }
+
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8

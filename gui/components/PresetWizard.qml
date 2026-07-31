@@ -21,6 +21,7 @@ Item {
         character_claim: { enabled: true, claim_on_wish_ping: true, only_final_hour: true,
                            min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
+                           require_chaos_key_bypass_types: ["kakeraP"],
                            require_perk_8: false, min_spheres: null, low_power: null,
                            perk_8_budget_mode: false,
                            perk_8_budget_bypass_types: ["kakeraP"],
@@ -320,6 +321,16 @@ Item {
                             text: "Require chaos key"
                             checked: !!draft.kakera_reaction.require_chaos_key
                             onToggled: setDraftField("kakera_reaction", "require_chaos_key", checked)
+                        }
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            visible: !!draft.kakera_reaction.require_chaos_key
+                            title: "Ignore chaos key requirement for"
+                            options: kakeraOptions
+                            selected: draft.kakera_reaction.require_chaos_key_bypass_types || ["kakeraP"]
+                            onSelectionChanged: function(ids) {
+                                setDraftField("kakera_reaction", "require_chaos_key_bypass_types", ids)
+                            }
                         }
                         RowLayout {
                             Layout.fillWidth: true

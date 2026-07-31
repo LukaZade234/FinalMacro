@@ -114,6 +114,8 @@ class KakeraReactionRules:
     enabled: bool = False
     types_allowed: list[str] = field(default_factory=list)
     require_chaos_key: bool = False
+    # Kakera types that ignore the chaos-key requirement (purple is free by default).
+    require_chaos_key_bypass_types: list[str] = field(default_factory=lambda: ["kakeraP"])
     require_perk_8: bool = False
     min_spheres: int | None = None
     low_power: LowPowerOverride | None = None
@@ -136,6 +138,9 @@ class KakeraReactionRules:
             enabled=bool(data.get("enabled", False)),
             types_allowed=_coerce_str_list(data.get("types_allowed")),
             require_chaos_key=bool(data.get("require_chaos_key", False)),
+            require_chaos_key_bypass_types=_coerce_str_list(
+                data.get("require_chaos_key_bypass_types", ["kakeraP"])
+            ),
             require_perk_8=bool(data.get("require_perk_8", False)),
             min_spheres=_coerce_int_or_none(data.get("min_spheres")),
             low_power=low_power,
@@ -152,6 +157,7 @@ class KakeraReactionRules:
             "enabled": self.enabled,
             "types_allowed": list(self.types_allowed),
             "require_chaos_key": self.require_chaos_key,
+            "require_chaos_key_bypass_types": list(self.require_chaos_key_bypass_types),
             "require_perk_8": self.require_perk_8,
             "min_spheres": self.min_spheres,
             "low_power": self.low_power.to_dict() if self.low_power else None,
@@ -286,6 +292,7 @@ class MacroConfig:
                 enabled=base.enabled,
                 types_allowed=us_types,
                 require_chaos_key=base.require_chaos_key,
+                require_chaos_key_bypass_types=list(base.require_chaos_key_bypass_types),
                 require_perk_8=base.require_perk_8,
                 min_spheres=base.min_spheres,
                 low_power=None,
@@ -298,6 +305,7 @@ class MacroConfig:
             enabled=base.enabled,
             types_allowed=[],
             require_chaos_key=base.require_chaos_key,
+            require_chaos_key_bypass_types=list(base.require_chaos_key_bypass_types),
             require_perk_8=base.require_perk_8,
             min_spheres=base.min_spheres,
             low_power=base.low_power,

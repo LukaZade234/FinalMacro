@@ -64,6 +64,7 @@ def test_round_trip_preserves_all_blocks():
     assert restored.kakera_reaction.low_power.types_allowed == ["kakeraR"]
     assert restored.kakera_reaction.perk_8_budget_mode is True
     assert restored.kakera_reaction.perk_8_budget_bypass_types == ["kakeraP"]
+    assert restored.kakera_reaction.require_chaos_key_bypass_types == ["kakeraP"]
     assert restored.sphere_reaction.types_allowed == ["spY", "spB"]
 
 
@@ -221,6 +222,28 @@ def test_kakera_chaos_required_blocks_without_key():
     decision = passes_kakera_reaction(fields, rules, state)
     assert decision.buttons == []
     assert "chaos" in decision.reason
+
+
+def test_kakera_chaos_required_allows_purple_without_key():
+    fields = _kakera_fields(_kakera_buttons("kakeraP", "kakeraR"))
+    rules = KakeraReactionRules(enabled=True, require_chaos_key=True)
+    state = AccountState()
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraP"
+
+
+def test_kakera_chaos_bypass_types_override():
+    fields = _kakera_fields(_kakera_buttons("kakera", "kakeraR"))
+    rules = KakeraReactionRules(
+        enabled=True,
+        require_chaos_key=True,
+        require_chaos_key_bypass_types=["kakera"],
+    )
+    state = AccountState()
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakera"
 
 
 def test_kakera_perk_8_required():
