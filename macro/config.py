@@ -237,7 +237,6 @@ class MacroConfig:
     roll_command: str = "wa"
     prefix: str = "$"
     roll_delay_sec: float = 0.6
-    claim_reset_margin_minutes: int = 20
     claim_expire_sec: int = 45
     # $us mass-roll mode: rolls Mudae adds per "$us N" (capped at 20 by Mudae),
     # and how close to the hourly rolls reset (minutes) we refuse to add more
@@ -369,7 +368,6 @@ class MacroConfig:
             roll_command=str(data.get("roll_command", "wa")),
             prefix=str(data.get("prefix", "$")),
             roll_delay_sec=float(data.get("roll_delay_sec", 0.6)),
-            claim_reset_margin_minutes=int(data.get("claim_reset_margin_minutes", 20)),
             claim_expire_sec=int(data.get("claim_expire_sec", 45)),
             us_batch_size=int(data.get("us_batch_size", 20)),
             us_reset_margin_minutes=int(data.get("us_reset_margin_minutes", 2)),
@@ -388,7 +386,6 @@ class MacroConfig:
             "roll_command": self.roll_command,
             "prefix": self.prefix,
             "roll_delay_sec": self.roll_delay_sec,
-            "claim_reset_margin_minutes": self.claim_reset_margin_minutes,
             "claim_expire_sec": self.claim_expire_sec,
             "us_batch_size": self.us_batch_size,
             "us_reset_margin_minutes": self.us_reset_margin_minutes,

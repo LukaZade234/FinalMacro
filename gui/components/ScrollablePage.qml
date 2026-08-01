@@ -8,8 +8,12 @@ Item {
     id: root
     clip: true
 
+    Layout.fillWidth: true
+    Layout.fillHeight: true
+
     property int contentSpacing: 12
     property int bottomPadding: 20
+    readonly property real contentWidth: flick.width
 
     default property alias content: contentHost.data
 

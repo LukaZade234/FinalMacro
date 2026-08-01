@@ -20,7 +20,7 @@ Rectangle {
     signal enabledToggled(bool value)
 
     implicitHeight: outer.implicitHeight + 24
-    implicitWidth: 300
+    Layout.fillWidth: true
 
     ColumnLayout {
         id: outer

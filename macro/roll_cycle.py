@@ -320,7 +320,6 @@ class RollCycleEngine:
         self._final_roll_session = is_final_roll_session_before_claim_reset(
             self._state.next_claim_reset_minutes,
             self._state.rolls_reset_minutes,
-            margin_minutes=self._config.claim_reset_margin_minutes,
         )
 
     @property

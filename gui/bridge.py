@@ -839,14 +839,22 @@ class AppBridge(QObject):
                     "roll_command": data["roll_command"],
                     "prefix": data["prefix"],
                     "roll_delay_sec": data["roll_delay_sec"],
-                    "claim_expire_sec": data["claim_expire_sec"],
-                    "claim_reset_margin_minutes": data["claim_reset_margin_minutes"],
                     "notification_mode": data["notification_mode"],
                 },
                 "character_claim": data["character_claim"],
                 "kakera_reaction": data["kakera_reaction"],
                 "sphere_reaction": data["sphere_reaction"],
                 "us_roll_kakera": data["us_roll_kakera"],
+                "us_mode": {
+                    "us_batch_size": data["us_batch_size"],
+                    "us_reset_margin_minutes": data["us_reset_margin_minutes"],
+                },
+                "expert": {
+                    "claim_expire_sec": data["claim_expire_sec"],
+                    "us_read_before_add_delay_sec": data["us_read_before_add_delay_sec"],
+                    "us_add_delay_sec": data["us_add_delay_sec"],
+                    "us_roll_timeout_retry_sec": data["us_roll_timeout_retry_sec"],
+                },
             }
         )
 
@@ -870,12 +878,27 @@ class AppBridge(QObject):
                 "roll_command",
                 "prefix",
                 "roll_delay_sec",
-                "claim_expire_sec",
-                "claim_reset_margin_minutes",
                 "notification_mode",
             ):
                 if key in basic_patch:
                     data[key] = basic_patch[key]
+
+        us_mode_patch = patch.get("us_mode")
+        if isinstance(us_mode_patch, dict):
+            for key in ("us_batch_size", "us_reset_margin_minutes"):
+                if key in us_mode_patch:
+                    data[key] = us_mode_patch[key]
+
+        expert_patch = patch.get("expert")
+        if isinstance(expert_patch, dict):
+            for key in (
+                "claim_expire_sec",
+                "us_read_before_add_delay_sec",
+                "us_add_delay_sec",
+                "us_roll_timeout_retry_sec",
+            ):
+                if key in expert_patch:
+                    data[key] = expert_patch[key]
 
         for block in ("character_claim", "kakera_reaction", "sphere_reaction", "us_roll_kakera"):
             block_patch = patch.get(block)

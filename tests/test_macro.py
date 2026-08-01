@@ -128,10 +128,11 @@ def test_pick_best_claimable_none():
 def test_final_roll_session_detection():
     from macro.claim_window import is_final_roll_session_before_claim_reset
 
-    assert is_final_roll_session_before_claim_reset(60, 60, margin_minutes=20) is True
-    assert is_final_roll_session_before_claim_reset(180, 60, margin_minutes=20) is False
-    assert is_final_roll_session_before_claim_reset(120, 60, margin_minutes=20) is False
-    assert is_final_roll_session_before_claim_reset(75, 60, margin_minutes=20) is True
+    assert is_final_roll_session_before_claim_reset(60, 60) is True
+    assert is_final_roll_session_before_claim_reset(180, 60) is False
+    assert is_final_roll_session_before_claim_reset(120, 60) is False
+    assert is_final_roll_session_before_claim_reset(75, 60) is False
+    assert is_final_roll_session_before_claim_reset(61, 60) is False
 
 
 def test_macro_config_roundtrip():

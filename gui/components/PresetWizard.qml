@@ -3,8 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
 
-// Six-step linear wizard overlay for editing one preset.
-// Reads current values from App.getPresetRulesJson and saves one patch on Finish.
+// Five-step wizard aligned with Presets tab sections.
 Item {
     id: wizard
     visible: open
@@ -16,8 +15,12 @@ Item {
     property int activeStep: 0
     property bool showAdvancedKakera: false
 
-    // Working draft (initialised from the current preset on open).
+    readonly property var stepTitles: [
+        "Rolling", "Claims", "Reactions", "$us", "Expert"
+    ]
+
     property var draft: ({
+        basic: { prefix: "$", roll_command: "wa", roll_delay_sec: 0.6, notification_mode: false },
         character_claim: { enabled: true, claim_on_wish_ping: true, only_final_hour: true,
                            auto_use_rt: false, min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
@@ -27,25 +30,30 @@ Item {
                            perk_8_budget_bypass_types: ["kakeraP"],
                            perk_8_types_allowed: [], auto_use_dk: false },
         us_roll_kakera: { override: false, skip_kakera: false, types_allowed: [] },
-        sphere_reaction: { enabled: false, types_allowed: [] }
+        us_mode: { us_batch_size: 20, us_reset_margin_minutes: 2 },
+        sphere_reaction: { enabled: false, types_allowed: [] },
+        expert: { claim_expire_sec: 45,
+                  us_read_before_add_delay_sec: 2, us_add_delay_sec: 5,
+                  us_roll_timeout_retry_sec: 5 }
     })
 
     signal finished()
 
     function loadFromPreset() {
         activeStep = 0
-        if (!presetId) {
+        if (!presetId)
             return
-        }
         try {
             var d = JSON.parse(App.getPresetRulesJson(presetId)) || {}
             draft = {
+                basic: Object.assign({}, draft.basic, d.basic || {}),
                 character_claim: Object.assign({}, draft.character_claim, d.character_claim || {}),
                 kakera_reaction: Object.assign({}, draft.kakera_reaction, d.kakera_reaction || {}),
                 us_roll_kakera: Object.assign({}, draft.us_roll_kakera, d.us_roll_kakera || {}),
-                sphere_reaction: Object.assign({}, draft.sphere_reaction, d.sphere_reaction || {})
+                us_mode: Object.assign({}, draft.us_mode, d.us_mode || {}),
+                sphere_reaction: Object.assign({}, draft.sphere_reaction, d.sphere_reaction || {}),
+                expert: Object.assign({}, draft.expert, d.expert || {})
             }
-            // Legacy ``mode`` field from older presets.
             var us = draft.us_roll_kakera
             if (us.mode !== undefined && us.override === undefined) {
                 if (us.mode === "none") {
@@ -68,7 +76,6 @@ Item {
 
     function kakeraUsesAdvancedOptions() {
         var k = draft.kakera_reaction || {}
-        var u = draft.us_roll_kakera || {}
         if (k.require_perk_8)
             return true
         if (k.min_spheres !== null && k.min_spheres !== undefined)
@@ -76,8 +83,6 @@ Item {
         if (k.perk_8_budget_mode)
             return true
         if (k.low_power !== null && k.low_power !== undefined)
-            return true
-        if (u.override)
             return true
         return false
     }
@@ -115,16 +120,26 @@ Item {
         return isNaN(n) ? null : n
     }
 
+    function parseFloatOrDefault(text, fallback) {
+        if (!text || text.trim().length === 0)
+            return fallback
+        var n = parseFloat(text)
+        return isNaN(n) ? fallback : n
+    }
+
     function saveAndClose() {
         if (!presetId) {
             open = false
             return
         }
         var patch = {
+            basic: draft.basic,
             character_claim: draft.character_claim,
             kakera_reaction: draft.kakera_reaction,
             us_roll_kakera: draft.us_roll_kakera,
-            sphere_reaction: draft.sphere_reaction
+            us_mode: draft.us_mode,
+            sphere_reaction: draft.sphere_reaction,
+            expert: draft.expert
         }
         App.updatePresetRules(presetId, JSON.stringify(patch))
         open = false
@@ -132,12 +147,10 @@ Item {
     }
 
     onOpenChanged: {
-        if (open) {
+        if (open)
             loadFromPreset()
-        }
     }
 
-    // Backdrop
     Rectangle {
         anchors.fill: parent
         color: "#000000"
@@ -151,7 +164,7 @@ Item {
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - 60, 720)
-        height: Math.min(parent.height - 60, 600)
+        height: Math.min(parent.height - 60, 620)
         radius: 12
         color: Theme.bgMedium
         border.color: Theme.border
@@ -172,7 +185,7 @@ Item {
                     elide: Text.ElideRight
                 }
                 Label {
-                    text: "Step " + (activeStep + 1) + " / 4"
+                    text: "Step " + (activeStep + 1) + " / 5 · " + stepTitles[activeStep]
                     color: Theme.fgMuted
                     font.pixelSize: 11
                 }
@@ -189,68 +202,18 @@ Item {
                 }
             }
 
-            // Body — StackLayout switches between steps.
             StackLayout {
                 id: stepStack
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 currentIndex: wizard.activeStep
 
-                // ---- Step 1: Character claim ----
+                // ---- Rolling ----
                 ColumnLayout {
                     spacing: 8
+                    Label { text: "Rolling"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Label {
-                        text: "1 · Character claim"
-                        color: Theme.fgPrimary
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                    }
-                    Label {
-                        text: "Decide whether the macro claims characters at all and how it picks them. Wish pings are honored separately so you can leave the main block off and still catch wishlist drops."
-                        color: Theme.fgMuted
-                        font.pixelSize: 11
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Claim characters (master switch)"
-                        checked: draft.character_claim.enabled
-                        onToggled: setDraftField("character_claim", "enabled", checked)
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Always claim if a wish pings you"
-                        checked: draft.character_claim.claim_on_wish_ping
-                        onToggled: setDraftField("character_claim", "claim_on_wish_ping", checked)
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Use $rt for wish pings when claim is on cooldown (Emerald badge)"
-                        checked: !!draft.character_claim.auto_use_rt
-                        onToggled: setDraftField("character_claim", "auto_use_rt", checked)
-                    }
-                    ThemedCheckBox {
-                        Layout.fillWidth: true
-                        text: "Only claim during the final roll hour"
-                        checked: draft.character_claim.only_final_hour
-                        onToggled: setDraftField("character_claim", "only_final_hour", checked)
-                    }
-                    Label {
-                        text: "Example: \"enabled + only final hour\" reproduces the current 'best claim at reset' behaviour."
-                        color: Theme.fgMuted
-                        font.pixelSize: 10
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                }
-
-                // ---- Step 2: Claim triggers ----
-                ColumnLayout {
-                    spacing: 8
-                    Label { text: "2 · Claim triggers"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
-                    Label {
-                        text: "Leave fields blank to keep them off. Any non-blank trigger causes an instant claim mid-batch when it fires."
+                        text: "How the macro sends roll commands and paces each batch."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
                     GridLayout {
@@ -259,48 +222,110 @@ Item {
                         rowSpacing: 8
                         Layout.fillWidth: true
 
-                        Label { text: "Instant claim min kakera"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 200 }
+                        Label { text: "Prefix"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
                         ThemedTextField {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 32
-                            placeholderText: "blank = off"
-                            text: draft.character_claim.min_kakera === null ? "" : draft.character_claim.min_kakera.toString()
-                            onEditingFinished: setDraftField("character_claim", "min_kakera", parseIntOrNull(text))
+                            maximumLength: 4
+                            text: draft.basic.prefix || "$"
+                            onEditingFinished: setDraftField("basic", "prefix", text)
                         }
 
-                        Label {
-                            text: "Instant claim at claim rank ≤"
-                            color: Theme.fgSecondary
-                            font.pixelSize: 11
-                            Layout.preferredWidth: 200
-                            wrapMode: Text.WordWrap
-                        }
+                        Label { text: "Roll command"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
                         ThemedTextField {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 32
-                            placeholderText: "e.g. 200 = ranks 1–200"
-                            text: draft.character_claim.max_claim_rank === null ? "" : draft.character_claim.max_claim_rank.toString()
-                            onEditingFinished: setDraftField("character_claim", "max_claim_rank", parseIntOrNull(text))
+                            text: draft.basic.roll_command || "wa"
+                            onEditingFinished: setDraftField("basic", "roll_command", text)
+                        }
+
+                        Label { text: "Delay between rolls (s)"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
+                        ThemedTextField {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 32
+                            text: draft.basic.roll_delay_sec !== undefined ? draft.basic.roll_delay_sec.toString() : "0.6"
+                            onEditingFinished: setDraftField("basic", "roll_delay_sec", parseFloatOrDefault(text, 0.6))
+                        }
+                    }
+                    ThemedCheckBox {
+                        Layout.fillWidth: true
+                        text: "Notification mode (disconnect between hourly sessions)"
+                        checked: !!draft.basic.notification_mode
+                        onToggled: setDraftField("basic", "notification_mode", checked)
+                    }
+                }
+
+                // ---- Claims ----
+                ScrollView {
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    contentWidth: availableWidth
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 8
+                        Label { text: "Claims"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Claim characters (master switch)"
+                            checked: draft.character_claim.enabled
+                            onToggled: setDraftField("character_claim", "enabled", checked)
+                        }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Always claim if a wish pings you"
+                            checked: draft.character_claim.claim_on_wish_ping
+                            onToggled: setDraftField("character_claim", "claim_on_wish_ping", checked)
+                        }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Use $rt for wish pings when claim is on cooldown (Emerald badge)"
+                            checked: !!draft.character_claim.auto_use_rt
+                            onToggled: setDraftField("character_claim", "auto_use_rt", checked)
+                        }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Only claim during the final roll hour (claim reset = roll reset on $tu)"
+                            checked: draft.character_claim.only_final_hour
+                            onToggled: setDraftField("character_claim", "only_final_hour", checked)
+                        }
+                        GridLayout {
+                            columns: 2
+                            columnSpacing: 12
+                            rowSpacing: 8
+                            Layout.fillWidth: true
+
+                            Label { text: "Instant claim min kakera"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 200 }
+                            ThemedTextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                placeholderText: "blank = off"
+                                text: draft.character_claim.min_kakera === null ? "" : draft.character_claim.min_kakera.toString()
+                                onEditingFinished: setDraftField("character_claim", "min_kakera", parseIntOrNull(text))
+                            }
+
+                            Label { text: "Instant claim at claim rank ≤"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 200; wrapMode: Text.WordWrap }
+                            ThemedTextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                placeholderText: "e.g. 200"
+                                text: draft.character_claim.max_claim_rank === null ? "" : draft.character_claim.max_claim_rank.toString()
+                                onEditingFinished: setDraftField("character_claim", "max_claim_rank", parseIntOrNull(text))
+                            }
                         }
                     }
                 }
 
-                // ---- Step 3: Kakera reaction ----
+                // ---- Reactions ----
                 ScrollView {
                     id: kakeraStepScroll
                     clip: true
                     ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     contentWidth: availableWidth
-
                     ColumnLayout {
                         width: kakeraStepScroll.availableWidth
                         spacing: 8
-                        Label { text: "3 · Kakera reaction"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
-                        Label {
-                            text: "Pick which kakera colors the macro should click. Leave all unselected to allow every color."
-                            color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
-                        }
+                        Label { text: "Reactions"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
+                        Label { text: "Kakera"; color: Theme.fgSecondary; font.pixelSize: 12; font.weight: Font.DemiBold }
                         ThemedCheckBox {
                             Layout.fillWidth: true
                             text: "Enable kakera reactions"
@@ -318,7 +343,7 @@ Item {
                         }
                         ThemedCheckBox {
                             Layout.fillWidth: true
-                            text: "Use $dk when reaction power runs out (refills power to max)"
+                            text: "Use $dk when reaction power runs out"
                             checked: !!draft.kakera_reaction.auto_use_dk
                             onToggled: setDraftField("kakera_reaction", "auto_use_dk", checked)
                         }
@@ -328,25 +353,9 @@ Item {
                             checked: !!draft.kakera_reaction.require_chaos_key
                             onToggled: setDraftField("kakera_reaction", "require_chaos_key", checked)
                         }
-                        ColorChipPicker {
-                            Layout.fillWidth: true
-                            visible: !!draft.kakera_reaction.require_chaos_key
-                            title: "Ignore chaos key requirement for"
-                            options: kakeraOptions
-                            selected: draft.kakera_reaction.require_chaos_key_bypass_types || ["kakeraP"]
-                            onSelectionChanged: function(ids) {
-                                setDraftField("kakera_reaction", "require_chaos_key_bypass_types", ids)
-                            }
-                        }
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 8
-                            Label {
-                                text: "Advanced kakera options"
-                                color: Theme.fgSecondary
-                                font.pixelSize: 11
-                                Layout.fillWidth: true
-                            }
+                            Label { text: "Advanced kakera options"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.fillWidth: true }
                             ThemedSwitch {
                                 checked: wizard.showAdvancedKakera
                                 onToggled: wizard.showAdvancedKakera = checked
@@ -357,46 +366,74 @@ Item {
                             visible: wizard.showAdvancedKakera
                             rules: wizard.draft
                             kakeraOptions: wizard.kakeraOptions
-                            onPatch: function(block, key, value) {
-                                setDraftField(block, key, value)
-                            }
-                            onPatchLowPower: function(key, value) {
-                                setLowPowerField(key, value)
-                            }
-                            onSetLowPowerEnabled: function(on) {
-                                setLowPowerEnabled(on)
+                            onPatch: function(block, key, value) { setDraftField(block, key, value) }
+                            onPatchLowPower: function(key, value) { setLowPowerField(key, value) }
+                            onSetLowPowerEnabled: function(on) { setLowPowerEnabled(on) }
+                        }
+                        Label { text: "Spheres"; color: Theme.fgSecondary; font.pixelSize: 12; font.weight: Font.DemiBold; Layout.topMargin: 8 }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Enable sphere reactions"
+                            checked: draft.sphere_reaction.enabled
+                            onToggled: setDraftField("sphere_reaction", "enabled", checked)
+                        }
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            title: "Allowed sphere colors"
+                            options: sphereOptions
+                            selected: draft.sphere_reaction.types_allowed || []
+                            onSelectionChanged: function(ids) {
+                                setDraftField("sphere_reaction", "types_allowed", ids)
                             }
                         }
                     }
                 }
 
-                // ---- Step 4: Sphere reaction ----
+                // ---- $us ----
+                ScrollView {
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    contentWidth: availableWidth
+                    UsRollPanel {
+                        width: parent.width
+                        rules: wizard.draft
+                        kakeraOptions: wizard.kakeraOptions
+                        onPatch: function(block, key, value) { setDraftField(block, key, value) }
+                        onPatchUsMode: function(key, value) { setDraftField("us_mode", key, value) }
+                    }
+                }
+
+                // ---- Expert ----
                 ColumnLayout {
                     spacing: 8
-                    Label { text: "4 · Sphere reaction"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
+                    Label { text: "Expert"; color: Theme.fgPrimary; font.pixelSize: 14; font.weight: Font.DemiBold }
                     Label {
-                        text: "Perk 9 lets you grab spheres on roll. Pick which colors to click — leaving all unselected accepts any color."
+                        text: "Optional fine-tuning. Defaults work for most setups — skip if unsure."
                         color: Theme.fgMuted; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true
                     }
-                    ThemedCheckBox {
+                    GridLayout {
+                        columns: 2
+                        columnSpacing: 12
+                        rowSpacing: 8
                         Layout.fillWidth: true
-                        text: "Enable sphere reactions"
-                        checked: draft.sphere_reaction.enabled
-                        onToggled: setDraftField("sphere_reaction", "enabled", checked)
-                    }
-                    ColorChipPicker {
-                        Layout.fillWidth: true
-                        title: "Allowed sphere colors"
-                        options: sphereOptions
-                        selected: draft.sphere_reaction.types_allowed || []
-                        onSelectionChanged: function(ids) {
-                            setDraftField("sphere_reaction", "types_allowed", ids)
+
+                        Label { text: "Claim timeout (s)"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
+                        ThemedTextField {
+                            Layout.fillWidth: true
+                            text: draft.expert.claim_expire_sec !== undefined ? draft.expert.claim_expire_sec.toString() : "45"
+                            onEditingFinished: setDraftField("expert", "claim_expire_sec", parseInt(text) || 45)
+                        }
+
+                        Label { text: "Rolls per $us"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 180 }
+                        ThemedTextField {
+                            Layout.fillWidth: true
+                            text: draft.us_mode.us_batch_size !== undefined ? draft.us_mode.us_batch_size.toString() : "20"
+                            onEditingFinished: setDraftField("us_mode", "us_batch_size", parseInt(text) || 20)
                         }
                     }
                 }
             }
 
-            // Footer
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
@@ -411,15 +448,15 @@ Item {
 
                 ThemedButton {
                     text: "Skip"
-                    visible: activeStep < 3
-                    onClicked: activeStep = Math.min(3, activeStep + 1)
+                    visible: activeStep < 4
+                    onClicked: activeStep = Math.min(4, activeStep + 1)
                 }
 
                 ThemedButton {
-                    text: activeStep < 3 ? "Next" : "Save preset"
+                    text: activeStep < 4 ? "Next" : "Save preset"
                     accent: true
                     onClicked: {
-                        if (activeStep < 3) {
+                        if (activeStep < 4) {
                             activeStep += 1
                         } else {
                             saveAndClose()
