@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from gui.run_target import resolve_run_target
 from gui.server_profiles import ServerProfileStore
 from gui.settings import load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
+from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
 from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, activity_log_text
 from macro.config import MacroConfig
@@ -31,6 +33,9 @@ from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
+
+_UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+_UPDATE_STARTUP_DELAY_MS = 4000
 
 _PROFILE_META_KEYS = frozenset({
     "command",
@@ -103,6 +108,10 @@ class AppBridge(QObject):
     runActionPendingChanged = Signal()
     usModeOptionsChanged = Signal()
     minimizeToTrayChanged = Signal()
+    updateStatusChanged = Signal()
+    updateCheckingChanged = Signal()
+    updatePullingChanged = Signal()
+    autoUpdateCheckChanged = Signal()
     macroPhaseChanged = Signal(str)
     macroStateChanged = Signal()
     macroLogChanged = Signal()
@@ -163,10 +172,26 @@ class AppBridge(QObject):
         self._us_mode_options = UsModeStopOptions.from_dict(
             us_opts_raw if isinstance(us_opts_raw, dict) else None
         )
-        run_ui = saved.get("run_ui") or {}
-        self._minimize_to_tray = bool(run_ui.get("minimize_to_tray", False))
+        # NOTE: save_app_settings() flattens every fragment into the top-level
+        # dict (the kwarg name is just a label), so these are read from ``saved``
+        # directly rather than a nested "run_ui" key.
+        self._minimize_to_tray = bool(saved.get("minimize_to_tray", False))
         self._tray_available = False
         self._tray: Any = None
+
+        self._update_status: UpdateStatus | None = None
+        self._update_checking = False
+        self._update_pulling = False
+        self._update_pull_message = ""
+        self._update_pull_ok = False
+        self._update_dismissed_sha = str(saved.get("update_dismissed_sha") or "")
+        self._update_notified_sha = str(saved.get("update_notified_sha") or "")
+        self._update_auto_check = bool(saved.get("update_auto_check_enabled", True))
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self.checkForUpdates)
+        if self._update_auto_check:
+            self._update_timer.start(_UPDATE_CHECK_INTERVAL_MS)
+            QTimer.singleShot(_UPDATE_STARTUP_DELAY_MS, self.checkForUpdates)
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -254,6 +279,58 @@ class AppBridge(QObject):
     @Property(bool, constant=False, notify=minimizeToTrayChanged)
     def trayAvailable(self) -> bool:
         return self._tray_available
+
+    @Property(bool, constant=False, notify=updateCheckingChanged)
+    def updateChecking(self) -> bool:
+        return self._update_checking
+
+    @Property(bool, constant=False, notify=updatePullingChanged)
+    def updatePulling(self) -> bool:
+        return self._update_pulling
+
+    @Property(bool, constant=False, notify=autoUpdateCheckChanged)
+    def autoUpdateCheckEnabled(self) -> bool:
+        return self._update_auto_check
+
+    @Property(bool, constant=False, notify=updateStatusChanged)
+    def updateAvailable(self) -> bool:
+        status = self._update_status
+        if not status or not status.available:
+            return False
+        return status.remote_sha != self._update_dismissed_sha
+
+    @Property(bool, constant=False, notify=updateStatusChanged)
+    def updateCanPull(self) -> bool:
+        return bool(self._update_status and self._update_status.can_pull)
+
+    @Property(int, constant=False, notify=updateStatusChanged)
+    def updateBehindCount(self) -> int:
+        return self._update_status.behind if self._update_status else 0
+
+    @Property(str, constant=False, notify=updateStatusChanged)
+    def updateCommitsJson(self) -> str:
+        commits = self._update_status.commits if self._update_status else []
+        return json.dumps(commits[:MAX_COMMIT_SUMMARY])
+
+    @Property(str, constant=False, notify=updateStatusChanged)
+    def updateBranch(self) -> str:
+        return (self._update_status.branch or "") if self._update_status else ""
+
+    @Property(str, constant=False, notify=updateStatusChanged)
+    def updateError(self) -> str:
+        return (self._update_status.error or "") if self._update_status else ""
+
+    @Property(float, constant=False, notify=updateStatusChanged)
+    def updateLastCheckedEpoch(self) -> float:
+        return self._update_status.checked_at if self._update_status else 0.0
+
+    @Property(str, constant=False, notify=updateStatusChanged)
+    def updatePullMessage(self) -> str:
+        return self._update_pull_message
+
+    @Property(bool, constant=False, notify=updateStatusChanged)
+    def updatePullOk(self) -> bool:
+        return self._update_pull_ok
 
     @Property(str, constant=False, notify=serversChanged)
     def serversJson(self) -> str:
@@ -816,6 +893,11 @@ class AppBridge(QObject):
                 "us_mode_options": self._us_mode_options.to_dict(),
                 "minimize_to_tray": self._minimize_to_tray,
             },
+            updates={
+                "update_dismissed_sha": self._update_dismissed_sha,
+                "update_notified_sha": self._update_notified_sha,
+                "update_auto_check_enabled": self._update_auto_check,
+            },
         )
 
     @Slot(bool)
@@ -855,6 +937,120 @@ class AppBridge(QObject):
         if self._minimize_to_tray and not self._tray_available:
             self._minimize_to_tray = False
             self.minimizeToTrayChanged.emit()
+
+    @staticmethod
+    def _repo_root() -> Path:
+        return Path(__file__).resolve().parent.parent
+
+    @Slot(bool)
+    def setAutoUpdateCheckEnabled(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._update_auto_check == enabled:
+            return
+        self._update_auto_check = enabled
+        self.autoUpdateCheckChanged.emit()
+        self._persist()
+        if enabled:
+            self._update_timer.start(_UPDATE_CHECK_INTERVAL_MS)
+            self.checkForUpdates()
+        else:
+            self._update_timer.stop()
+
+    @Slot()
+    def checkForUpdates(self) -> None:
+        if self._update_checking:
+            return
+        self._update_checking = True
+        self.updateCheckingChanged.emit()
+        threading.Thread(target=self._check_updates_worker, daemon=True).start()
+
+    def _check_updates_worker(self) -> None:
+        status = check_for_updates(self._repo_root())
+        payload = json.dumps(status.to_dict())
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_update_status",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, payload),
+        )
+
+    @Slot(str)
+    def _deliver_update_status(self, payload_json: str) -> None:
+        data = json.loads(payload_json)
+        self._update_status = UpdateStatus(
+            checked_at=float(data.get("checked_at") or time.time()),
+            error=data.get("error"),
+            branch=data.get("branch"),
+            current_sha=data.get("current_sha"),
+            remote_sha=data.get("remote_sha"),
+            behind=int(data.get("behind") or 0),
+            ahead=int(data.get("ahead") or 0),
+            dirty=bool(data.get("dirty")),
+            commits=list(data.get("commits") or []),
+        )
+        self._update_checking = False
+        self.updateCheckingChanged.emit()
+        self.updateStatusChanged.emit()
+        status = self._update_status
+        if status.available and status.remote_sha != self._update_notified_sha:
+            self._update_notified_sha = status.remote_sha
+            self._persist()
+            tray = self._tray
+            notify = getattr(tray, "notify", None) if tray is not None else None
+            if callable(notify):
+                count = len(status.commits)
+                change_word = "change" if count == 1 else "changes"
+                notify(
+                    "FinalMacro update available",
+                    f"{count} {change_word} ready — see the Run tab.",
+                )
+
+    @Slot()
+    def dismissUpdate(self) -> None:
+        status = self._update_status
+        if not status or not status.remote_sha:
+            return
+        self._update_dismissed_sha = status.remote_sha
+        self.updateStatusChanged.emit()
+        self._persist()
+
+    @Slot()
+    def pullUpdate(self) -> None:
+        if self._update_pulling:
+            return
+        if self.sessionActive:
+            self._update_pull_message = "Disconnect first — updating while connected could interrupt the macro"
+            self._update_pull_ok = False
+            self.updateStatusChanged.emit()
+            return
+        status = self._update_status
+        if not status or not status.can_pull:
+            return
+        self._update_pulling = True
+        self.updatePullingChanged.emit()
+        branch = status.branch
+        threading.Thread(target=self._pull_update_worker, args=(branch,), daemon=True).start()
+
+    def _pull_update_worker(self, branch: str | None) -> None:
+        result = pull_update(self._repo_root(), branch=branch)
+        payload = json.dumps({"ok": result.ok, "message": result.message, "new_sha": result.new_sha})
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_pull_result",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, payload),
+        )
+
+    @Slot(str)
+    def _deliver_pull_result(self, payload_json: str) -> None:
+        data = json.loads(payload_json)
+        self._update_pulling = False
+        self.updatePullingChanged.emit()
+        self._update_pull_message = str(data.get("message") or "")
+        self._update_pull_ok = bool(data.get("ok"))
+        self.updateStatusChanged.emit()
+        if data.get("ok"):
+            self.checkForUpdates()
 
     @Slot()
     def showMainWindow(self) -> None:

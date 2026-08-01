@@ -38,3 +38,39 @@ def test_tray_show_window_calls_window_methods():
 
     tray.show_window()
     assert calls == ["show", "raise", "activate"]
+
+
+def test_notify_does_nothing_when_tray_unavailable():
+    window = SimpleNamespace(show=lambda: None, raise_=lambda: None, requestActivate=lambda: None)
+    bridge = SimpleNamespace(shutdown=lambda: None)
+
+    with patch("gui.tray.QSystemTrayIcon.isSystemTrayAvailable", return_value=False):
+        tray = TrayController(None, window, bridge, icon_path=__file__)
+
+    tray.notify("Title", "Message")  # must not raise
+
+
+def test_notify_shows_message_when_supported():
+    window = SimpleNamespace(show=lambda: None, raise_=lambda: None, requestActivate=lambda: None)
+    bridge = SimpleNamespace(shutdown=lambda: None)
+
+    with patch("gui.tray.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
+        with patch("gui.tray.QIcon") as icon_cls:
+            icon_cls.return_value.isNull.return_value = False
+            with patch("gui.tray.QMenu"):
+                with patch("gui.tray.QAction"):
+                    with patch("gui.tray.QSystemTrayIcon") as tray_cls:
+                        tray_cls.supportsMessages.return_value = True
+                        tray_instance = tray_cls.return_value
+                        tray = TrayController(None, window, bridge, icon_path=__file__)
+
+                        # Must stay inside the patch context: notify() looks up
+                        # QSystemTrayIcon.supportsMessages()/MessageIcon live, and
+                        # calling the real (unmocked) static method with no
+                        # QApplication running crashes the process.
+                        tray.notify("Update available", "2 changes ready")
+
+    tray_instance.showMessage.assert_called_once()
+    args = tray_instance.showMessage.call_args.args
+    assert args[0] == "Update available"
+    assert args[1] == "2 changes ready"

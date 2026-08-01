@@ -13,6 +13,27 @@ Item {
         color: Theme.bgDark
     }
 
+    function updateStatusIsError() {
+        return App.updateError !== ""
+    }
+
+    function updateStatusText() {
+        if (App.updateChecking)
+            return "Checking…"
+        if (App.updateError !== "") {
+            if (App.updateError === "Not a git checkout")
+                return "Not a git checkout — clone the repo with git to enable update checks."
+            return "Check failed: " + App.updateError
+        }
+        if (App.updateAvailable)
+            return App.updateBehindCount + " change" + (App.updateBehindCount === 1 ? "" : "s") + " available on " + App.updateBranch
+        if (App.updateLastCheckedEpoch > 0) {
+            var d = new Date(App.updateLastCheckedEpoch * 1000)
+            return "Up to date · last checked " + d.toLocaleTimeString(Qt.locale(), "hh:mm")
+        }
+        return "Not checked yet"
+    }
+
     ScrollablePage {
         anchors.fill: parent
 
@@ -95,6 +116,63 @@ Item {
                     color: Theme.warning
                     font.pixelSize: 10
                     wrapMode: Text.WordWrap
+                }
+            }
+        }
+
+        PanelCard {
+            Layout.fillWidth: true
+            title: "Updates"
+            titleSize: 14
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "FinalMacro checks the git remote for new commits. Only works for a `git clone` checkout — a downloaded ZIP has no way to check."
+                    color: Theme.fgMuted
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Automatically check for updates"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+
+                    ThemedSwitch {
+                        checked: App.autoUpdateCheckEnabled
+                        onToggled: App.setAutoUpdateCheckEnabled(checked)
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    ThemedButton {
+                        text: App.updateChecking ? "Checking…" : "Check now"
+                        loading: App.updateChecking
+                        enabled: !App.updateChecking
+                        onClicked: App.checkForUpdates()
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: settingsRoot.updateStatusText()
+                        color: settingsRoot.updateStatusIsError() ? Theme.warning : Theme.fgMuted
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
         }

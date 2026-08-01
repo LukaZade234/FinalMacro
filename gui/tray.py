@@ -8,6 +8,8 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+_NOTIFICATION_MS = 8000
+
 
 class TrayController(QObject):
     def __init__(
@@ -77,3 +79,16 @@ class TrayController(QObject):
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window()
+
+    def notify(self, title: str, message: str) -> None:
+        """Show an OS notification balloon from the tray icon, if one exists."""
+        if self._icon is None:
+            return
+        if not QSystemTrayIcon.supportsMessages():
+            return
+        self._icon.showMessage(
+            title,
+            message,
+            QSystemTrayIcon.MessageIcon.Information,
+            _NOTIFICATION_MS,
+        )
