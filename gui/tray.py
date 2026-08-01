@@ -61,6 +61,14 @@ class TrayController(QObject):
         show = getattr(self._window, "show", None)
         if callable(show):
             show()
+        set_state = getattr(self._window, "setWindowState", None)
+        window_state = getattr(self._window, "windowState", None)
+        if callable(set_state) and callable(window_state):
+            from PySide6.QtCore import Qt
+
+            state = window_state()
+            if state & Qt.WindowState.WindowMinimized:
+                set_state(state & ~Qt.WindowState.WindowMinimized)
         raise_fn = getattr(self._window, "raise_", None)
         if callable(raise_fn):
             raise_fn()
@@ -77,7 +85,12 @@ class TrayController(QObject):
             quit_fn()
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+        # Linux status-notifier backends usually emit Trigger (primary click), not
+        # DoubleClick — handle both so left/double click restores the window.
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
             self.show_window()
 
     def notify(self, title: str, message: str) -> None:

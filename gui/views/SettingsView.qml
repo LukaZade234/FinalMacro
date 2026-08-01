@@ -103,7 +103,7 @@ Item {
                 Label {
                     Layout.fillWidth: true
                     visible: App.trayAvailable
-                    text: "Double-click the tray icon to restore the window. Right-click for Quit."
+                    text: "Click the tray icon to restore the window. Right-click for Quit."
                     color: Theme.fgMuted
                     font.pixelSize: 10
                     wrapMode: Text.WordWrap
