@@ -8,6 +8,8 @@ from collections import deque
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from macro.config import CharacterClaimRules, KakeraReactionRules, MacroConfig
 from macro.perk8_daily import PERK8_DAILY_KEY, Perk8DailyRecord
 from macro.roll_cycle import RollCycleEngine
@@ -419,6 +421,7 @@ def test_notification_restore_skips_when_stop_requested():
     assert reconnects == []
 
 
+@pytest.mark.slow
 def test_wait_for_scheduled_wake_defers_ohu8_when_disconnected():
     """A refill landing mid-wait, while notification mode holds the gateway down.
 

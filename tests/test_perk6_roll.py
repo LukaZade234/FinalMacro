@@ -7,6 +7,8 @@ from collections import deque
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from macro.config import CharacterClaimRules, MacroConfig
 from macro.roll_cycle import RollCycleEngine
 from macro.state import AccountState
@@ -112,6 +114,7 @@ async def _fast_sleep(_delay: float) -> None:
     return None
 
 
+@pytest.mark.slow
 def test_perk6_spawn_wait_polls_when_no_spawn():
     config = MacroConfig(
         roll_command="wa",
@@ -139,6 +142,7 @@ def test_perk6_spawn_wait_polls_when_no_spawn():
     assert all(timeout <= 0.25 for timeout in timeouts)
 
 
+@pytest.mark.slow
 def test_perk6_spawn_is_processed_after_parent_roll():
     config = MacroConfig(
         roll_command="wa",

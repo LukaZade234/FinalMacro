@@ -66,6 +66,7 @@ class _RollOutcome:
     rolls_left: int | None = None
     claimed: bool = False  # a claim was made on this roll via the interrupt path
     stop: bool = False  # caller should stop the *normal* roll loop (interrupt claim)
+    roll_limit: bool = False  # Mudae hourly roll limit (no embed)
 
 
 class RollCycleEngine:
@@ -295,7 +296,7 @@ class RollCycleEngine:
         self._reset_roll_stop_tracker()
         self._log(f"{normal_rolls} hourly roll(s) — standard macro rules")
         segment_start = len(session_records)
-        done, claimed = await self._run_normal_roll_segment(
+        done, claimed, _ = await self._run_normal_roll_segment(
             cmd,
             session_records,
             roll_index,
@@ -597,7 +598,7 @@ class RollCycleEngine:
                 self._state.rolls_reset_minutes = int(fields["rolls_reset_minutes"])
             self._notify()
             self._log(parsed.summary or "Hourly roll limit reached")
-            return _RollOutcome(ok=False, rolls_left=0)
+            return _RollOutcome(ok=False, rolls_left=0, roll_limit=True)
 
         outcome = await self._process_roll_embed(
             snapshot,
@@ -661,7 +662,7 @@ class RollCycleEngine:
         if not fields.get("perk_6"):
             # Perk-6 spawns are free, so they never come off a pool.
             if rl is not None:
-                self._state.rolls_left = int(rl)
+                self._apply_roll_footer_pool_count(int(rl), us_roll=us_roll)
             else:
                 self._consume_roll(us_roll=us_roll)
         self._notify()
@@ -983,15 +984,45 @@ class RollCycleEngine:
             return False
         return True
 
+    def _apply_roll_footer_pool_count(self, count: int, *, us_roll: bool) -> None:
+        """Map Mudae's low-roll footer to the pool it actually refers to.
+
+        During ``$us`` rolls the footer tracks the ``$us`` usable pool, not hourly
+        rolls. Bonus normal rolls (chaos kakera random rewards, etc.) show up on
+        the next ``$tu`` instead — do not mirror a ``$us`` footer into
+        ``rolls_left`` or they get mistaken for spendable bonus normals.
+        """
+        if us_roll and (self._state.rolls_us_bonus or 0) > 0:
+            self._state.rolls_us_bonus = count
+            return
+        if us_roll:
+            return
+        self._state.rolls_left = count
+
+    def _clear_phantom_bonus_normal_rolls(self, *, attempted: int | None = None) -> None:
+        """Drop a bogus ``rolls_left`` count after Mudae rejects a normal roll."""
+        self._state.rolls_left = 0
+        self._notify()
+        if attempted is not None:
+            self._log(
+                f"$us mode: {attempted} bonus normal roll(s) unavailable "
+                "(hourly limit) — continuing $us rolls"
+            )
+        else:
+            self._log(
+                "$us mode: bonus normal rolls unavailable (hourly limit) — "
+                "continuing $us rolls"
+            )
+
     def _leftover_normal_rolls(self) -> int | None:
-        """Rolls to spend explicitly, or ``None`` to let the stop-at-2 tail decide.
+        """Bonus normal rolls to spend explicitly, or ``None`` for the stop-at-2 tail.
 
         Mudae announces "N rolls left" in a footer only on the way down past the
         threshold, so a pool that *starts* at or below it never triggers the tail
         and the standard pass would roll nothing. That is how one-off bonus rolls
-        (chaos kakera and friends) get stranded: ``$us`` rolls cycle and refill
-        around them forever while the leftovers sit unused. Spend exactly what is
-        left instead.
+        (chaos kakera and similar random rewards, often 1–15+) get stranded:
+        ``$us`` rolls cycle and refill around them forever while the extras sit
+        unused. Spend exactly what ``$tu`` reports, then resume ``$us``.
         """
         self._sync_roll_stop_config()
         rl = self._state.rolls_left
@@ -1020,10 +1051,10 @@ class RollCycleEngine:
         *,
         respect_roll_stop: bool = True,
         max_rolls: int | None = None,
-    ) -> tuple[int, bool]:
+    ) -> tuple[int, bool, bool]:
         """Roll normal hourly rolls with standard stop/interrupt rules.
 
-        Returns ``(rolls_done, claimed_via_interrupt)``.
+        Returns ``(rolls_done, claimed_via_interrupt, roll_limit_hit)``.
         """
         if respect_roll_stop:
             self._sync_roll_stop_config()
@@ -1031,6 +1062,7 @@ class RollCycleEngine:
         claimed_via_interrupt = False
         done = 0
         stop_rolling = False
+        roll_limit_hit = False
 
         while not self._stop.is_set() and not stop_rolling:
             if max_rolls is not None and done >= max_rolls:
@@ -1048,6 +1080,7 @@ class RollCycleEngine:
                 stop_on_interrupt=True,
             )
             if not outcome.ok:
+                roll_limit_hit = outcome.roll_limit
                 break
             done += 1
             if outcome.stop:
@@ -1073,7 +1106,7 @@ class RollCycleEngine:
 
             await asyncio.sleep(self._config.roll_delay())
 
-        return done, claimed_via_interrupt
+        return done, claimed_via_interrupt, roll_limit_hit
 
     async def _run_us_cycle(self) -> None:
         """Roll out the usable pool, top it up from the ``$us`` stack, repeat.
@@ -1155,12 +1188,14 @@ class RollCycleEngine:
                             if normal_rolls > 0:
                                 self._reset_roll_stop_tracker()
                                 segment_start = len(session_records)
-                                done, claimed = await self._run_normal_roll_segment(
-                                    cmd,
-                                    session_records,
-                                    roll_index,
-                                    respect_roll_stop=False,
-                                    max_rolls=normal_rolls,
+                                done, claimed, roll_limit_hit = (
+                                    await self._run_normal_roll_segment(
+                                        cmd,
+                                        session_records,
+                                        roll_index,
+                                        respect_roll_stop=False,
+                                        max_rolls=normal_rolls,
+                                    )
                                 )
                                 roll_index += done
                                 claimed_any = claimed_any or claimed
@@ -1168,12 +1203,26 @@ class RollCycleEngine:
                                     session_records[segment_start:],
                                     claimed,
                                 )
-                                keep, roll_timeouts = await self._handle_us_roll_timeout(
-                                    done, normal_rolls, roll_timeouts
-                                )
-                                if not keep:
-                                    break
-                                if done < normal_rolls:
+                                if roll_limit_hit and done == 0 and not claimed:
+                                    self._clear_phantom_bonus_normal_rolls(
+                                        attempted=normal_rolls,
+                                    )
+                                elif done == 0 and not claimed:
+                                    keep, roll_timeouts = (
+                                        await self._handle_us_roll_timeout(
+                                            done, normal_rolls, roll_timeouts
+                                        )
+                                    )
+                                    if not keep:
+                                        break
+                                elif done < normal_rolls:
+                                    keep, roll_timeouts = (
+                                        await self._handle_us_roll_timeout(
+                                            done, normal_rolls, roll_timeouts
+                                        )
+                                    )
+                                    if not keep:
+                                        break
                                     continue
                             if us_bonus > 0:
                                 done, claimed, us_stopped = await self._roll_us_batch(
@@ -1206,8 +1255,8 @@ class RollCycleEngine:
                         leftover = self._leftover_normal_rolls()
                         if leftover is not None:
                             self._log(
-                                f"$us mode: {leftover} leftover normal roll(s) — "
-                                "using them before adding $us rolls"
+                                f"$us mode: {leftover} bonus normal roll(s) — "
+                                "using before $us (chaos kakera / random reward)"
                             )
                         else:
                             self._log(
@@ -1215,15 +1264,26 @@ class RollCycleEngine:
                                 "standard macro rules"
                             )
                         segment_start = len(session_records)
-                        done, claimed = await self._run_normal_roll_segment(
-                            cmd,
-                            session_records,
-                            roll_index,
-                            respect_roll_stop=leftover is None,
-                            max_rolls=leftover,
+                        done, claimed, roll_limit_hit = (
+                            await self._run_normal_roll_segment(
+                                cmd,
+                                session_records,
+                                roll_index,
+                                respect_roll_stop=leftover is None,
+                                max_rolls=leftover,
+                            )
                         )
                         roll_index += done
                         claimed_any = claimed_any or claimed
+                        if roll_limit_hit and done == 0 and not claimed:
+                            self._clear_phantom_bonus_normal_rolls(
+                                attempted=leftover,
+                            )
+                            await self._claim_best_at_session_end(
+                                session_records[segment_start:],
+                                claimed,
+                            )
+                            continue
                         if done == 0 and not claimed:
                             self._log("$us mode: normal roll failed — stopping")
                             break

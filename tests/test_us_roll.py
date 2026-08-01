@@ -494,6 +494,100 @@ def test_us_kakera_rules_for_us_rolls():
     assert migrated.types_allowed == ["kakeraG"]
 
 
+def _roll_limit(reset_minutes: int = 30) -> tuple[SimpleNamespace, ParseResult]:
+    from mudae.parsers.roll_limit import parse_roll_limit
+
+    content = (
+        "user, the roulette is limited to 30 uses per hour. "
+        f"{reset_minutes} min left."
+    )
+    return SimpleNamespace(message_id=999), parse_roll_limit(content)
+
+
+def test_us_mode_continues_when_bonus_normal_rolls_hit_hourly_limit():
+    """Bonus normals from $tu are spent when real; roll limit clears phantoms."""
+    actions = _FakeActions(
+        tu_script=[
+            _tu(0, 30, us_bonus=2),
+            _tu(2, 30),
+            _tu(0, 30, us_bonus=2),
+            _tu(0, 30),
+        ],
+        roll_script=[
+            _roll(1),
+            _roll(2),
+            _roll_limit(30),
+            _roll(3),
+            _roll(4),
+        ],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+
+    _run_us(engine)
+
+    # Rolls 1–2 ($us), roll 3 (bonus attempt → limit), rolls 3–4 ($us resume).
+    assert len(actions.roll_commands()) == 5
+    assert any(
+        "continuing $us rolls" in entry.text for entry in state.activity_log
+    )
+    assert not any(
+        "normal roll failed — stopping" in entry.text for entry in state.activity_log
+    )
+
+
+def test_us_roll_footer_updates_us_bonus_not_normal_rolls():
+    """Low-roll footers during $us track the $us pool, not bonus normal rolls."""
+    actions = _FakeActions(tu_script=[], roll_script=[])
+    engine, state = _make_engine(actions)
+    state.rolls_left = 0
+    state.rolls_us_bonus = 5
+
+    snapshot, parsed = _roll(1, rolls_left=4)
+
+    async def _run() -> None:
+        await engine._process_roll_embed(
+            snapshot,
+            parsed,
+            roll_index=1,
+            session_records=[],
+            us_roll=True,
+            stop_on_interrupt=False,
+        )
+
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(_run())
+
+    assert state.rolls_left == 0
+    assert state.rolls_us_bonus == 4
+
+
+def test_us_roll_footer_ignored_when_us_pool_empty():
+    """With no $us pool left, footers must not invent bonus normal rolls."""
+    actions = _FakeActions(tu_script=[], roll_script=[])
+    engine, state = _make_engine(actions)
+    state.rolls_left = 0
+    state.rolls_us_bonus = 0
+
+    snapshot, parsed = _roll(1, rolls_left=2)
+
+    async def _run() -> None:
+        await engine._process_roll_embed(
+            snapshot,
+            parsed,
+            roll_index=1,
+            session_records=[],
+            us_roll=True,
+            stop_on_interrupt=False,
+        )
+
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(_run())
+
+    assert state.rolls_left == 0
+    assert state.rolls_us_bonus == 0
+
+
 def test_us_kakera_override_ignores_base_low_power_colors():
     from macro.config import LowPowerOverride
     from macro.rule_eval import passes_kakera_reaction
