@@ -177,6 +177,65 @@ def test_perform_roll_resends_after_embed_timeouts():
     assert any("resending $wa" in entry.text for entry in state.activity_log)
 
 
+def _wish_roll(message_id: int, rolls_left: int | None = None) -> tuple[SimpleNamespace, ParseResult]:
+    """A roll that pings the running account's wishlist and is claimable."""
+    snapshot = SimpleNamespace(message_id=message_id)
+    fields: dict = {
+        "character_name": f"Char{message_id}",
+        "wished_by": [999],
+        "can_claim": True,
+        "claimed": False,
+        "buttons": [{"label": "Claim", "custom_id": "1p2p3", "disabled": False}],
+    }
+    if rolls_left is not None:
+        fields["rolls_left"] = rolls_left
+    return snapshot, ParseResult(kind=MessageKind.ROLL, summary="$roll", fields=fields)
+
+
+class _ClaimCapableActions(_FakeActions):
+    """``_FakeActions`` plus the claim-button interaction methods."""
+
+    async def wait_for_claim(self, *, timeout: float = 15.0):
+        return ParseResult(
+            kind=MessageKind.CLAIM,
+            summary="claim",
+            fields={"winner": "Tester", "character": "Char"},
+        )
+
+    async def fetch_message_snapshot(self, message_id: int):
+        return None
+
+
+def test_normal_macro_keeps_rolling_hour_after_wish_ping_claim():
+    """A mid-hour wish-ping claim should not end the whole macro session."""
+    actions = _ClaimCapableActions(
+        tu_script=[_tu(5, 30), _tu(0, 30)],
+        roll_script=[
+            _roll(1, 4),
+            _wish_roll(2, 3),
+            _roll(3, 2),
+            _roll(4, 1),
+            _roll(5, 0),
+        ],
+    )
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.6,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=True),
+    )
+    state = AccountState(own_user_ids=[999])
+    monitor = SimpleNamespace(macro_active=False)
+    engine = RollCycleEngine(actions, config, state, monitor)
+
+    _run_normal(engine)
+
+    # All 5 rolls of the hour still happen even though roll 2 triggered a claim.
+    assert len(actions.roll_commands()) == 5
+    assert any("claim now" in entry.text for entry in state.activity_log)
+    assert any("continuing after claim" in entry.text for entry in state.activity_log)
+    assert any("Macro finished" in entry.text for entry in state.activity_log)
+
+
 def test_normal_macro_waits_and_rolls_next_hour():
     actions = _FakeActions(
         tu_script=[_tu(5, 30), _tu(0, 30), _tu(8, 55)],

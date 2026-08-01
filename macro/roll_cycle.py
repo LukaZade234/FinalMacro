@@ -488,11 +488,21 @@ class RollCycleEngine:
                         roll_index,
                         normal_rolls=normal_rolls,
                     )
-                    if claimed:
-                        break
                     if done == 0:
                         self._log("Roll failed — stopping")
                         break
+                    if done < normal_rolls:
+                        # An interrupt (e.g. wish-ping claim) ended the segment
+                        # early. Rolls remain in this hour's pool — keep going
+                        # instead of ending the whole macro session. rolls_left
+                        # is already current from the roll footer, so no need
+                        # to re-poll $tu before resuming.
+                        self._log(
+                            f"{normal_rolls - done} roll(s) left this hour — "
+                            "continuing after claim"
+                        )
+                        tu_fresh = True
+                        continue
 
                     if not await self._wait_for_hourly_refill():
                         break

@@ -219,6 +219,16 @@ class DiscordActions:
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         return await self._monitor.click_button(message_id, custom_id)
 
+    async def fetch_message_snapshot(self, message_id: int) -> MudaeMessageSnapshot | None:
+        """Re-fetch a message so stale cached fields (e.g. buttons) can be refreshed."""
+        fetch = getattr(self._monitor, "fetch_message_snapshot", None)
+        if fetch is None:
+            return None
+        try:
+            return await fetch(message_id)
+        except Exception:
+            return None
+
     async def wait_for(
         self,
         predicate: Callable[[MudaeMessageSnapshot, ParseResult], bool],

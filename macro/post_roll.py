@@ -119,11 +119,18 @@ class PostRollHandler:
         if not (rules.enabled or rules.claim_on_wish_ping):
             self._log(f"{prefix}character claim off — skipped")
             return False
+        needed_rt = allow_rt and self._state.claim_available is False
         if not await self._ensure_claim_slot(prefix, allow_rt=allow_rt):
             self._log(f"{prefix}claim on cooldown — skipped")
             return False
+        # $rt can take several seconds (tick + settle + response waits); refresh
+        # the roll's fields so a stale "can_claim"/"claimed" snapshot from before
+        # $rt doesn't cause a wrong skip or a click on an already-claimed roll.
+        if needed_rt:
+            await self._refresh_record_fields(record)
         if record.fields.get("claimed"):
-            self._log(f"{prefix}already claimed — skipped")
+            owner = record.fields.get("owner") or "someone else"
+            self._log(f"{prefix}already claimed by {owner} — skipped")
             return False
         if not record.fields.get("can_claim"):
             self._log(f"{prefix}not claimable — skipped")
@@ -134,6 +141,24 @@ class PostRollHandler:
             return False
         await self._try_claim(record)
         return True
+
+    async def _refresh_record_fields(self, record: RollRecord) -> None:
+        """Re-fetch the roll message so claim/button state reflects reality.
+
+        Used after an ``$rt`` detour: cached fields are from roll time, and by
+        the time the ``$rt`` round trip finishes, someone else may have
+        claimed the character, or Mudae may have disabled the button once its
+        own claim timer elapsed.
+        """
+        fresh = await self._actions.fetch_message_snapshot(record.message_id)
+        if fresh is None:
+            return
+        from mudae.parsers.pipeline import parse_mudae_message
+
+        parsed = parse_mudae_message(fresh)
+        if parsed.fields.get("character_name") is None:
+            return
+        record.fields = dict(parsed.fields)
 
     async def claim_best(
         self,
@@ -270,7 +295,14 @@ class PostRollHandler:
             None,
         )
         if not claim_btn:
-            self._log(f"No claim button on {record.character_name or '?'}")
+            if record.fields.get("claimed"):
+                owner = record.fields.get("owner") or "someone else"
+                self._log(f"{record.character_name or '?'} was already claimed by {owner}")
+            else:
+                self._log(
+                    f"No usable claim button on {record.character_name or '?'} "
+                    "(claim window may have expired)"
+                )
             return
         custom_id = claim_btn.get("custom_id") or ""
         if not custom_id:

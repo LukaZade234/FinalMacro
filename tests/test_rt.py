@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from macro.config import CharacterClaimRules, MacroConfig
 from macro.post_roll import PostRollHandler, RollRecord
@@ -120,6 +120,7 @@ def test_post_roll_uses_rt_before_wish_claim():
             fields={"rt_used": True, "claim_available": True},
         )
     )
+    actions.fetch_message_snapshot = AsyncMock(return_value=None)
     actions.click_button = AsyncMock(return_value=True)
     actions.wait_for_claim = AsyncMock(
         return_value=ParseResult(
@@ -149,6 +150,58 @@ def test_post_roll_uses_rt_before_wish_claim():
     assert state.claim_available is False  # spent after claim
     assert any("$rt OK" in line for line in logs)
     actions.wait_for_mudae_tick.assert_awaited_once_with(12345, timeout=8.0)
+
+
+def test_post_roll_rt_then_someone_else_claimed_first():
+    """If a claim slot opens via $rt but another user claimed it meanwhile, skip cleanly."""
+    state = AccountState(claim_available=False, rt_available=True)
+    config = MacroConfig(
+        character_claim=CharacterClaimRules(
+            enabled=False,
+            claim_on_wish_ping=True,
+            auto_use_rt=True,
+        )
+    )
+    actions = AsyncMock()
+    actions.send_command = AsyncMock(return_value=12345)
+    actions.wait_for_mudae_tick = AsyncMock(return_value=True)
+    actions.wait_for_rt_use = AsyncMock(
+        return_value=ParseResult(
+            kind=MessageKind.TU,
+            summary="$rt",
+            fields={"rt_used": True, "claim_available": True},
+        )
+    )
+    fresh_snapshot = object()
+    actions.fetch_message_snapshot = AsyncMock(return_value=fresh_snapshot)
+
+    logs: list[str] = []
+    handler = PostRollHandler(actions, config, state, log=logs.append)
+    record = RollRecord(
+        message_id=1,
+        character_name="Char",
+        fields={
+            "can_claim": True,
+            "claimed": False,
+            "buttons": [{"label": "Claim", "custom_id": "123p456p789"}],
+        },
+    )
+
+    with patch(
+        "mudae.parsers.pipeline.parse_mudae_message",
+        return_value=ParseResult(
+            kind=MessageKind.ROLL_OWNERSHIP,
+            summary="Roll claimed",
+            fields={"character_name": "Char", "claimed": True, "owner": "RivalUser"},
+        ),
+    ):
+        claimed = asyncio.run(
+            handler.claim_record(record, reason="Wish rolled and pinged you", allow_rt=True)
+        )
+
+    assert claimed is False
+    actions.click_button.assert_not_called()
+    assert any("already claimed by RivalUser" in line for line in logs)
 
 
 def test_post_roll_rt_aborts_without_tick():
