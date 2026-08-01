@@ -28,6 +28,7 @@ from macro.reaction_power import (
     reaction_power_cost,
     refresh_reaction_power,
 )
+from macro.rt_manager import has_rt_available
 from macro.state import AccountState
 from mudae.constants import (
     SPHERE_ROLL_DEFAULT_EMOJI,
@@ -164,7 +165,16 @@ def passes_character_claim(
         return ClaimDecision(False, False, "character already claimed")
     if not fields.get("can_claim"):
         return ClaimDecision(False, False, "no enabled claim button")
-    if state.claim_available is False:
+
+    claim_blocked = state.claim_available is False
+    if claim_blocked:
+        if (
+            rules.claim_on_wish_ping
+            and wished_pinged
+            and rules.auto_use_rt
+            and has_rt_available(state)
+        ):
+            return ClaimDecision(True, True, "wish ping ($rt)")
         return ClaimDecision(False, False, "claim on cooldown")
 
     if rules.claim_on_wish_ping and wished_pinged:

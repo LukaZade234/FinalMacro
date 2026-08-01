@@ -1225,6 +1225,8 @@ class AppBridge(QObject):
         state.rolls_reset_minutes = None
         state.next_claim_reset_minutes = None
         state.claim_expire_sec = None
+        state.rt_available = None
+        state.rt_next_minutes = None
         state.phase = MacroPhase.IDLE
         state.kakera_clicks_today = 0
         state.kakera_clicks_day = ""

@@ -378,6 +378,13 @@ Item {
 
                         ThemedCheckBox {
                             Layout.fillWidth: true
+                            text: "Use $rt for wish pings when claim is on cooldown (Emerald badge)"
+                            checked: rules.character_claim ? !!rules.character_claim.auto_use_rt : false
+                            onToggled: patch("character_claim", "auto_use_rt", checked)
+                        }
+
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
                             text: "Only claim during the final roll hour"
                             checked: rules.character_claim ? rules.character_claim.only_final_hour : true
                             onToggled: patch("character_claim", "only_final_hour", checked)

@@ -68,6 +68,7 @@ class CharacterClaimRules:
     enabled: bool = True
     claim_on_wish_ping: bool = True
     only_final_hour: bool = True
+    auto_use_rt: bool = False
     min_kakera: int | None = None
     max_claim_rank: int | None = None  # instant claim when claim rank ≤ this value
 
@@ -79,6 +80,7 @@ class CharacterClaimRules:
             enabled=bool(data.get("enabled", True)),
             claim_on_wish_ping=bool(data.get("claim_on_wish_ping", True)),
             only_final_hour=bool(data.get("only_final_hour", True)),
+            auto_use_rt=bool(data.get("auto_use_rt", False)),
             min_kakera=_coerce_int_or_none(data.get("min_kakera")),
             max_claim_rank=_coerce_int_or_none(data.get("max_claim_rank")),
         )

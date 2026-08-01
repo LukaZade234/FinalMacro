@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -11,8 +12,15 @@ from mudae.buttons import is_claim_button
 
 from macro.actions import DiscordActions
 from macro.config import MacroConfig
+from macro.rt_manager import apply_rt_response, has_rt_available
 from macro.rule_eval import passes_character_claim
 from macro.state import AccountState
+
+
+_RT_RESPONSE_TIMEOUT_SEC = 12.0
+_RT_PAUSE_BEFORE_SEC = 1.0
+_RT_TICK_TIMEOUT_SEC = 8.0
+_RT_SETTLE_AFTER_TICK_SEC = 1.0
 
 
 @dataclass
@@ -98,14 +106,20 @@ class PostRollHandler:
             return max(1, int(self._state.claim_expire_sec))
         return max(1, self._config.claim_expire_sec)
 
-    async def claim_record(self, record: RollRecord, *, reason: str = "") -> bool:
+    async def claim_record(
+        self,
+        record: RollRecord,
+        *,
+        reason: str = "",
+        allow_rt: bool = False,
+    ) -> bool:
         """Claim one roll immediately (interrupt path). Returns True if claim attempted."""
         prefix = f"{reason}: " if reason else ""
         rules = self._config.character_claim
         if not (rules.enabled or rules.claim_on_wish_ping):
             self._log(f"{prefix}character claim off — skipped")
             return False
-        if self._state.claim_available is False:
+        if not await self._ensure_claim_slot(prefix, allow_rt=allow_rt):
             self._log(f"{prefix}claim on cooldown — skipped")
             return False
         if record.fields.get("claimed"):
@@ -193,6 +207,61 @@ class PostRollHandler:
             f"({len(eligible)} eligible)"
         )
         await self._try_claim(best)
+
+    async def _ensure_claim_slot(self, prefix: str, *, allow_rt: bool = False) -> bool:
+        if self._state.claim_available is not False:
+            return True
+        if not allow_rt:
+            return False
+        rules = self._config.character_claim
+        if not rules.auto_use_rt or not has_rt_available(self._state):
+            return False
+        return await self._try_use_rt(reason=prefix.rstrip(": "))
+
+    async def _try_use_rt(self, *, reason: str = "") -> bool:
+        rules = self._config.character_claim
+        if not rules.auto_use_rt or not has_rt_available(self._state):
+            if rules.auto_use_rt:
+                self._log("$rt: none available — cannot reset claim timer")
+            return False
+
+        note = f"{reason} · " if reason else ""
+        self._log(f"$rt: waiting {_RT_PAUSE_BEFORE_SEC:g}s before send — {note}claim on cooldown")
+        await asyncio.sleep(_RT_PAUSE_BEFORE_SEC)
+
+        message_id = await self._actions.send_command("rt", prefix=self._config.prefix)
+        if message_id is None:
+            self._log("$rt: send failed — claim cancelled")
+            return False
+        self._log(f"$rt: sent {self._config.prefix}rt")
+
+        ticked = await self._actions.wait_for_mudae_tick(
+            message_id,
+            timeout=_RT_TICK_TIMEOUT_SEC,
+        )
+        if not ticked:
+            self._log(
+                f"$rt: no Mudae tick within {_RT_TICK_TIMEOUT_SEC:g}s — claim cancelled"
+            )
+            return False
+
+        self._log(
+            f"$rt: tick received — waiting {_RT_SETTLE_AFTER_TICK_SEC:g}s "
+            "before claim"
+        )
+        await asyncio.sleep(_RT_SETTLE_AFTER_TICK_SEC)
+
+        parsed = await self._actions.wait_for_rt_use(timeout=_RT_RESPONSE_TIMEOUT_SEC)
+        if parsed is None:
+            self._log(f"$rt: no Mudae response within {_RT_RESPONSE_TIMEOUT_SEC:g}s — claim cancelled")
+            return False
+
+        if not apply_rt_response(self._state, dict(parsed.fields)):
+            self._log("$rt: response did not open a claim slot — claim cancelled")
+            return False
+
+        self._log("$rt OK — claim slot available")
+        return True
 
     async def _try_claim(self, record: RollRecord) -> None:
         buttons = record.fields.get("buttons") or []

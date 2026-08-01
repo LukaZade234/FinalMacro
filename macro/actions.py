@@ -133,6 +133,15 @@ def is_dk_use_parse_result(snapshot: MudaeMessageSnapshot, parsed: ParseResult) 
     return False
 
 
+def is_rt_use_parse_result(snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> bool:
+    if parsed.kind != MessageKind.TU:
+        return False
+    content = getattr(snapshot, "content", "") or ""
+    from mudae.parsers.rt import is_rt_response
+
+    return is_rt_response(content)
+
+
 from mudae.parsers.ohu import is_ohu_response
 from mudae.parsers.ohu8 import is_ohu8_response
 
@@ -357,6 +366,10 @@ class DiscordActions:
 
     async def wait_for_dk_use(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(is_dk_use_parse_result, timeout=timeout)
+        return result[1] if result else None
+
+    async def wait_for_rt_use(self, *, timeout: float = 12.0) -> ParseResult | None:
+        result = await self.wait_for(is_rt_use_parse_result, timeout=timeout)
         return result[1] if result else None
 
     def drain_queue(self) -> None:

@@ -19,7 +19,7 @@ Item {
     // Working draft (initialised from the current preset on open).
     property var draft: ({
         character_claim: { enabled: true, claim_on_wish_ping: true, only_final_hour: true,
-                           min_kakera: null, max_claim_rank: null },
+                           auto_use_rt: false, min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
                            require_chaos_key_bypass_types: ["kakeraP"],
                            require_perk_8: false, min_spheres: null, low_power: null,
@@ -223,6 +223,12 @@ Item {
                         text: "Always claim if a wish pings you"
                         checked: draft.character_claim.claim_on_wish_ping
                         onToggled: setDraftField("character_claim", "claim_on_wish_ping", checked)
+                    }
+                    ThemedCheckBox {
+                        Layout.fillWidth: true
+                        text: "Use $rt for wish pings when claim is on cooldown (Emerald badge)"
+                        checked: !!draft.character_claim.auto_use_rt
+                        onToggled: setDraftField("character_claim", "auto_use_rt", checked)
                     }
                     ThemedCheckBox {
                         Layout.fillWidth: true

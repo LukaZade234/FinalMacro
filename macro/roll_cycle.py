@@ -690,6 +690,7 @@ class RollCycleEngine:
             claimed = await self._make_post_roll_handler().claim_record(
                 record,
                 reason=interrupt.reason,
+                allow_rt=interrupt.code == "wish_ping",
             )
             return _RollOutcome(
                 ok=True,
@@ -1599,6 +1600,9 @@ class RollCycleEngine:
             self._state.claim_cooldown_minutes = fields["claim_cooldown_minutes"]
         sync_reaction_power_fields(self._state, fields)
         sync_dk_fields_from_tu(self._state, fields)
+        from macro.rt_manager import sync_rt_fields_from_tu
+
+        sync_rt_fields_from_tu(self._state, fields)
         if "rolls_reset_minutes" in fields:
             self._state.rolls_reset_minutes = int(fields["rolls_reset_minutes"])
         if "next_claim_reset_minutes" in fields and fields["next_claim_reset_minutes"] is not None:

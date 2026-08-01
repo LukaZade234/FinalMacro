@@ -86,9 +86,15 @@ def parse_tu(content: str) -> ParseResult:
 
     fields.update(parse_reaction_power_fields(content))
 
-    # 6. $rt — only set when explicitly mentioned
+    # 6. $rt — available line or cooldown timer (mutually exclusive in $tu).
     if "$rt is available" in lower or "$rt está pronto" in lower:
         fields["rt_available"] = True
+    next_rt = _minutes_after_phrase(content, "next $rt in")
+    if next_rt is None:
+        next_rt = _minutes_after_phrase(content, "próximo $rt")
+    if next_rt is not None:
+        fields["rt_next_minutes"] = next_rt
+        fields["rt_available"] = False
 
     # 7. $dk stock / recharge timer
     dk_count = re.search(r"\*\*(\d+)\*\*\s*\$dk\s*(?:available|dispon)", lower)
@@ -149,6 +155,9 @@ def _build_summary(fields: dict[str, Any]) -> str:
 
     if fields.get("rt_available"):
         parts.append("$rt ready")
+    elif (rt_next := fields.get("rt_next_minutes")) is not None:
+        h, m = divmod(rt_next, 60)
+        parts.append(f"rt next {h}h {m}m" if h else f"rt next {m}m")
 
     dk = fields.get("dk_stock")
     if dk is not None:

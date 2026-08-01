@@ -33,6 +33,8 @@ class AccountState:
     rolls_reset_minutes: int | None = None
     next_claim_reset_minutes: int | None = None
     claim_expire_sec: int | None = None
+    rt_available: bool | None = None
+    rt_next_minutes: int | None = None
     phase: MacroPhase = MacroPhase.IDLE
     own_usernames: list[str] = field(default_factory=list)
     own_user_ids: list[int] = field(default_factory=list)
@@ -58,6 +60,8 @@ class AccountState:
             "rolls_reset_minutes": self.rolls_reset_minutes,
             "next_claim_reset_minutes": self.next_claim_reset_minutes,
             "claim_expire_sec": self.claim_expire_sec,
+            "rt_available": self.rt_available,
+            "rt_next_minutes": self.rt_next_minutes,
             "phase": self.phase.value,
             "own_usernames": list(self.own_usernames),
             "own_user_ids": list(self.own_user_ids),
