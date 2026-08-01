@@ -102,6 +102,7 @@ class AppBridge(QObject):
     sessionActiveChanged = Signal()
     runActionPendingChanged = Signal()
     usModeOptionsChanged = Signal()
+    minimizeToTrayChanged = Signal()
     macroPhaseChanged = Signal(str)
     macroStateChanged = Signal()
     macroLogChanged = Signal()
@@ -162,6 +163,10 @@ class AppBridge(QObject):
         self._us_mode_options = UsModeStopOptions.from_dict(
             us_opts_raw if isinstance(us_opts_raw, dict) else None
         )
+        run_ui = saved.get("run_ui") or {}
+        self._minimize_to_tray = bool(run_ui.get("minimize_to_tray", False))
+        self._tray_available = False
+        self._tray: Any = None
 
     @Property(str, constant=False, notify=statusChanged)
     def statusText(self) -> str:
@@ -241,6 +246,14 @@ class AppBridge(QObject):
     @Property(int, constant=False, notify=usModeOptionsChanged)
     def usStopAfterRolls(self) -> int:
         return self._us_mode_options.stop_after_rolls
+
+    @Property(bool, constant=False, notify=minimizeToTrayChanged)
+    def minimizeToTray(self) -> bool:
+        return self._minimize_to_tray
+
+    @Property(bool, constant=False, notify=minimizeToTrayChanged)
+    def trayAvailable(self) -> bool:
+        return self._tray_available
 
     @Property(str, constant=False, notify=serversChanged)
     def serversJson(self) -> str:
@@ -799,7 +812,10 @@ class AppBridge(QObject):
             presets=self._presets.to_settings_fragment(),
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
-            run_ui={"us_mode_options": self._us_mode_options.to_dict()},
+            run_ui={
+                "us_mode_options": self._us_mode_options.to_dict(),
+                "minimize_to_tray": self._minimize_to_tray,
+            },
         )
 
     @Slot(bool)
@@ -819,6 +835,48 @@ class AppBridge(QObject):
         self._us_mode_options.stop_after_rolls = max(1, int(count))
         self.usModeOptionsChanged.emit()
         self._persist()
+
+    @Slot(bool)
+    def setMinimizeToTray(self, enabled: bool) -> None:
+        if not self._tray_available and enabled:
+            self._set_status("System tray is not available on this desktop")
+            return
+        enabled = bool(enabled)
+        if self._minimize_to_tray == enabled:
+            return
+        self._minimize_to_tray = enabled
+        self.minimizeToTrayChanged.emit()
+        self._persist()
+
+    def attach_tray(self, tray: Any) -> None:
+        self._tray = tray
+        self._tray_available = bool(getattr(tray, "available", False))
+        self.minimizeToTrayChanged.emit()
+        if self._minimize_to_tray and not self._tray_available:
+            self._minimize_to_tray = False
+            self.minimizeToTrayChanged.emit()
+
+    @Slot()
+    def showMainWindow(self) -> None:
+        if self._tray is not None:
+            show = getattr(self._tray, "show_window", None)
+            if callable(show):
+                show()
+
+    @Slot()
+    def requestQuit(self) -> None:
+        if self._tray is not None:
+            quit_fn = getattr(self._tray, "request_quit", None)
+            if callable(quit_fn):
+                quit_fn()
+                return
+        self.shutdown()
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance() or QGuiApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _get_daily_resets_for(
         self,

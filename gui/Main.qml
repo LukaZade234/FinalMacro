@@ -17,6 +17,13 @@ ApplicationWindow {
 
     property int currentPage: 0
 
+    onClosing: function(close) {
+        if (App.minimizeToTray) {
+            close.accepted = false
+            win.hide()
+        }
+    }
+
     readonly property var pages: [
         { label: "Run", title: "Run" },
         { label: "Accounts", title: "Accounts" },

@@ -45,6 +45,62 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
+            title: "System tray"
+            titleSize: 14
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Keep the macro running in the background when you close the window."
+                    color: Theme.fgMuted
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Minimize to tray when closing the window"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+
+                    ThemedSwitch {
+                        checked: App.minimizeToTray
+                        enabled: App.trayAvailable
+                        onToggled: App.setMinimizeToTray(checked)
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: App.trayAvailable
+                    text: "Double-click the tray icon to restore the window. Right-click for Quit."
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: !App.trayAvailable
+                    text: "System tray is not available on this desktop, so this option is disabled."
+                    color: Theme.warning
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
+
+        PanelCard {
+            Layout.fillWidth: true
             title: "Import from MudaeBot"
             titleSize: 14
 
