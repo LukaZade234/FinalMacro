@@ -17,11 +17,13 @@ from gui.tray import TrayController
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("FinalMacro")
+    app.setDesktopFileName("finalmacro")
 
     project_root = Path(__file__).resolve().parent.parent
     icon_path = project_root / "assets" / "app-icon.png"
-    if icon_path.is_file():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    window_icon = QIcon(str(icon_path)) if icon_path.is_file() else QIcon()
+    if not window_icon.isNull():
+        app.setWindowIcon(window_icon)
 
     bridge = AppBridge()
     engine = QQmlApplicationEngine()
@@ -35,6 +37,11 @@ def main() -> None:
         sys.exit(1)
 
     window = engine.rootObjects()[0]
+    if not window_icon.isNull():
+        set_icon = getattr(window, "setIcon", None)
+        if callable(set_icon):
+            set_icon(window_icon)
+
     tray = TrayController(
         app,
         window,
