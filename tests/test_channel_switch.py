@@ -113,3 +113,77 @@ def test_apply_run_target_switch_moves_monitor_without_token_change():
     monitor.switch_channel.assert_awaited_once_with(222)
     monitor.reconnect.assert_not_awaited()
     bind.assert_called_once_with(resolved)
+
+
+def test_apply_run_target_switch_reconnects_during_notification_standby():
+    from gui.bridge import AppBridge
+
+    bridge = AppBridge()
+    loop = asyncio.new_event_loop()
+    bridge._loop = loop
+    bridge._thread = SimpleNamespace(is_alive=lambda: True)
+    bridge._run_token = "same-token"
+    bridge._run_account_id = "acc-1"
+    bridge._run_channel_profile_id = "ch-a"
+    bridge._notification_standby = True
+    bridge._connected = False
+
+    monitor = SimpleNamespace(
+        channel_id=111,
+        is_connected=False,
+        token="same-token",
+        get_own_usernames=lambda: ["Tester"],
+        get_own_user_id=lambda: 42,
+        switch_channel=AsyncMock(return_value=True),
+        reconnect=AsyncMock(return_value=True),
+    )
+    bridge._monitor = monitor
+    bridge._actions = _FakeActions()
+    bridge._macro_state.activity_log.append(
+        __import__("macro.activity_log", fromlist=["ActivityLogEntry"]).ActivityLogEntry(
+            text="Waiting for rolls",
+            severity="info",
+        )
+    )
+    engine = RollCycleEngine(
+        bridge._actions,
+        MacroConfig(),
+        bridge._macro_state,
+        monitor,
+        account_id="acc-1",
+    )
+    engine._task = None
+    bridge._engine = engine
+
+    resolved = SimpleNamespace(
+        token="same-token",
+        discord_channel_id="222",
+        macro_config=MacroConfig(),
+        preset_id="default",
+        account_id="acc-1",
+        channel_profile_id="ch-b",
+        label="Tester · Server · #mudae · default",
+    )
+
+    delivered: list[bool] = []
+
+    def capture_connected(value: bool) -> None:
+        delivered.append(value)
+
+    try:
+        with patch.object(bridge, "_bind_run_target_metadata") as bind:
+            with patch.object(bridge, "_on_connected", side_effect=capture_connected):
+                with patch.object(bridge, "_on_notification_standby") as standby:
+                    with patch.object(bridge, "_on_macro_state"):
+                        asyncio.run(bridge._apply_run_target_switch(resolved))
+    finally:
+        loop.close()
+
+    monitor.reconnect.assert_awaited_once_with(channel_id=222)
+    monitor.switch_channel.assert_not_awaited()
+    bind.assert_called_once_with(resolved)
+    standby.assert_called_once_with(False)
+    assert delivered == [True]
+    assert bridge._notification_standby is True  # bridge field; standby cleared via _on_notification_standby mock
+    assert any("Switched to" in entry.text for entry in bridge._macro_state.activity_log)
+    assert any("Waiting for rolls" == entry.text for entry in bridge._macro_state.activity_log)

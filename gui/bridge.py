@@ -1199,12 +1199,28 @@ class AppBridge(QObject):
             self._engine.update_config(resolved.macro_config)
 
     def _reset_macro_state_preserve_identity(self) -> None:
-        """Clear channel-specific runtime state while keeping the logged-in user."""
-        own_usernames = list(self._macro_state.own_usernames)
-        own_user_ids = list(self._macro_state.own_user_ids)
-        self._macro_state = AccountState()
-        self._macro_state.own_usernames = own_usernames
-        self._macro_state.own_user_ids = own_user_ids
+        """Clear channel-specific runtime state while keeping user identity and log."""
+        state = self._macro_state
+        state.rolls_left = None
+        state.rolls_us_bonus = None
+        state.us_stacked = None
+        state.claim_available = None
+        state.claim_cooldown_minutes = None
+        state.power_percent = None
+        state.power_tracked_at = 0.0
+        state.dk_stock = None
+        state.dk_next_minutes = None
+        state.rolls_reset_minutes = None
+        state.next_claim_reset_minutes = None
+        state.claim_expire_sec = None
+        state.phase = MacroPhase.IDLE
+        state.kakera_clicks_today = 0
+        state.kakera_clicks_day = ""
+        state.perk8_priority_mode = "inactive"
+        state.perk8_click_max = None
+
+    def _append_activity_log(self, text: str) -> None:
+        ActivityLog(self._macro_state, on_update=self._notify_macro).write(text)
 
     def _schedule_run_target_switch(self) -> None:
         """Move the live Discord session to the newly selected run target."""
@@ -1242,7 +1258,10 @@ class AppBridge(QObject):
             self._on_macro_state()
             return
 
+        was_notification_standby = self._notification_standby
+
         if self._engine.is_running:
+            self._engine.end_session("channel switch")
             self._engine.stop()
             for _ in range(100):
                 if not self._engine.is_running:
@@ -1254,8 +1273,11 @@ class AppBridge(QObject):
         if token_changed:
             self._monitor.token = token
             ready = await self._monitor.reconnect(channel_id=channel_id)
-        else:
+        elif self._monitor.is_connected:
             ready = await self._monitor.switch_channel(channel_id)
+        else:
+            # Gateway was dropped (notification standby) — reconnect on the new channel.
+            ready = await self._monitor.reconnect(channel_id=channel_id)
 
         if token_changed and not ready:
             self._on_status("Channel switch failed")
@@ -1263,13 +1285,18 @@ class AppBridge(QObject):
             return
 
         self._reset_macro_state_preserve_identity()
-        if self._monitor.is_connected:
+        if ready:
             self._macro_state.own_usernames = self._monitor.get_own_usernames()
             own_id = self._monitor.get_own_user_id()
             self._macro_state.own_user_ids = [own_id] if own_id is not None else []
 
         self._bind_run_target_metadata(resolved)
-        if self._monitor.is_connected:
+        suffix = " (reconnected from notification standby)" if was_notification_standby else ""
+        self._append_activity_log(f"Switched to {resolved.label}{suffix}")
+
+        if was_notification_standby:
+            self._on_notification_standby(False)
+        if ready:
             self._on_connected(True)
         else:
             self._on_status(f"Switched · {resolved.label}")
