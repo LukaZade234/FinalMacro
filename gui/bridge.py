@@ -293,7 +293,14 @@ class AppBridge(QObject):
         return self._update_auto_check
 
     @Property(bool, constant=False, notify=updateStatusChanged)
+    def updatePending(self) -> bool:
+        """True when the remote is ahead, regardless of banner dismiss state."""
+        status = self._update_status
+        return bool(status and status.available)
+
+    @Property(bool, constant=False, notify=updateStatusChanged)
     def updateAvailable(self) -> bool:
+        """True when an update exists and the Run-page banner has not been dismissed."""
         status = self._update_status
         if not status or not status.available:
             return False
@@ -957,9 +964,14 @@ class AppBridge(QObject):
             self._update_timer.stop()
 
     @Slot()
-    def checkForUpdates(self) -> None:
+    @Slot(bool)
+    def checkForUpdates(self, redisplay: bool = False) -> None:
         if self._update_checking:
             return
+        if redisplay:
+            self._update_dismissed_sha = ""
+            self.updateStatusChanged.emit()
+            self._persist()
         self._update_checking = True
         self.updateCheckingChanged.emit()
         threading.Thread(target=self._check_updates_worker, daemon=True).start()

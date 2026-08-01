@@ -25,8 +25,9 @@ Item {
                 return "Not a git checkout — clone the repo with git to enable update checks."
             return "Check failed: " + App.updateError
         }
-        if (App.updateAvailable)
+        if (App.updatePending)
             return App.updateBehindCount + " change" + (App.updateBehindCount === 1 ? "" : "s") + " available on " + App.updateBranch
+                + (App.updateAvailable ? "" : " · banner dismissed")
         if (App.updateLastCheckedEpoch > 0) {
             var d = new Date(App.updateLastCheckedEpoch * 1000)
             return "Up to date · last checked " + d.toLocaleTimeString(Qt.locale(), "hh:mm")
@@ -163,7 +164,7 @@ Item {
                         text: App.updateChecking ? "Checking…" : "Check now"
                         loading: App.updateChecking
                         enabled: !App.updateChecking
-                        onClicked: App.checkForUpdates()
+                        onClicked: App.checkForUpdates(true)
                     }
 
                     Label {
