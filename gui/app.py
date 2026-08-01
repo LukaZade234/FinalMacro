@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
@@ -18,10 +18,13 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("FinalMacro")
 
+    project_root = Path(__file__).resolve().parent.parent
+    icon_path = project_root / "assets" / "app-icon.png"
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
+
     bridge = AppBridge()
     engine = QQmlApplicationEngine()
-
-    project_root = Path(__file__).resolve().parent.parent
     engine.addImportPath(str(project_root))
 
     engine.rootContext().setContextProperty("App", bridge)
@@ -36,7 +39,7 @@ def main() -> None:
         app,
         window,
         bridge,
-        icon_path=project_root / "assets" / "app-icon.png",
+        icon_path=icon_path,
     )
     bridge.attach_tray(tray)
 
