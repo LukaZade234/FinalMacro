@@ -7,13 +7,14 @@ from typing import Any
 
 from macro.config import KakeraReactionRules
 from macro.dk_manager import has_dk_available
+from macro.perk8_daily import perk8_budget_applies
 from macro.reaction_power import (
-    BASE_REACTION_COST,
     KAKERA_FREE_REACT_EMOJIS,
     can_afford_reaction,
     reaction_power_cost,
     refresh_reaction_power,
 )
+from macro.rule_eval import perk8_click_budget, perk8_mode_from_state
 
 
 @dataclass
@@ -42,20 +43,39 @@ class UsModeStopOptions:
         }
 
 
-def _minimum_kakera_cost(rules: KakeraReactionRules) -> float:
-    """Lowest reaction cost among kakera types this preset could click."""
+def _perk8_half_cost_applies(state: Any, rules: KakeraReactionRules) -> bool:
+    """True when the next paid kakera clicks are likely at perk-8 half cost."""
+    if not rules.perk_8_budget_mode:
+        return False
+    mode = perk8_mode_from_state(state)
+    if not perk8_budget_applies(mode):
+        return False
+    budget = perk8_click_budget(state, rules)
+    return state.remaining_kakera_budget(budget) > 0
+
+
+def _minimum_kakera_cost(state: Any, rules: KakeraReactionRules) -> float:
+    """Lowest non-free reaction cost among kakera types this preset could click."""
+    has_perk_8 = _perk8_half_cost_applies(state, rules)
     types = list(rules.types_allowed)
     if not types:
-        return BASE_REACTION_COST
+        return reaction_power_cost(
+            kakera_emoji="kakeraW",
+            has_chaos_key=True,
+            has_perk_8=has_perk_8,
+        )
     costs = [
         reaction_power_cost(
             kakera_emoji=emoji,
             has_chaos_key=True,
-            has_perk_8=True,
+            has_perk_8=has_perk_8,
         )
         for emoji in types
+        if emoji not in KAKERA_FREE_REACT_EMOJIS
     ]
-    return min(costs) if costs else BASE_REACTION_COST
+    if not costs:
+        return 0.0
+    return min(costs)
 
 
 def us_kakera_power_exhausted(state: Any, rules: KakeraReactionRules) -> bool:
@@ -64,7 +84,8 @@ def us_kakera_power_exhausted(state: Any, rules: KakeraReactionRules) -> bool:
         return False
 
     types = list(rules.types_allowed)
-    if types and all(t in KAKERA_FREE_REACT_EMOJIS for t in types):
+    paid_types = [t for t in types if t not in KAKERA_FREE_REACT_EMOJIS]
+    if types and not paid_types:
         return False
 
     refresh_reaction_power(state)
@@ -74,7 +95,7 @@ def us_kakera_power_exhausted(state: Any, rules: KakeraReactionRules) -> bool:
     if rules.auto_use_dk and has_dk_available(state):
         return False
 
-    min_cost = _minimum_kakera_cost(rules)
+    min_cost = _minimum_kakera_cost(state, rules)
     if min_cost <= 0:
         return False
     return not can_afford_reaction(state, min_cost)

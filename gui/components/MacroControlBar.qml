@@ -167,7 +167,7 @@ ColumnLayout {
     ThemedCheckBox {
         visible: bar.showActions
         Layout.fillWidth: true
-        text: "Stop when out of power ($dk counted)"
+        text: "Stop when out of paid-kakera power ($dk counted)"
         textSize: 10
         enabled: !bar.macroEngineRunning
         checked: App.usStopOnPowerExhausted

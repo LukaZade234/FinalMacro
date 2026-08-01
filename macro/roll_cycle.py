@@ -14,7 +14,7 @@ from macro.activity_log import ActivityLog
 from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
-from macro.us_stop import UsModeStopOptions, us_stop_reason
+from macro.us_stop import UsModeStopOptions, us_stop_reason, _minimum_kakera_cost
 from mudae.discord_errors import is_fatal_runtime_error, is_transient_discord_error
 from macro.perk8_daily import (
     PERK8_MIN_ROLL_POOL,
@@ -1240,7 +1240,12 @@ class RollCycleEngine:
 
             stop_bits: list[str] = []
             if self._us_stop.stop_on_power_exhausted:
-                stop_bits.append("power")
+                rules = self._config.kakera_rules_for_roll(us_roll=True)
+                min_cost = _minimum_kakera_cost(self._state, rules)
+                if min_cost > 0:
+                    stop_bits.append(f"power < {min_cost:g}%")
+                else:
+                    stop_bits.append("power (paid kakera only)")
             if self._us_stop.stop_after_rolls_enabled:
                 stop_bits.append(f"after {self._us_stop.stop_after_rolls} rolls")
             if stop_bits:
