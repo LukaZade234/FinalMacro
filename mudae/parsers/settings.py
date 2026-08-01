@@ -107,6 +107,9 @@ def _coerce_value(raw: str) -> Any:
     if exact_min:
         return int(exact_min.group(1))
 
+    # "Reset shifted: by +N min. ($shifthour)" — despite the command name this is
+    # MINUTES past the hour for the server's hourly reset, not an hour of the day.
+    # Daily counters (perk 8, spheres) always reset at 00:00 UTC regardless.
     shifted = re.search(r"by\s*\+?\s*(\d+)\s*min", lower)
     if shifted:
         return int(shifted.group(1))

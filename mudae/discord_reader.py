@@ -148,6 +148,62 @@ class ChannelMonitor:
             self._emit_status("Reconnect timed out")
         return ready
 
+    async def switch_channel(self, channel_id: int) -> bool:
+        """Point the monitor at another channel without dropping the gateway."""
+        self.channel_id = int(channel_id)
+        self._clear_channel_state()
+        if self.is_connected:
+            await self._emit_channel_status("Switched")
+        return True
+
+    async def reconnect(self, *, channel_id: int | None = None) -> bool:
+        """Restart the gateway — used when the account token changes."""
+        if channel_id is not None:
+            self.channel_id = int(channel_id)
+        self._clear_channel_state()
+        try:
+            await self.stop_background()
+        except Exception:
+            pass
+        ready = await self.start_background()
+        if ready:
+            await self._emit_channel_status("Reconnected")
+        else:
+            self._emit_status("Reconnect timed out")
+        return ready
+
+    def _clear_channel_state(self) -> None:
+        """Drop cached messages and in-flight waits for the previous channel."""
+        self._messages.clear()
+        for future in self._tick_waiters.values():
+            if not future.done():
+                future.set_result(False)
+        self._tick_waiters.clear()
+        self._pending_macro_command = None
+        self._commands = CommandContextTracker()
+        self._claims = ClaimContextTracker()
+        self.macro_active = False
+
+    async def _resolve_channel_label(self) -> str:
+        if not self._client:
+            return str(self.channel_id)
+        channel_label = str(self.channel_id)
+        try:
+            ch = self._client.get_channel(self.channel_id)
+            if ch is None:
+                ch = await self._client.fetch_channel(self.channel_id)
+            if hasattr(ch, "name"):
+                channel_label = f"#{ch.name} ({self.channel_id})"
+        except Exception as exc:
+            channel_label = f"{self.channel_id} (could not resolve: {exc})"
+        return channel_label
+
+    async def _emit_channel_status(self, verb: str) -> None:
+        user = self._client.user if self._client else None
+        name = user.name if user else "?"
+        label = await self._resolve_channel_label()
+        self._emit_status(f"{verb} as {name} · monitoring {label}")
+
     def _remember_message(self, message: discord.Message) -> None:
         self._messages[message.id] = message
         if len(self._messages) > _MESSAGE_CACHE_MAX:
@@ -312,19 +368,8 @@ class ChannelMonitor:
 
         @self._client.event
         async def on_ready() -> None:
-            user = self._client.user
-            name = user.name if user else "?"
             self._connected = True
-            channel_label = str(self.channel_id)
-            try:
-                ch = self._client.get_channel(self.channel_id)
-                if ch is None:
-                    ch = await self._client.fetch_channel(self.channel_id)
-                if hasattr(ch, "name"):
-                    channel_label = f"#{ch.name} ({self.channel_id})"
-            except Exception as exc:
-                channel_label = f"{self.channel_id} (could not resolve: {exc})"
-            self._emit_status(f"Connected as {name} · monitoring {channel_label}")
+            await self._emit_channel_status("Connected")
             self._ready.set()
 
         @self._client.event

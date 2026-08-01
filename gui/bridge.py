@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from gui.presets import PresetStore
 from gui.run_target import resolve_run_target
 from gui.server_profiles import ServerProfileStore
 from gui.settings import load_settings, save_app_settings
-from gui.targets import TargetStore
+from gui.targets import ResolvedRunTarget, TargetStore
 from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, activity_log_text
 from macro.config import MacroConfig
@@ -154,6 +155,9 @@ class AppBridge(QObject):
         self._run_channel_name: str | None = None
         self._run_account_name: str = ""
         self._run_preset_id: str = ""
+        self._run_account_id: str = ""
+        self._run_channel_profile_id: str = ""
+        self._run_token: str = ""
         us_opts_raw = saved.get("us_mode_options")
         self._us_mode_options = UsModeStopOptions.from_dict(
             us_opts_raw if isinstance(us_opts_raw, dict) else None
@@ -480,6 +484,7 @@ class AppBridge(QObject):
         self._apply_active_preset_to_engine()
         self._notify_config()
         self._persist()
+        self._schedule_run_target_switch()
 
     @Slot(str)
     def setActiveAccount(self, account_id: str) -> None:
@@ -496,6 +501,7 @@ class AppBridge(QObject):
         self._apply_active_preset_to_engine()
         self._notify_config()
         self._persist()
+        self._schedule_run_target_switch()
 
     @Slot(str)
     def setActivePreset(self, preset_id: str) -> None:
@@ -523,6 +529,7 @@ class AppBridge(QObject):
         self._apply_active_preset_to_engine()
         self._notify_config()
         self._persist()
+        self._schedule_run_target_switch()
 
     @Slot(str, str, result=str)
     def addAccount(self, name: str, account_type: str) -> str:
@@ -865,6 +872,154 @@ class AppBridge(QObject):
             return int(value.strip())
         except ValueError as exc:
             raise ValueError(f"Invalid {label}: must be a numeric Discord ID") from exc
+
+    def _daily_resets_callbacks_for(
+        self,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> tuple[Callable[[], dict[str, Any]], Callable[[dict[str, Any]], None]]:
+        return (
+            lambda: self._get_daily_resets_for(account_id, channel_profile_id),
+            lambda daily: self._save_daily_resets_for(
+                account_id,
+                channel_profile_id,
+                daily,
+            ),
+        )
+
+    def _bind_run_target_metadata(self, resolved: ResolvedRunTarget) -> None:
+        """Update session labels, log recorders, and engine persistence for a target."""
+        from mudae.kakera_log import set_recording_account as set_kakera_account
+        from mudae.key_log import set_recording_account as set_key_account
+        from mudae.soulmate_log import set_recording_account
+        from mudae.sphere_log import set_recording_account as set_sphere_account
+
+        self._run_token = resolved.token.strip()
+        self._run_account_id = resolved.account_id
+        self._run_channel_profile_id = resolved.channel_profile_id
+        self._run_preset_id = resolved.preset_id
+        self._macro_config = resolved.macro_config
+
+        account = self._accounts.find_account(resolved.account_id)
+        account_name = account.name if account else "Main"
+        self._run_account_name = account_name
+        set_recording_account(resolved.account_id, account_name)
+        set_kakera_account(resolved.account_id, account_name)
+        set_key_account(resolved.account_id, account_name)
+        set_sphere_account(resolved.account_id, account_name)
+
+        channel_profile = self._profiles.find_channel_by_profile_id(
+            resolved.channel_profile_id
+        )
+        channel = channel_profile[1] if channel_profile else None
+        server = (
+            channel_profile[0]
+            if channel_profile
+            else self._profiles.find_server(self._profiles.active_server_id)
+        )
+        self._run_channel_name = channel.name if channel else None
+        self._run_guild_name = (
+            (channel.guild_name if channel else None)
+            or (server.name if server else None)
+        )
+        guild_raw = None
+        if channel and channel.guild_id:
+            guild_raw = channel.guild_id
+        elif server and server.guild_id:
+            guild_raw = server.guild_id
+        try:
+            self._run_guild_id = int(guild_raw) if guild_raw else None
+        except (TypeError, ValueError):
+            self._run_guild_id = None
+
+        if self._engine:
+            daily_get, daily_save = self._daily_resets_callbacks_for(
+                resolved.account_id,
+                resolved.channel_profile_id,
+            )
+            self._engine.update_run_target(
+                account_id=resolved.account_id,
+                daily_resets_get=daily_get,
+                daily_resets_save=daily_save,
+            )
+            self._engine.update_config(resolved.macro_config)
+
+    def _reset_macro_state_preserve_identity(self) -> None:
+        """Clear channel-specific runtime state while keeping the logged-in user."""
+        own_usernames = list(self._macro_state.own_usernames)
+        own_user_ids = list(self._macro_state.own_user_ids)
+        self._macro_state = AccountState()
+        self._macro_state.own_usernames = own_usernames
+        self._macro_state.own_user_ids = own_user_ids
+
+    def _schedule_run_target_switch(self) -> None:
+        """Move the live Discord session to the newly selected run target."""
+        if not self._loop or not self._thread or not self._thread.is_alive():
+            return
+        if not self._monitor or not self._engine:
+            return
+        resolved = resolve_run_target(
+            self._accounts,
+            self._profiles,
+            self._presets,
+            self._targets,
+        )
+        if not resolved:
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._apply_run_target_switch(resolved),
+            self._loop,
+        )
+
+    async def _apply_run_target_switch(self, resolved: ResolvedRunTarget) -> None:
+        if not self._monitor or not self._engine or not self._actions:
+            return
+
+        channel_id = self._parse_int(resolved.discord_channel_id, "channel ID")
+        token = resolved.token.strip()
+        same_binding = (
+            token == self._run_token
+            and resolved.account_id == self._run_account_id
+            and resolved.channel_profile_id == self._run_channel_profile_id
+            and channel_id == self._monitor.channel_id
+        )
+        if same_binding:
+            self._bind_run_target_metadata(resolved)
+            self._on_macro_state()
+            return
+
+        if self._engine.is_running:
+            self._engine.stop()
+            for _ in range(100):
+                if not self._engine.is_running:
+                    break
+                await asyncio.sleep(0.05)
+
+        self._actions.drain_queue()
+        token_changed = token != self._run_token
+        if token_changed:
+            self._monitor.token = token
+            ready = await self._monitor.reconnect(channel_id=channel_id)
+        else:
+            ready = await self._monitor.switch_channel(channel_id)
+
+        if token_changed and not ready:
+            self._on_status("Channel switch failed")
+            self._on_connected(False)
+            return
+
+        self._reset_macro_state_preserve_identity()
+        if self._monitor.is_connected:
+            self._macro_state.own_usernames = self._monitor.get_own_usernames()
+            own_id = self._monitor.get_own_user_id()
+            self._macro_state.own_user_ids = [own_id] if own_id is not None else []
+
+        self._bind_run_target_metadata(resolved)
+        if self._monitor.is_connected:
+            self._on_connected(True)
+        else:
+            self._on_status(f"Switched · {resolved.label}")
+        self._on_macro_state()
 
     @Slot(str)
     def _deliver_entry_json(self, payload_json: str) -> None:
@@ -1222,40 +1377,13 @@ class AppBridge(QObject):
         )
         if not resolved:
             raise ValueError("Select account, server, channel, and preset on Run")
-        self._macro_config = resolved.macro_config
         channel_id = self._parse_int(resolved.discord_channel_id, "channel ID")
-        run_account_id = resolved.account_id
-        run_channel_profile_id = resolved.channel_profile_id
-
-        from mudae.kakera_log import set_recording_account as set_kakera_account
-        from mudae.key_log import set_recording_account as set_key_account
-        from mudae.soulmate_log import set_recording_account
-        from mudae.sphere_log import set_recording_account as set_sphere_account
-
-        account = self._accounts.find_account(run_account_id)
-        account_name = account.name if account else "Main"
-        self._run_account_name = account_name
-        set_recording_account(run_account_id, account_name)
-        set_kakera_account(run_account_id, account_name)
-        set_key_account(run_account_id, account_name)
-        set_sphere_account(run_account_id, account_name)
-
-        channel_profile = self._profiles.active_channel()
-        server = self._profiles.find_server(self._profiles.active_server_id)
-        self._run_channel_name = channel_profile.name if channel_profile else None
-        self._run_guild_name = (
-            (channel_profile.guild_name if channel_profile else None)
-            or (server.name if server else None)
+        daily_get, daily_save = self._daily_resets_callbacks_for(
+            resolved.account_id,
+            resolved.channel_profile_id,
         )
-        guild_raw = None
-        if channel_profile and channel_profile.guild_id:
-            guild_raw = channel_profile.guild_id
-        elif server and server.guild_id:
-            guild_raw = server.guild_id
-        try:
-            self._run_guild_id = int(guild_raw) if guild_raw else None
-        except (TypeError, ValueError):
-            self._run_guild_id = None
+
+        self._bind_run_target_metadata(resolved)
 
         self._monitor = ChannelMonitor(
             token=resolved.token,
@@ -1273,17 +1401,11 @@ class AppBridge(QObject):
             on_state=self._on_macro_state,
             on_keys=self._on_keys_recorded,
             on_persist=self._request_persist,
-            daily_resets_get=lambda: self._get_daily_resets_for(
-                run_account_id,
-                run_channel_profile_id,
-            ),
-            daily_resets_save=lambda daily: self._save_daily_resets_for(
-                run_account_id,
-                run_channel_profile_id,
-                daily,
-            ),
+            daily_resets_get=daily_get,
+            daily_resets_save=daily_save,
             notification_disconnect=self._notification_disconnect,
             notification_reconnect=self._notification_reconnect,
+            account_id=resolved.account_id,
         )
 
         async def runner() -> None:
@@ -1332,6 +1454,9 @@ class AppBridge(QObject):
             self._run_channel_name = None
             self._run_account_name = ""
             self._run_preset_id = ""
+            self._run_account_id = ""
+            self._run_channel_profile_id = ""
+            self._run_token = ""
             loop.close()
             self._loop = None
             self._on_notification_standby(False)
@@ -1702,11 +1827,22 @@ class AppBridge(QObject):
         if not active:
             self._set_status("Select a channel first")
             return
-        if str(self._monitor.channel_id) != active:
-            self._set_status("Connected channel does not match selection")
-            return
 
         async def _run() -> None:
+            if str(self._monitor.channel_id) != active:
+                resolved = resolve_run_target(
+                    self._accounts,
+                    self._profiles,
+                    self._presets,
+                    self._targets,
+                )
+                if resolved is None:
+                    self._on_status("Select a channel first")
+                    return
+                await self._apply_run_target_switch(resolved)
+                if str(self._monitor.channel_id) != active:
+                    self._on_status("Channel switch failed")
+                    return
             await self._monitor.send_command(command)
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)

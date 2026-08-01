@@ -77,7 +77,11 @@ def _iso(dt_value: dt.datetime) -> str:
     return dt_value.astimezone(dt.timezone.utc).isoformat()
 
 
-def _parse_iso(value: str) -> dt.datetime | None:
+def parse_iso(value: str) -> dt.datetime | None:
+    """Parse a stored ISO-8601 timestamp as UTC; ``None`` when unusable.
+
+    Naive timestamps are assumed UTC so comparisons never raise.
+    """
     if not value:
         return None
     try:
@@ -107,27 +111,25 @@ def save_perk8_record(
     return updated
 
 
-def next_daily_reset(now: dt.datetime, shifthour: int = 0) -> dt.datetime:
-    """Next Mudae daily reset.
+def next_daily_reset(now: dt.datetime) -> dt.datetime:
+    """Next daily reset for perk-8 clicks: 00:00 UTC.
 
-    ``shifthour`` is the UTC hour from ``$settings`` (``$shifthour``). Mudae
-    daily counters refill at that hour, not necessarily at UTC midnight.
+    Perk-8 and sphere dailies always refill at UTC midnight. A server's
+    ``$shifthour`` shifts its *hourly* roll/claim reset by N **minutes** and has
+    no effect on daily counters — do not thread it in here.
     """
-    hour = max(0, min(23, int(shifthour)))
     now = now.astimezone(dt.timezone.utc)
     candidate = dt.datetime.combine(
-        now.date(), dt.time(hour, 0), tzinfo=dt.timezone.utc
+        now.date(), dt.time(0, 0), tzinfo=dt.timezone.utc
     )
     if now >= candidate:
         candidate += dt.timedelta(days=1)
     return candidate
 
 
-def mudae_daily_date(when: dt.datetime, shifthour: int = 0) -> dt.date:
-    """Calendar date in Mudae's daily cycle (anchored at ``shifthour`` UTC)."""
-    hour = max(0, min(23, int(shifthour)))
-    shifted = when.astimezone(dt.timezone.utc) - dt.timedelta(hours=hour)
-    return shifted.date()
+def mudae_daily_date(when: dt.datetime) -> dt.date:
+    """Calendar date in the daily cycle — plain UTC date, since dailies reset at 00:00."""
+    return when.astimezone(dt.timezone.utc).date()
 
 
 def _set_refill_deadline(
@@ -135,19 +137,18 @@ def _set_refill_deadline(
     now: dt.datetime,
     *,
     refill_minutes: int | None = None,
-    shifthour: int = 0,
 ) -> None:
     """Persist when perk-8 clicks are expected back."""
     minutes = refill_minutes if refill_minutes is not None else record.last_refill_minutes
     if minutes is not None and minutes > 0:
         deadline = now + dt.timedelta(minutes=minutes)
-        reset_at = next_daily_reset(now, shifthour)
+        reset_at = next_daily_reset(now)
         if deadline > reset_at:
             deadline = reset_at
         record.last_refill_minutes = int((deadline - now).total_seconds() // 60) or 1
         record.refill_at = _iso(deadline)
         return
-    reset_at = next_daily_reset(now, shifthour)
+    reset_at = next_daily_reset(now)
     record.last_refill_minutes = int((reset_at - now).total_seconds() // 60) or 1
     record.refill_at = _iso(reset_at)
 
@@ -156,19 +157,16 @@ def refresh_exhausted_if_refill_passed(
     record: Perk8DailyRecord,
     *,
     now: dt.datetime | None = None,
-    shifthour: int = 0,
 ) -> Perk8DailyRecord:
     """Clear a stale exhausted flag once the daily refill has passed."""
     if not record.clicks_exhausted:
         return record
     now = now or _utc_now()
-    updated = _parse_iso(record.updated_at)
-    if updated is not None and mudae_daily_date(updated, shifthour) < mudae_daily_date(
-        now, shifthour
-    ):
+    updated = parse_iso(record.updated_at)
+    if updated is not None and mudae_daily_date(updated) < mudae_daily_date(now):
         record.clicks_exhausted = False
         return record
-    refill_at = _parse_iso(record.refill_at)
+    refill_at = parse_iso(record.refill_at)
     if refill_at is not None and now >= refill_at:
         record.clicks_exhausted = False
     return record
@@ -201,16 +199,15 @@ def should_skip_ohu8_until_refill(
     record: Perk8DailyRecord,
     *,
     now: dt.datetime | None = None,
-    shifthour: int = 0,
 ) -> bool:
     """True when daily perk-8 clicks are spent and the refill ETA has not passed."""
     now = now or _utc_now()
-    record = refresh_exhausted_if_refill_passed(record, now=now, shifthour=shifthour)
+    record = refresh_exhausted_if_refill_passed(record, now=now)
     if not record.clicks_exhausted:
         return False
     if _clicks_below_cap(record):
         return False
-    refill_at = _parse_iso(record.refill_at)
+    refill_at = parse_iso(record.refill_at)
     if refill_at is None:
         return True
     return now < refill_at
@@ -220,14 +217,13 @@ def should_query_ohu8_on_refill(
     record: Perk8DailyRecord,
     *,
     now: dt.datetime | None = None,
-    shifthour: int = 0,
 ) -> bool:
     """True when a mid-session ``$ohu8`` re-query is warranted (refill passed, etc.)."""
     now = now or _utc_now()
-    record = refresh_exhausted_if_refill_passed(record, now=now, shifthour=shifthour)
+    record = refresh_exhausted_if_refill_passed(record, now=now)
     if record.clicks_exhausted and _clicks_below_cap(record):
         return True
-    refill_at = _parse_iso(record.refill_at)
+    refill_at = parse_iso(record.refill_at)
     if refill_at is not None and now >= refill_at:
         if record.clicks_exhausted:
             return True
@@ -271,7 +267,6 @@ def update_record_from_ohu8(
     fields: dict[str, Any],
     *,
     now: dt.datetime | None = None,
-    shifthour: int = 0,
 ) -> tuple[Perk8DailyRecord, Perk8PriorityMode]:
     """Merge a fresh ``$ohu8`` parse into persisted state."""
     now = now or _utc_now()
@@ -293,7 +288,7 @@ def update_record_from_ohu8(
     if mode is Perk8PriorityMode.DONE:
         record.clicks_exhausted = True
         if refill_minutes is None:
-            _set_refill_deadline(record, now, shifthour=shifthour)
+            _set_refill_deadline(record, now)
     else:
         record.clicks_exhausted = False
 
@@ -305,13 +300,12 @@ def mark_perk8_exhausted(
     *,
     now: dt.datetime | None = None,
     clicked_today: int | None = None,
-    shifthour: int = 0,
 ) -> Perk8DailyRecord:
     """Mark clicks done mid-session using the last known refill ETA."""
     now = now or _utc_now()
     record.clicks_exhausted = True
     record.updated_at = _iso(now)
-    _set_refill_deadline(record, now, shifthour=shifthour)
+    _set_refill_deadline(record, now)
     if clicked_today is not None:
         record.last_clicked = int(clicked_today)
     elif record.last_click_max is not None:

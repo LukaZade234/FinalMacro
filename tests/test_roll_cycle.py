@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 from collections import deque
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from macro.config import CharacterClaimRules, KakeraReactionRules, MacroConfig
+from macro.perk8_daily import PERK8_DAILY_KEY, Perk8DailyRecord
 from macro.roll_cycle import RollCycleEngine
 from macro.state import AccountState
 from mudae.types import MessageKind, ParseResult
@@ -359,6 +361,23 @@ def test_notification_restore_skips_when_stop_requested():
 
 
 def test_wait_for_scheduled_wake_defers_ohu8_when_disconnected():
+    """A refill landing mid-wait, while notification mode holds the gateway down.
+
+    The wait loop must not try to send ``$ohu8`` with no connection, and must
+    leave a note so the query happens once the macro reconnects.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    store = {
+        "value": {
+            PERK8_DAILY_KEY: Perk8DailyRecord(
+                clicks_exhausted=True,
+                refill_at=(now + dt.timedelta(seconds=0.02)).isoformat(),
+                updated_at=now.isoformat(),
+                last_clicked=40,
+                last_click_max=40,
+            ).to_dict()
+        }
+    }
     actions = _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
     config = MacroConfig(
         notification_mode=True,
@@ -366,20 +385,22 @@ def test_wait_for_scheduled_wake_defers_ohu8_when_disconnected():
         character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
     )
     monitor = SimpleNamespace(is_connected=False, macro_active=False)
-    engine = RollCycleEngine(actions, config, AccountState(), monitor)
+    engine = RollCycleEngine(
+        actions,
+        config,
+        AccountState(),
+        monitor,
+        daily_resets_get=lambda: store["value"],
+        daily_resets_save=lambda daily: store.__setitem__("value", daily),
+    )
     engine._stop.clear()
     engine._pending_perk8_refresh = False
 
     async def run() -> None:
-        with patch.object(engine, "_seconds_until_perk8_refresh", return_value=0.0):
-            with patch.object(
-                engine,
-                "_maybe_refresh_perk8_status",
-                side_effect=AssertionError("must defer while disconnected"),
-            ):
-                ok = await engine._wait_for_scheduled_wake(0.05)
+        ok = await engine._wait_for_scheduled_wake(0.05)
         assert ok is True
         assert engine._pending_perk8_refresh is True
+        assert [c for c, _ in actions.sent if c == "ohu8"] == []
 
     asyncio.run(run())
 

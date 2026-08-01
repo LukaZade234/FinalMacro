@@ -287,6 +287,135 @@ def test_us_mode_consumes_normal_rolls_first():
     assert actions.us_adds() == []  # normal rolls used before any $us add
 
 
+def test_us_mode_spends_leftover_bonus_rolls():
+    """One-off bonus rolls (chaos kakera and friends) must not be stranded.
+
+    A pool that starts at or below the stop-at-2 threshold never triggers Mudae's
+    "N rolls left" footer, so the standard pass would roll nothing and these two
+    would sit unused forever while $us rolls cycled and refilled around them.
+    """
+    actions = _FakeActions(
+        tu_script=[_tu(2, 30), _tu(0, 30)],
+        roll_script=[_roll(1), _roll(2)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 2
+    assert actions.us_adds() == []
+
+
+def test_us_mode_spends_a_single_leftover_roll():
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(1)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 1
+
+
+def test_us_mode_spends_leftovers_before_stacking_more():
+    """The reported scenario: 2 leftover rolls alongside a live $us stack."""
+    actions = _FakeActions(
+        # Leftovers, then an empty pool, then $tu confirming the added $us rolls.
+        tu_script=[_tu(2, 30), _tu(0, 30), _tu(0, 30, us_bonus=5)],
+        roll_script=[_roll(i) for i in range(1, 8)],
+        stack_script=[_us_stack(5)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    first_add = next(
+        i for i, (cmd, _) in enumerate(actions.sent) if cmd.startswith("us ")
+    )
+    rolled_before_add = [c for c, _ in actions.sent[:first_add] if c == "wa"]
+    assert len(rolled_before_add) == 2
+    assert actions.us_adds() == ["us 5"]
+    assert len(actions.roll_commands()) == 7
+
+
+def test_roll_counts_tick_down_between_tu_polls():
+    """Mudae prints a footer count only near the end of a pool.
+
+    Without a local decrement the status bar would sit on the last $tu figure for
+    the whole batch, so the user never sees rolls being spent.
+    """
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30, us_bonus=3), _tu(0, 30)],
+        roll_script=[_roll(1), _roll(2), _roll(3)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+    seen: list[tuple[int | None, int | None]] = []
+    engine._on_state = lambda: seen.append((state.rolls_left, state.rolls_us_bonus))
+
+    _run_us(engine)
+
+    assert (0, 2) in seen
+    assert (0, 1) in seen
+    assert (0, 0) in seen
+
+
+def test_footer_count_wins_over_the_local_decrement():
+    """$tu and the embed footer stay authoritative; the decrement only fills gaps."""
+    actions = _FakeActions(
+        tu_script=[_tu(4, 30), _tu(0, 30)],
+        roll_script=[_roll(1, 3), _roll(2, 2), _roll(3, 1), _roll(4, 0)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+    seen: list[int | None] = []
+    engine._on_state = lambda: seen.append(state.rolls_left)
+
+    _run_us(engine)
+
+    # Collapse repeats from notifications that were not roll counts changing.
+    counts = [n for n in seen if n is not None]
+    steps = [n for i, n in enumerate(counts) if i == 0 or n != counts[i - 1]]
+    # Straight down by the footer values, never skipping one to a double decrement.
+    assert steps == [4, 3, 2, 1, 0]
+
+
+def test_consume_roll_takes_us_rolls_from_the_bonus_pool_first():
+    engine, state = _make_engine(_FakeActions(tu_script=[], roll_script=[]))
+    state.rolls_left = 2
+    state.rolls_us_bonus = 3
+
+    engine._consume_roll(us_roll=True)
+    assert (state.rolls_left, state.rolls_us_bonus) == (2, 2)
+
+    engine._consume_roll(us_roll=False)
+    assert (state.rolls_left, state.rolls_us_bonus) == (1, 2)
+
+
+def test_consume_roll_falls_back_to_normal_rolls_when_bonus_is_gone():
+    engine, state = _make_engine(_FakeActions(tu_script=[], roll_script=[]))
+    state.rolls_left = 2
+    state.rolls_us_bonus = 0
+
+    engine._consume_roll(us_roll=True)
+
+    assert state.rolls_left == 1
+
+
+def test_consume_roll_never_goes_negative():
+    engine, state = _make_engine(_FakeActions(tu_script=[], roll_script=[]))
+    state.rolls_left = 0
+    state.rolls_us_bonus = 0
+
+    engine._consume_roll(us_roll=True)
+    engine._consume_roll(us_roll=False)
+
+    assert (state.rolls_left, state.rolls_us_bonus) == (0, 0)
+
+
 def test_us_mode_does_not_add_when_reset_imminent():
     # Rolls reset in 2 min (== margin): roll out the 3 remaining, wait, resume.
     actions = _FakeActions(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,26 +10,21 @@ from typing import Any
 
 from macro.actions import DiscordActions, is_perk6_spawn_parse_result
 from macro.activity_log import ActivityLog
+from macro.connection_recovery import ConnectionRecovery
+from macro.roll_context import RollContext
+from macro.roll_scheduler import (
+    seconds_until_rolls_reset,
+    sleep_interruptible,
+    wait_for_scheduled_wake,
+)
 from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
 from macro.us_stop import UsModeStopOptions, us_stop_reason, _minimum_kakera_cost
-from mudae.discord_errors import is_fatal_runtime_error, is_transient_discord_error
-from macro.perk8_daily import (
-    PERK8_MIN_ROLL_POOL,
-    Perk8DailyRecord,
-    Perk8PriorityMode,
-    apply_cached_perk8,
-    load_perk8_record,
-    mark_perk8_exhausted,
-    refresh_exhausted_if_refill_passed,
-    save_perk8_record,
-    should_query_ohu8_on_refill,
-    should_skip_ohu8_until_refill,
-    sync_refill_deadline,
-    update_record_from_ohu8,
-)
+from mudae.discord_errors import is_fatal_runtime_error
+from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
 from macro.kakera_reactor import KakeraReactor
+from macro.perk8_runtime import Perk8Runtime
 from macro.post_roll import PostRollHandler, RollRecord
 from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
 from macro.roll_stop import ROLLS_LEFT_STOP, RollStopTracker
@@ -48,21 +42,16 @@ from mudae.buttons import is_kakera_button, is_sphere_button
 _MAX_FAILED_US_ADDS = 3
 # Stop $us mode after this many consecutive roll timeouts (no embed arrived).
 _MAX_ROLL_TIMEOUT_RETRIES = 5
-# How many Discord 503 / disconnect recoveries to attempt before giving up.
-_MAX_TRANSIENT_RECOVERIES = 3
 # After this many consecutive roll timeouts, force a Discord reconnect.
 _ROLL_TIMEOUT_RECONNECT_AFTER = 2
 
 # Timing knobs shared by the roll loops (seconds).
 _COMMAND_SETTLE_SEC = 2.5  # pause after $tu before polling for the reply
-_OHU8_SETTLE_SEC = 2.0  # pause after $ohu8 before polling for the reply
 _RESPONSE_TIMEOUT_SEC = 12.0  # max wait for a $tu / $ohu8 / $us text reply
 # Progressive waits for a missed roll embed; resend the roll command between stages.
 _ROLL_EMBED_TIMEOUTS_SEC = (5.0, 10.0, 25.0)
 _ROLL_EMBED_TIMEOUT_SEC = _ROLL_EMBED_TIMEOUTS_SEC[-1]  # used in timeout log text
 _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($us mode)
-_ROLLS_RESET_BUFFER_SEC = 5.0  # pad after parsed reset time before re-checking $tu
-_STOP_CHECK_SEC = 1.0  # wake interval so Stop remains responsive during long waits
 _PERK6_SPAWN_WAIT_SEC = 0.5  # brief poll; queue drain catches late spawns
 _PERK6_SPAWN_POLL_SEC = 0.25
 _PERK6_POST_SETTLE_SEC = 1.2  # pause after spawn reactions before next roll
@@ -94,6 +83,7 @@ class RollCycleEngine:
         daily_resets_save: Callable[[dict[str, Any]], None] | None = None,
         notification_disconnect: Callable[[], Any] | None = None,
         notification_reconnect: Callable[[], Any] | None = None,
+        account_id: str = "",
     ) -> None:
         self._actions = actions
         self._config = config
@@ -102,10 +92,6 @@ class RollCycleEngine:
         self._on_state = on_state
         self._on_keys = on_keys
         self._on_persist = on_persist
-        self._daily_resets_get = daily_resets_get
-        self._daily_resets_save = daily_resets_save
-        self._notification_disconnect = notification_disconnect
-        self._notification_reconnect = notification_reconnect
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._roll_stop = RollStopTracker()
@@ -114,7 +100,50 @@ class RollCycleEngine:
         self._activity = ActivityLog(self._state, on_update=self._notify)
         self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
-        self._pending_perk8_refresh = False
+        self._ctx = RollContext(
+            actions=actions,
+            config=config,
+            state=state,
+            monitor=monitor,
+            stop=self._stop,
+            account_id=account_id,
+            log=self._log,
+            log_debug=self._log_debug,
+            notify=self._notify,
+            sleep=self._sleep,
+        )
+        self._recovery = ConnectionRecovery(
+            self._ctx,
+            notification_disconnect=notification_disconnect,
+            notification_reconnect=notification_reconnect,
+        )
+        self._perk8 = Perk8Runtime(
+            self._ctx,
+            daily_get=daily_resets_get,
+            daily_save=daily_resets_save,
+            on_busy=lambda: self._set_phase(MacroPhase.CHECKING_TU),
+            on_idle=lambda: self._set_phase(MacroPhase.IDLE),
+            response_timeout_sec=_RESPONSE_TIMEOUT_SEC,
+        )
+
+    def _set_phase(self, phase: MacroPhase) -> None:
+        self._state.phase = phase
+
+    @property
+    def _pending_perk8_refresh(self) -> bool:
+        return self._perk8.pending
+
+    @_pending_perk8_refresh.setter
+    def _pending_perk8_refresh(self, value: bool) -> None:
+        if value:
+            self._perk8.mark_pending()
+        else:
+            self._perk8.clear_pending()
+
+    async def _sleep(self, seconds: float) -> None:
+        # Routed through this module so tests patching ``macro.roll_cycle.asyncio``
+        # still intercept waits taken inside extracted subsystems.
+        await asyncio.sleep(seconds)
 
     def _notify(self) -> None:
         if not self._on_state:
@@ -134,36 +163,10 @@ class RollCycleEngine:
             self._on_persist()
 
     async def _release_connection_for_notifications(self) -> bool:
-        """Disconnect between hourly sessions when notification mode is enabled."""
-        if self._stop.is_set():
-            return False
-        if not self._config.notification_mode:
-            return True
-        if self._notification_disconnect is None:
-            return True
-        if not getattr(self._monitor, "is_connected", False):
-            return True
-        self._log("Notification mode: disconnecting until next roll session")
-        result = self._notification_disconnect()
-        if asyncio.iscoroutine(result):
-            return bool(await result)
-        return bool(result)
+        return await self._recovery.release_for_notifications()
 
     async def _restore_connection_for_notifications(self) -> bool:
-        """Reconnect before the next hourly roll session when needed."""
-        if self._stop.is_set():
-            return False
-        if not self._config.notification_mode:
-            return True
-        if self._notification_reconnect is None:
-            return True
-        if getattr(self._monitor, "is_connected", False):
-            return True
-        self._log("Notification mode: reconnecting for roll session")
-        result = self._notification_reconnect()
-        if asyncio.iscoroutine(result):
-            return bool(await result)
-        return bool(result)
+        return await self._recovery.restore_for_notifications()
 
     def _log(self, text: str) -> None:
         self._activity.write(text)
@@ -172,19 +175,7 @@ class RollCycleEngine:
         self._activity.debug(text)
 
     async def _force_discord_reconnect(self) -> bool:
-        """Force a fresh Discord gateway after a transport failure."""
-        if self._stop.is_set():
-            return False
-        reconnect = getattr(self._monitor, "force_reconnect", None)
-        if reconnect is None:
-            # Fall back to notification-mode reconnect hooks when available.
-            if not await self._release_connection_for_notifications():
-                return False
-            return await self._restore_connection_for_notifications()
-        result = reconnect()
-        if asyncio.iscoroutine(result):
-            return bool(await result)
-        return bool(result)
+        return await self._recovery.force_reconnect()
 
     async def _recover_transient_connection(
         self,
@@ -193,33 +184,11 @@ class RollCycleEngine:
         label: str,
         recoveries: int,
     ) -> int | None:
-        """Reconnect after a transient Discord error.
-
-        Returns the new recovery count on success, or ``None`` when the caller
-        should abort (fatal / too many failures / reconnect failed).
-        """
-        if is_fatal_runtime_error(exc):
-            self._log(f"{label}: fatal runtime error — {exc}")
-            return None
-        if not is_transient_discord_error(exc):
-            return None
-        recoveries += 1
-        if recoveries > _MAX_TRANSIENT_RECOVERIES:
-            self._log(
-                f"{label}: connection errors exhausted "
-                f"({recoveries - 1}/{_MAX_TRANSIENT_RECOVERIES}) — stopping"
-            )
-            return None
-        self._log(
-            f"{label}: connection error ({exc}) — reconnecting "
-            f"({recoveries}/{_MAX_TRANSIENT_RECOVERIES})"
+        return await self._recovery.recover_transient(
+            exc,
+            label=label,
+            recoveries=recoveries,
         )
-        if not await self._force_discord_reconnect():
-            self._log(f"{label}: reconnect failed — stopping")
-            return None
-        self._actions.drain_queue()
-        await asyncio.sleep(2.0)
-        return recoveries
 
     async def _send_command_with_reconnect(
         self,
@@ -227,25 +196,7 @@ class RollCycleEngine:
         *,
         label: str,
     ) -> int | None:
-        """Send a command; reconnect once on a transient Discord transport error."""
-        try:
-            return await self._actions.send_command(
-                command,
-                prefix=self._config.prefix,
-            )
-        except Exception as exc:
-            if is_fatal_runtime_error(exc) or not is_transient_discord_error(exc):
-                raise
-            self._log(f"{label}: connection error ({exc}) — reconnecting")
-            if not await self._force_discord_reconnect():
-                self._log(f"{label}: reconnect failed")
-                raise
-            self._actions.drain_queue()
-            await asyncio.sleep(2.0)
-            return await self._actions.send_command(
-                command,
-                prefix=self._config.prefix,
-            )
+        return await self._recovery.send_command_with_reconnect(command, label=label)
 
     def begin_session(self, mode: str, meta: dict[str, Any]) -> None:
         if self._session and self._session.active:
@@ -306,177 +257,31 @@ class RollCycleEngine:
         )
 
     def _get_daily_resets(self) -> dict[str, Any]:
-        if self._daily_resets_get:
-            return dict(self._daily_resets_get())
-        return {}
+        return self._perk8.load_daily()
 
     def _save_daily_resets(self, daily: dict[str, Any]) -> None:
-        if self._daily_resets_save:
-            self._daily_resets_save(daily)
-
-    def _mudae_shifthour(self) -> int:
-        from mudae.channel_cache import get_channel_settings
-
-        channel_id = getattr(self._monitor, "channel_id", None)
-        if channel_id is None:
-            return 0
-        settings = get_channel_settings(int(channel_id))
-        if not settings:
-            return 0
-        value = settings.get("shifthour")
-        if value is None:
-            return 0
-        try:
-            return max(0, min(23, int(value)))
-        except (TypeError, ValueError):
-            return 0
+        self._perk8.save_daily(daily)
 
     def _discord_commands_blocked(self) -> bool:
-        """True when notification mode has dropped the gateway (no sends yet)."""
-        return (
-            self._config.notification_mode
-            and not getattr(self._monitor, "is_connected", False)
-        )
+        return self._ctx.commands_blocked
 
     def _apply_perk8_mode(self, mode: Perk8PriorityMode, record: Perk8DailyRecord) -> None:
-        self._state.perk8_priority_mode = mode.value
-        if record.last_click_max is not None:
-            self._state.perk8_click_max = record.last_click_max
-        if record.last_clicked is not None:
-            self._state.rollover_kakera_budget_if_needed()
-            self._state.kakera_clicks_today = record.last_clicked
+        self._perk8.apply_mode(mode, record)
 
     def _mark_perk8_exhausted(self) -> None:
-        try:
-            mode = Perk8PriorityMode(self._state.perk8_priority_mode)
-        except ValueError:
-            return
-        if mode is not Perk8PriorityMode.ACTIVE:
-            return
-        daily = self._get_daily_resets()
-        record = mark_perk8_exhausted(
-            load_perk8_record(daily),
-            clicked_today=self._state.kakera_clicks_today,
-            shifthour=self._mudae_shifthour(),
-        )
-        self._save_daily_resets(save_perk8_record(daily, record))
-        self._apply_perk8_mode(Perk8PriorityMode.DONE, record)
-        self._log("$ohu8: daily perk 8 clicks used — equal kakera clicking until refill")
-        self._notify()
+        self._perk8.mark_exhausted()
 
     def _persist_perk8_click_progress(self) -> None:
-        """Write this account's kakera click count back to persisted daily state."""
-        if not self._config.kakera_reaction.perk_8_budget_mode:
-            return
-        daily = self._get_daily_resets()
-        record = load_perk8_record(daily)
-        record.last_clicked = self._state.kakera_clicks_today
-        self._save_daily_resets(save_perk8_record(daily, record))
+        self._perk8.persist_click_progress()
 
     def _sync_perk8_refill_from_tu(self, fields: dict[str, Any]) -> None:
-        """Keep the persisted refill ETA in sync with ``$tu`` / ``$ohu8`` text."""
-        if not self._config.kakera_reaction.perk_8_budget_mode:
-            return
-        refill = fields.get("perk8_refill_minutes")
-        if refill is None:
-            return
-        daily = self._get_daily_resets()
-        record = load_perk8_record(daily)
-        sync_refill_deadline(record, int(refill))
-        record = refresh_exhausted_if_refill_passed(
-            record, shifthour=self._mudae_shifthour()
-        )
-        self._save_daily_resets(save_perk8_record(daily, record))
+        self._perk8.sync_refill_from_tu(fields)
 
     async def _refresh_perk8_status(self, *, at_startup: bool = False) -> None:
-        rules = self._config.kakera_reaction
-        if not rules.perk_8_budget_mode:
-            self._state.perk8_priority_mode = Perk8PriorityMode.INACTIVE.value
-            self._state.perk8_click_max = None
-            return
-
-        if self._discord_commands_blocked():
-            self._pending_perk8_refresh = True
-            return
-
-        shifthour = self._mudae_shifthour()
-        daily = self._get_daily_resets()
-        record = load_perk8_record(daily)
-        record = refresh_exhausted_if_refill_passed(record, shifthour=shifthour)
-        self._save_daily_resets(save_perk8_record(daily, record))
-
-        if should_skip_ohu8_until_refill(record, shifthour=shifthour):
-            mode = apply_cached_perk8(record)
-            self._apply_perk8_mode(mode, record)
-            eta = record.refill_at or "unknown"
-            self._log(
-                f"$ohu8: skipped until refill ({eta}) — "
-                f"cached mode {mode.value}"
-            )
-            self._notify()
-            return
-
-        if not at_startup and not should_query_ohu8_on_refill(record, shifthour=shifthour):
-            mode = apply_cached_perk8(record)
-            self._apply_perk8_mode(mode, record)
-            return
-
-        self._actions.drain_queue()
-        self._state.phase = MacroPhase.CHECKING_TU
-        self._log("Sent $ohu8")
-        self._notify()
-        await self._actions.send_command("ohu8", prefix=self._config.prefix)
-        await asyncio.sleep(_OHU8_SETTLE_SEC)
-        parsed = await self._actions.wait_for_ohu8(timeout=_RESPONSE_TIMEOUT_SEC)
-        if parsed is None:
-            self._log("$ohu8 timeout — using preset budget rules")
-            self._state.perk8_priority_mode = Perk8PriorityMode.ACTIVE.value
-            self._state.phase = MacroPhase.IDLE
-            self._notify()
-            return
-
-        record, mode = update_record_from_ohu8(
-            record, parsed.fields, shifthour=shifthour
-        )
-        refresh_exhausted_if_refill_passed(record, shifthour=shifthour)
-        self._save_daily_resets(save_perk8_record(daily, record))
-        self._apply_perk8_mode(mode, record)
-        self._pending_perk8_refresh = False
-
-        if mode is Perk8PriorityMode.DONE:
-            self._log("$ohu8: perk 8 clicks done for today — equal kakera clicking")
-        elif mode is Perk8PriorityMode.INSUFFICIENT_POOL:
-            self._log(
-                f"$ohu8: roll pool < {PERK8_MIN_ROLL_POOL} — equal kakera clicking"
-            )
-        else:
-            clicked = record.last_clicked if record.last_clicked is not None else "?"
-            cap = record.last_click_max if record.last_click_max is not None else "?"
-            self._log(f"$ohu8: prioritizing perk 8 · clicked {clicked}/{cap}")
-
-        self._state.phase = MacroPhase.IDLE
-        self._notify()
+        await self._perk8.refresh(at_startup=at_startup)
 
     async def _maybe_refresh_perk8_status(self) -> None:
-        """Re-query ``$ohu8`` when the daily perk-8 refill window has passed."""
-        if not self._config.kakera_reaction.perk_8_budget_mode:
-            return
-        shifthour = self._mudae_shifthour()
-        daily = self._get_daily_resets()
-        record = load_perk8_record(daily)
-        refresh_exhausted_if_refill_passed(record, shifthour=shifthour)
-        self._save_daily_resets(save_perk8_record(daily, record))
-        needs_query = self._pending_perk8_refresh or should_query_ohu8_on_refill(
-            record, shifthour=shifthour
-        )
-        if not needs_query:
-            mode = apply_cached_perk8(record)
-            self._apply_perk8_mode(mode, record)
-            return
-        if self._discord_commands_blocked():
-            self._pending_perk8_refresh = True
-            return
-        await self._refresh_perk8_status()
+        await self._perk8.maybe_refresh()
 
     async def _roll_hourly_normal_segment(
         self,
@@ -525,6 +330,22 @@ class RollCycleEngine:
     def update_config(self, config: MacroConfig) -> None:
         # Copy so live preset edits always replace the running snapshot.
         self._config = MacroConfig.from_dict(config.to_dict())
+        self._ctx.config = self._config
+
+    def update_run_target(
+        self,
+        *,
+        account_id: str,
+        daily_resets_get: Callable[[], dict[str, Any]] | None = None,
+        daily_resets_save: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        """Rebind per-channel persistence after a live server/channel switch."""
+        self._ctx.account_id = account_id
+        self._perk8.update_daily_store(
+            daily_get=daily_resets_get,
+            daily_save=daily_resets_save,
+        )
+        self._reset_roll_stop_tracker()
 
     def stop(self) -> None:
         self._stop.set()
@@ -828,8 +649,13 @@ class RollCycleEngine:
         self._log(f"{log_prefix}→ {name}{ka_text}{spawn_note}")
 
         rl = fields.get("rolls_left")
-        if rl is not None and not fields.get("perk_6"):
-            self._state.rolls_left = int(rl)
+        if not fields.get("perk_6"):
+            # Perk-6 spawns are free, so they never come off a pool.
+            if rl is not None:
+                self._state.rolls_left = int(rl)
+            else:
+                self._consume_roll(us_roll=us_roll)
+        self._notify()
 
         record = RollRecord(
             message_id=snapshot.message_id,
@@ -1108,6 +934,26 @@ class RollCycleEngine:
                     "claim best skipped (not final hour; buttons expire)"
                 )
 
+    def _consume_roll(self, *, us_roll: bool) -> None:
+        """Count one roll off the pool this roll was spending.
+
+        Mudae only prints "N rolls left" in a roll footer near the end of the
+        pool, so without a local decrement the status bar would sit on the last
+        ``$tu`` figure for a whole batch. The next ``$tu`` is authoritative and
+        overwrites this, so a wrong guess here is cosmetic and short-lived.
+
+        ``$us`` rolls come off the stacked bonus first — that is why leftover
+        normal rolls survive a full ``$us`` cycle and have to be spent explicitly.
+        """
+        if us_roll:
+            bonus = self._state.rolls_us_bonus
+            if bonus is not None and bonus > 0:
+                self._state.rolls_us_bonus = bonus - 1
+                return
+        left = self._state.rolls_left
+        if left is not None and left > 0:
+            self._state.rolls_left = left - 1
+
     def _reset_roll_stop_tracker(self) -> None:
         self._sync_roll_stop_config()
         self._roll_stop = RollStopTracker(
@@ -1125,7 +971,27 @@ class RollCycleEngine:
             return True
         if self._roll_stop.saw_warning:
             return False
-        return int(rl) > self._roll_stop.threshold
+        return True
+
+    def _leftover_normal_rolls(self) -> int | None:
+        """Rolls to spend explicitly, or ``None`` to let the stop-at-2 tail decide.
+
+        Mudae announces "N rolls left" in a footer only on the way down past the
+        threshold, so a pool that *starts* at or below it never triggers the tail
+        and the standard pass would roll nothing. That is how one-off bonus rolls
+        (chaos kakera and friends) get stranded: ``$us`` rolls cycle and refill
+        around them forever while the leftovers sit unused. Spend exactly what is
+        left instead.
+        """
+        self._sync_roll_stop_config()
+        rl = self._state.rolls_left
+        if rl is None or int(rl) <= 0:
+            return None
+        if self._roll_stop.tail_remaining is not None and self._roll_stop.tail_remaining > 0:
+            return None
+        if int(rl) <= self._roll_stop.threshold:
+            return int(rl)
+        return None
 
     def _check_us_stop(self) -> str | None:
         rules = self._config.kakera_rules_for_roll(us_roll=True)
@@ -1327,15 +1193,24 @@ class RollCycleEngine:
                         continue
 
                     if self._should_roll_normal_in_us_mode():
-                        self._log(
-                            f"$us mode: {normal_rolls} normal roll(s) — "
-                            "standard macro rules"
-                        )
+                        leftover = self._leftover_normal_rolls()
+                        if leftover is not None:
+                            self._log(
+                                f"$us mode: {leftover} leftover normal roll(s) — "
+                                "using them before adding $us rolls"
+                            )
+                        else:
+                            self._log(
+                                f"$us mode: {normal_rolls} normal roll(s) — "
+                                "standard macro rules"
+                            )
                         segment_start = len(session_records)
                         done, claimed = await self._run_normal_roll_segment(
                             cmd,
                             session_records,
                             roll_index,
+                            respect_roll_stop=leftover is None,
+                            max_rolls=leftover,
                         )
                         roll_index += done
                         claimed_any = claimed_any or claimed
@@ -1560,75 +1435,26 @@ class RollCycleEngine:
         return True, roll_timeouts
 
     def _seconds_until_rolls_reset(self) -> float:
-        """Wall-clock seconds until the next hourly rolls reset from the last ``$tu``."""
-        reset_m = self._state.rolls_reset_minutes
-        if reset_m is None:
-            return 0.0
-        return max(0.0, reset_m * 60.0 + _ROLLS_RESET_BUFFER_SEC)
+        return seconds_until_rolls_reset(self._state.rolls_reset_minutes)
 
     def _seconds_until_perk8_refresh(self) -> float | None:
-        """Seconds until the stored perk-8 daily refill, or ``0`` if it just passed.
-
-        Returns ``None`` when no timed perk-8 wake is needed during a long sleep
-        (normal active mode — do not spam ``$ohu8`` every second).
-        """
-        if not self._config.kakera_reaction.perk_8_budget_mode:
-            return None
-        daily = self._get_daily_resets()
-        record = refresh_exhausted_if_refill_passed(load_perk8_record(daily))
-        if not record.clicks_exhausted or not record.refill_at:
-            return None
-        try:
-            refill_at = dt.datetime.fromisoformat(
-                record.refill_at.replace("Z", "+00:00")
-            )
-        except ValueError:
-            return None
-        now = dt.datetime.now(dt.timezone.utc)
-        if now >= refill_at:
-            return 0.0
-        return (refill_at - now).total_seconds()
+        return self._perk8.seconds_until_refill()
 
     async def _sleep_interruptible(self, seconds: float) -> bool:
-        """Sleep up to ``seconds``. Returns False if the macro was stopped."""
-        remaining = max(0.0, seconds)
-        while remaining > 0:
-            if self._stop.is_set():
-                return False
-            step = min(remaining, _STOP_CHECK_SEC)
-            await asyncio.sleep(step)
-            remaining -= step
-        return True
+        return await sleep_interruptible(seconds, ctx=self._ctx)
 
     async def _wait_for_scheduled_wake(self, seconds: float) -> bool:
-        """Sleep until a deadline, waking early for perk-8 refresh if needed."""
-        remaining = max(0.0, seconds)
-        while remaining > 0:
-            if self._stop.is_set():
-                return False
-            perk8_sec = self._seconds_until_perk8_refresh()
-            if (
-                perk8_sec is not None
-                and perk8_sec <= 0
-                and not self._discord_commands_blocked()
-            ):
-                await self._maybe_refresh_perk8_status()
-            elif perk8_sec is not None and perk8_sec <= 0:
-                self._pending_perk8_refresh = True
-            step = min(remaining, _STOP_CHECK_SEC)
-            if perk8_sec is not None and 0 < perk8_sec < step:
-                step = min(step, perk8_sec)
-            await asyncio.sleep(step)
-            remaining -= step
-            if (
-                perk8_sec is not None
-                and 0 < perk8_sec <= step
-                and not self._discord_commands_blocked()
-            ):
-                await self._maybe_refresh_perk8_status()
-            elif perk8_sec is not None and 0 < perk8_sec <= step:
-                self._pending_perk8_refresh = True
-        return True
+        """Sleep until a deadline, waking early for a perk-8 refresh if one is due.
+
+        A refresh that lands while the gateway is down is deferred inside
+        ``Perk8Runtime.maybe_refresh``, so this loop needs no connection check.
+        """
+        return await wait_for_scheduled_wake(
+            seconds,
+            ctx=self._ctx,
+            wake_hint=self._perk8.seconds_until_refill,
+            on_wake=self._perk8.maybe_refresh,
+        )
 
     async def _wait_for_rolls_reset(self, margin: int) -> bool:
         """Pause until the hourly rolls reset is no longer imminent.
