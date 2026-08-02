@@ -1,4 +1,18 @@
-"""Persist app configuration (accounts, presets, targets, servers)."""
+"""Persist app configuration locally in ``data/settings.json`` (gitignored).
+
+This file is never committed; each machine keeps its own copy. Loaded on startup
+and written by ``save_app_settings()`` from ``gui/bridge.py``.
+
+Typical top-level keys:
+
+- ``accounts`` — Discord tokens and account metadata
+- ``presets`` / ``active_preset_id`` — macro roll/claim presets
+- ``mudae_settings_presets`` / ``default_mudae_settings_preset_id`` — Mudae
+  server ``$settings`` templates (Servers → Settings presets tab)
+- ``servers`` / ``active_server_id`` / ``active_channel_id`` — server profiles;
+  each channel may store fetched ``settings`` and ``bonus`` snapshots
+- ``targets`` — per (account, channel) run bindings
+"""
 
 from __future__ import annotations
 

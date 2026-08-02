@@ -868,18 +868,25 @@ def test_parse_settings_full():
     assert result.fields["setkakerabonus"] == 100
     assert result.fields["setspherebonus"] == 100
     assert result.fields["gamemode"] == 2
-    assert "7,000 $wa" in result.fields["servlimroul"]
+    assert result.fields["servlimroul"] == {
+        "wa": 7000,
+        "ha": 7000,
+        "wg": 5000,
+        "hg": 5000,
+    }
     assert result.fields["channelinstance"] == 1
     assert result.fields["toggleslash"] is True
     assert result.fields["toggleclaimrank"] is True
     assert result.fields["togglelikerank"] is True
     assert result.fields["togglerolls"] == "claims and likes"
+    assert result.fields["toggleclaimrolls"] is True
+    assert result.fields["togglelikerolls"] is True
     assert result.fields["removecopylimit"] is False
-    assert result.fields["togglebutton"] == "for all your rolls"
+    assert result.fields["togglebutton"] == 2
     assert result.fields["claimreact"] is False
     assert result.fields["haremlimit"] == 12000
-    assert result.fields["togglesnipe"] == 0
-    assert result.fields["togglekakerasnipe"] == 0
+    assert result.fields["togglesnipe"] == {"mode": 0, "seconds": None}
+    assert result.fields["togglekakerasnipe"] == {"mode": 0, "seconds": None}
     assert result.fields["togglespheretrade"] is True
 
 

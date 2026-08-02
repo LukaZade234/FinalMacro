@@ -14,6 +14,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, QTimer, QUrl, Signal, Slot
 
 from gui.accounts import AccountStore
+from gui.mudae_settings_presets import MudaeSettingsPresetStore
 from gui.presets import PresetStore
 from gui.run_target import resolve_run_target
 from gui.server_profiles import ServerProfileStore
@@ -24,6 +25,7 @@ from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
+from macro.settings_apply import SettingsApplyRunner
 from macro.us_stop import UsModeStopOptions
 from macro.sphere_game import OhSphereGame
 from macro.oc_game import OcSphereGame
@@ -32,6 +34,20 @@ from macro.minigames import PlayAllMinigames
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
+from mudae.parsers.settings_normalize import normalize_settings_fields
+from mudae.settings_commands import (
+    ESSENTIAL_APPLY_FIELDS,
+    FIELD_GROUPS,
+    compliance_status,
+    diff_settings,
+)
+from mudae.settings_catalog import (
+    CATALOG_BY_FIELD,
+    catalog_to_client_dict,
+    coerce_editor_value,
+    fields_to_display_dict,
+    merge_preset_fields,
+)
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
@@ -121,6 +137,8 @@ class AppBridge(QObject):
     kakeraChanged = Signal()
     spheresChanged = Signal()
     keysChanged = Signal()
+    mudaeSettingsPresetsChanged = Signal()
+    settingsApplyChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -131,6 +149,8 @@ class AppBridge(QObject):
         self._accounts.load_from_settings(saved)
         self._presets = PresetStore()
         self._presets.load_from_settings(saved)
+        self._mudae_settings_presets = MudaeSettingsPresetStore()
+        self._mudae_settings_presets.load_from_settings(saved)
         self._targets = TargetStore()
         self._targets.load_from_settings(saved)
         self._sync_initial_target()
@@ -157,6 +177,9 @@ class AppBridge(QObject):
         self._oq_running = False
         self._minigames_running = False
         self._minigame_availability: dict[str, int] = {}
+        self._settings_apply_running = False
+        self._settings_apply_log: list[str] = []
+        self._settings_apply_groups: frozenset[str] | None = None
         self._notification_standby = False
         self._servers_emit_pending = False
         self._config_emit_pending = False
@@ -354,6 +377,30 @@ class AppBridge(QObject):
     @Property(str, constant=False, notify=configChanged)
     def presetsJson(self) -> str:
         return json.dumps(self._presets.to_client_dict())
+
+    @Property(str, constant=False, notify=mudaeSettingsPresetsChanged)
+    def mudaeSettingsPresetsJson(self) -> str:
+        return json.dumps(self._mudae_settings_presets.to_client_dict())
+
+    @Property(str, constant=False, notify=settingsApplyChanged)
+    def settingsApplyLogText(self) -> str:
+        return "\n".join(self._settings_apply_log)
+
+    @Property(bool, constant=False, notify=settingsApplyChanged)
+    def settingsApplyRunning(self) -> bool:
+        return self._settings_apply_running
+
+    @Property(str, constant=True)
+    def mudaeSettingsCatalogJson(self) -> str:
+        return json.dumps(catalog_to_client_dict())
+
+    @Property(str, constant=False, notify=settingsApplyChanged)
+    def mudaeSettingsFieldGroupsJson(self) -> str:
+        groups: dict[str, list[str]] = {}
+        for field, group in FIELD_GROUPS.items():
+            if field in ESSENTIAL_APPLY_FIELDS:
+                groups.setdefault(group, []).append(field)
+        return json.dumps(groups)
 
     @Property(str, constant=False, notify=configChanged)
     def runTargetLabel(self) -> str:
@@ -917,6 +964,7 @@ class AppBridge(QObject):
         save_app_settings(
             accounts=self._accounts.to_settings_fragment(),
             presets=self._presets.to_settings_fragment(),
+            mudae_settings=self._mudae_settings_presets.to_settings_fragment(),
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
             run_ui={
@@ -2128,6 +2176,290 @@ class AppBridge(QObject):
                 )
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    def _notify_mudae_settings_presets(self) -> None:
+        self.mudaeSettingsPresetsChanged.emit()
+
+    def _append_settings_apply_log(self, line: str) -> None:
+        self._settings_apply_log.append(line)
+        if len(self._settings_apply_log) > 200:
+            del self._settings_apply_log[: len(self._settings_apply_log) - 200]
+        self.settingsApplyChanged.emit()
+
+    def _clear_settings_apply_log(self) -> None:
+        self._settings_apply_log.clear()
+        self.settingsApplyChanged.emit()
+
+    def _channel_settings_bundle(
+        self,
+        channel_profile_id: str,
+    ) -> tuple[Any, Any] | None:
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        if not found:
+            return None
+        _server, channel = found
+        return channel, normalize_settings_fields(dict(channel.settings or {}))
+
+    @Slot(str, result=str)
+    def addMudaeSettingsPreset(self, name: str) -> str:
+        preset_id = self._mudae_settings_presets.add_preset(name.strip() or "Preset")
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return preset_id
+
+    @Slot(str, result=bool)
+    def removeMudaeSettingsPreset(self, preset_id: str) -> bool:
+        removed = self._mudae_settings_presets.remove_preset(preset_id)
+        if removed:
+            self._notify_mudae_settings_presets()
+            self._persist()
+        return removed
+
+    @Slot(str, str, result=str)
+    def duplicateMudaeSettingsPreset(self, preset_id: str, new_name: str) -> str:
+        source = self._mudae_settings_presets.find(preset_id)
+        if source is None:
+            return ""
+        new_id = self._mudae_settings_presets.add_preset(
+            new_name.strip() or f"{source.name} copy",
+            copy_from=preset_id,
+        )
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return new_id
+
+    @Slot(str, str, result=str)
+    def saveChannelSettingsAsPreset(self, channel_profile_id: str, name: str) -> str:
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        if bundle is None:
+            return ""
+        _channel, settings = bundle
+        if not settings:
+            return ""
+        preset_id = self._mudae_settings_presets.add_preset(
+            name.strip() or "From channel",
+            fields=settings,
+            created_from_channel_id=channel_profile_id,
+        )
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return preset_id
+
+    @Slot(str, result=str)
+    def formatChannelSettingsDisplayJson(self, channel_profile_id: str) -> str:
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        if bundle is None:
+            return json.dumps({"sections": [], "field_count": 0})
+        _channel, settings = bundle
+        return json.dumps(fields_to_display_dict(settings))
+
+    @Slot(str, result=str)
+    def getMudaeSettingsPresetEditorJson(self, preset_id: str) -> str:
+        preset = self._mudae_settings_presets.find(preset_id)
+        if preset is None:
+            return json.dumps({"sections": [], "preset_id": "", "preset_name": ""})
+        display = fields_to_display_dict(preset.fields)
+        display["preset_id"] = preset.id
+        display["preset_name"] = preset.name
+        return json.dumps(display)
+
+    @Slot(str, str, str, result=bool)
+    def updateMudaeSettingsPresetField(
+        self,
+        preset_id: str,
+        field: str,
+        value_json: str,
+    ) -> bool:
+        preset = self._mudae_settings_presets.find(preset_id)
+        if preset is None or field not in CATALOG_BY_FIELD:
+            return False
+        try:
+            raw = json.loads(value_json)
+        except json.JSONDecodeError:
+            return False
+        if raw is None:
+            preset.fields.pop(field, None)
+        else:
+            preset.fields[field] = coerce_editor_value(field, raw)
+        preset.fields = normalize_settings_fields(dict(preset.fields))
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return True
+
+    @Slot(str, str, result=bool)
+    def copyChannelSettingsToMudaePreset(
+        self,
+        channel_profile_id: str,
+        preset_id: str,
+    ) -> bool:
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        preset = self._mudae_settings_presets.find(preset_id)
+        if bundle is None or preset is None:
+            return False
+        _channel, settings = bundle
+        if not settings:
+            return False
+        preset.fields = merge_preset_fields(preset.fields, settings)
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return True
+
+    @Slot(str, str, result=bool)
+    def copyMudaePresetToPreset(self, source_id: str, target_id: str) -> bool:
+        source = self._mudae_settings_presets.find(source_id)
+        target = self._mudae_settings_presets.find(target_id)
+        if source is None or target is None or source_id == target_id:
+            return False
+        target.fields = normalize_settings_fields(dict(source.fields))
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return True
+
+    @Slot(str, result=bool)
+    def setDefaultMudaeSettingsPreset(self, preset_id: str) -> bool:
+        if preset_id not in self._mudae_settings_presets.presets:
+            return False
+        self._mudae_settings_presets.set_default(preset_id)
+        self._notify_mudae_settings_presets()
+        self._persist()
+        return True
+
+    @Slot(str, str, result=bool)
+    def renameMudaeSettingsPreset(self, preset_id: str, new_name: str) -> bool:
+        result = self._mudae_settings_presets.rename_preset(preset_id, new_name)
+        if result:
+            self._notify_mudae_settings_presets()
+            self._persist()
+        return result is not None
+
+    @Slot(str, str, result=str)
+    def getChannelComplianceStatus(self, channel_profile_id: str, preset_id: str) -> str:
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        preset = self._mudae_settings_presets.find(preset_id)
+        if bundle is None or preset is None:
+            return "partial"
+        _channel, current = bundle
+        if not current:
+            return "partial"
+        return compliance_status(current, preset.fields)
+
+    @Slot(str, str, result=str)
+    def diffMudaeSettingsPreset(self, channel_profile_id: str, preset_id: str) -> str:
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        preset = self._mudae_settings_presets.find(preset_id)
+        if bundle is None or preset is None:
+            return json.dumps({"items": [], "command_count": 0})
+        _channel, current = bundle
+        items = diff_settings(
+            current,
+            preset.fields,
+            groups=self._settings_apply_groups,
+        )
+        commands = [item.command for item in items if item.command]
+        return json.dumps(
+            {
+                "items": [item.to_dict() for item in items],
+                "command_count": len(commands),
+            }
+        )
+
+    @Slot(str)
+    def setMudaeSettingsApplyGroups(self, groups_json: str) -> None:
+        try:
+            parsed = json.loads(groups_json or "[]")
+        except json.JSONDecodeError:
+            self._settings_apply_groups = None
+            return
+        if not parsed:
+            self._settings_apply_groups = None
+            return
+        self._settings_apply_groups = frozenset(str(g) for g in parsed if g)
+
+    @Slot(str, str, bool)
+    def applyMudaeSettingsPreset(
+        self,
+        channel_profile_id: str,
+        preset_id: str,
+        dry_run: bool,
+    ) -> None:
+        if self._settings_apply_running:
+            self._set_status("Settings apply already running")
+            return
+        if not self._loop or not self._actions or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._engine and self._engine.is_running:
+            self._set_status("Stop the macro before applying settings")
+            return
+
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        preset = self._mudae_settings_presets.find(preset_id)
+        if bundle is None or preset is None:
+            self._set_status("Channel or preset not found")
+            return
+        channel, _cached_settings = bundle
+        if channel.id != self._run_channel_profile_id:
+            self._set_status("Select this channel on Run → Run target first")
+            return
+        if str(self._monitor.channel_id) != str(channel.channel_id):
+            self._set_status("Connected channel does not match profile")
+            return
+
+        self._clear_settings_apply_log()
+        self._settings_apply_running = True
+        self.settingsApplyChanged.emit()
+        prefix = str(channel.settings.get("prefix") or self._macro_config.prefix or "$")
+
+        async def _run() -> None:
+            runner = SettingsApplyRunner(
+                self._actions,
+                log=self._append_settings_apply_log,
+                prefix=prefix,
+                stop_check=lambda: not self._settings_apply_running,
+            )
+            try:
+                current = normalize_settings_fields(dict(channel.settings or {}))
+                if not current:
+                    current = await runner.fetch_current_settings()
+                premium = current.get("server_premium")
+                result = await runner.apply(
+                    preset.fields,
+                    current=current,
+                    dry_run=dry_run,
+                    groups=self._settings_apply_groups,
+                    server_premium=int(premium) if premium is not None else None,
+                )
+                if not dry_run and result.verified_fields:
+                    channel.settings = dict(result.verified_fields)
+                    timer = result.verified_fields.get("settimer")
+                    if self._engine is not None and timer is not None:
+                        self._engine.apply_settings_fields(result.verified_fields)
+                    self._notify_servers()
+                    self._persist()
+                summary = (
+                    f"Dry run: {result.applied_count} command(s)"
+                    if dry_run
+                    else f"Applied {result.applied_count} command(s)"
+                )
+                if result.remaining_mismatches:
+                    summary += f"; still mismatched: {', '.join(result.remaining_mismatches)}"
+                self._on_status(summary)
+            except Exception as exc:  # noqa: BLE001
+                self._append_settings_apply_log(f"Error: {exc}")
+                self._on_status(f"Settings apply failed: {exc}")
+            finally:
+                self._settings_apply_running = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_emit_settings_apply_done",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def _emit_settings_apply_done(self) -> None:
+        self.settingsApplyChanged.emit()
 
     @Slot()
     def fetchSettings(self) -> None:

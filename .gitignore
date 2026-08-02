@@ -1,8 +1,13 @@
 data/settings.json
 data/channel_cache.json
 data/*_log.json
+data/settings_commands_capture.json
 data/session_logs/*
 !data/session_logs/.gitkeep
+
+# Live Mudae command capture / parsing audit (local machine only)
+docs/MUDAE_*.md
+
 .venv/
 __pycache__/
 *.pyc

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mudae.parsers.settings_normalize import normalize_settings_fields
 from mudae.types import MessageKind, ParseResult
 
 _BULLET_RE = re.compile(r"^[·•]\s*(.+)$", re.MULTILINE)
@@ -36,6 +37,8 @@ SETTINGS_FIELD_KEYS: tuple[str, ...] = (
     "toggleclaimrank",
     "togglelikerank",
     "togglerolls",
+    "toggleclaimrolls",
+    "togglelikerolls",
     "togglensfw",
     "toggledisturbing",
     "togglechildtag",
@@ -177,6 +180,7 @@ def parse_settings(content: str) -> ParseResult:
     if parsed_lines == 0:
         warnings.append("No settings bullet lines matched")
 
+    fields = normalize_settings_fields(fields)
     summary = _build_summary(fields)
     return ParseResult(
         kind=MessageKind.SETTINGS,

@@ -51,7 +51,7 @@ Re-run `./install-desktop.sh` if you move the project to a different folder (the
 3. **Presets** — configure roll rules, kakera colors, `$us` behavior, etc.
 4. **Run** — pick account, channel, and preset, then connect and start.
 
-Settings are saved to `data/settings.json` (gitignored). Session logs go under `data/session_logs/`.
+Settings are saved to `data/settings.json` (gitignored). That single file holds accounts, macro presets, Mudae settings presets, server/channel profiles (including fetched `$settings` / `$bonus`), and run targets. Session logs go under `data/session_logs/`.
 
 ## Sharing with friends
 
