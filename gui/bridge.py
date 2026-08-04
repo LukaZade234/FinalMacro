@@ -11,7 +11,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    QObject,
+    Property,
+    Q_ARG,
+    QFileSystemWatcher,
+    QMetaObject,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QGuiApplication
 
 from gui.accounts import AccountStore
@@ -19,7 +30,7 @@ from gui.mudae_settings_presets import MudaeSettingsPresetStore
 from gui.presets import PresetStore
 from gui.run_target import resolve_run_target
 from gui.server_profiles import ServerProfileStore
-from gui.settings import load_settings, save_app_settings
+from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
 from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
 from macro.actions import DiscordActions
@@ -54,6 +65,7 @@ from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 _UPDATE_STARTUP_DELAY_MS = 4000
+_SETTINGS_RELOAD_DEBOUNCE_MS = 400
 
 _PROFILE_META_KEYS = frozenset({
     "command",
@@ -146,17 +158,11 @@ class AppBridge(QObject):
         super().__init__()
         saved = load_settings()
         self._profiles = ServerProfileStore()
-        self._profiles.load_from_settings(saved)
         self._accounts = AccountStore()
-        self._accounts.load_from_settings(saved)
         self._presets = PresetStore()
-        self._presets.load_from_settings(saved)
         self._mudae_settings_presets = MudaeSettingsPresetStore()
-        self._mudae_settings_presets.load_from_settings(saved)
         self._targets = TargetStore()
-        self._targets.load_from_settings(saved)
-        self._sync_initial_target()
-        self._macro_config = self._presets.active_preset()
+        self._apply_saved_settings(saved, initial=True)
         self._macro_state = AccountState()
         self._status = "Disconnected"
         self._connected = False
@@ -193,14 +199,16 @@ class AppBridge(QObject):
         self._run_account_id: str = ""
         self._run_channel_profile_id: str = ""
         self._run_token: str = ""
-        us_opts_raw = saved.get("us_mode_options")
-        self._us_mode_options = UsModeStopOptions.from_dict(
-            us_opts_raw if isinstance(us_opts_raw, dict) else None
-        )
-        # NOTE: save_app_settings() flattens every fragment into the top-level
-        # dict (the kwarg name is just a label), so these are read from ``saved``
-        # directly rather than a nested "run_ui" key.
-        self._minimize_to_tray = bool(saved.get("minimize_to_tray", False))
+        self._settings_file_mtime: float | None = None
+        self._record_settings_file_mtime()
+        self._settings_reload_timer = QTimer(self)
+        self._settings_reload_timer.setSingleShot(True)
+        self._settings_reload_timer.setInterval(_SETTINGS_RELOAD_DEBOUNCE_MS)
+        self._settings_reload_timer.timeout.connect(self._reload_settings_from_disk)
+        self._settings_watcher = QFileSystemWatcher(self)
+        self._settings_watcher.fileChanged.connect(self._on_settings_file_changed)
+        self._settings_watcher.directoryChanged.connect(self._on_settings_directory_changed)
+        self._ensure_settings_watch()
         self._tray_available = False
         self._tray: Any = None
 
@@ -209,9 +217,6 @@ class AppBridge(QObject):
         self._update_pulling = False
         self._update_pull_message = ""
         self._update_pull_ok = False
-        self._update_dismissed_sha = str(saved.get("update_dismissed_sha") or "")
-        self._update_notified_sha = str(saved.get("update_notified_sha") or "")
-        self._update_auto_check = bool(saved.get("update_auto_check_enabled", True))
         self._update_timer = QTimer(self)
         self._update_timer.timeout.connect(self.checkForUpdates)
         if self._update_auto_check:
@@ -444,6 +449,96 @@ class AppBridge(QObject):
                 channel.id,
                 self._presets.active_preset_id,
             )
+
+    def _apply_saved_settings(self, saved: dict[str, Any], *, initial: bool = False) -> None:
+        """Load persisted stores and UI prefs from a settings dict."""
+        self._profiles.load_from_settings(saved)
+        self._accounts.load_from_settings(saved)
+        self._presets.load_from_settings(saved)
+        self._mudae_settings_presets.load_from_settings(saved)
+        self._targets.load_from_settings(saved)
+        self._sync_initial_target()
+        self._macro_config = self._presets.active_preset()
+
+        us_opts_raw = saved.get("us_mode_options")
+        self._us_mode_options = UsModeStopOptions.from_dict(
+            us_opts_raw if isinstance(us_opts_raw, dict) else None
+        )
+        # NOTE: save_app_settings() flattens every fragment into the top-level
+        # dict (the kwarg name is just a label), so these are read from ``saved``
+        # directly rather than a nested "run_ui" key.
+        self._minimize_to_tray = bool(saved.get("minimize_to_tray", False))
+        self._update_dismissed_sha = str(saved.get("update_dismissed_sha") or "")
+        self._update_notified_sha = str(saved.get("update_notified_sha") or "")
+        auto_check = bool(saved.get("update_auto_check_enabled", True))
+        if initial:
+            self._update_auto_check = auto_check
+        elif auto_check != self._update_auto_check:
+            self._update_auto_check = auto_check
+            self.autoUpdateCheckChanged.emit()
+            if auto_check:
+                self._update_timer.start(_UPDATE_CHECK_INTERVAL_MS)
+            else:
+                self._update_timer.stop()
+
+        if not initial:
+            self._sync_engine_config()
+            self.configChanged.emit()
+            self.serversChanged.emit()
+            self.mudaeSettingsPresetsChanged.emit()
+            self.usModeOptionsChanged.emit()
+            self.minimizeToTrayChanged.emit()
+            self.updateStatusChanged.emit()
+
+    def _record_settings_file_mtime(self) -> None:
+        try:
+            self._settings_file_mtime = SETTINGS_PATH.stat().st_mtime
+        except OSError:
+            self._settings_file_mtime = None
+
+    def _ensure_settings_watch(self) -> None:
+        settings_path = str(SETTINGS_PATH)
+        if SETTINGS_PATH.is_file():
+            if settings_path not in self._settings_watcher.files():
+                self._settings_watcher.addPath(settings_path)
+            return
+        directory = str(SETTINGS_PATH.parent)
+        if SETTINGS_PATH.parent.is_dir() and directory not in self._settings_watcher.directories():
+            self._settings_watcher.addPath(directory)
+
+    def _schedule_settings_reload(self) -> None:
+        self._ensure_settings_watch()
+        self._settings_reload_timer.start()
+
+    def _on_settings_file_changed(self, _path: str) -> None:
+        # Some platforms drop the watch after a change; re-register it.
+        self._ensure_settings_watch()
+        self._schedule_settings_reload()
+
+    def _on_settings_directory_changed(self, _path: str) -> None:
+        self._ensure_settings_watch()
+        if SETTINGS_PATH.is_file():
+            self._schedule_settings_reload()
+
+    def _reload_settings_from_disk(self) -> None:
+        if not SETTINGS_PATH.is_file():
+            return
+        try:
+            mtime = SETTINGS_PATH.stat().st_mtime
+        except OSError:
+            return
+        if self._settings_file_mtime is not None and mtime == self._settings_file_mtime:
+            return
+        saved = load_settings()
+        self._apply_saved_settings(saved)
+        self._settings_file_mtime = mtime
+        self._set_status("Reloaded settings from disk")
+
+    @Slot()
+    def reloadSettingsFromDisk(self) -> None:
+        """Force-reload ``data/settings.json`` (also used by the file watcher)."""
+        self._settings_file_mtime = None
+        self._reload_settings_from_disk()
 
     def _notify_servers(self) -> None:
         # Defer to the next event-loop tick so a value-returning Slot (e.g.
@@ -979,6 +1074,7 @@ class AppBridge(QObject):
                 "update_auto_check_enabled": self._update_auto_check,
             },
         )
+        self._record_settings_file_mtime()
 
     @Slot(bool)
     def setUsStopOnPowerExhausted(self, enabled: bool) -> None:

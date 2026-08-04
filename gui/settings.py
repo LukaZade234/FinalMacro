@@ -1,7 +1,9 @@
 """Persist app configuration locally in ``data/settings.json`` (gitignored).
 
 This file is never committed; each machine keeps its own copy. Loaded on startup
-and written by ``save_app_settings()`` from ``gui/bridge.py``.
+and written by ``save_app_settings()`` from ``gui/bridge.py``. While the app is
+running, ``AppBridge`` watches this file and reloads stores when it changes on
+disk (external editor, sync tool, second instance, etc.).
 
 Typical top-level keys:
 

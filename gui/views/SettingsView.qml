@@ -132,7 +132,7 @@ Item {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "FinalMacro checks the git remote for new commits. Only works for a `git clone` checkout — a downloaded ZIP has no way to check."
+                    text: "FinalMacro checks the git remote for new commits. Only works for a `git clone` checkout — a downloaded ZIP has no way to check. Edits to `data/settings.json` reload automatically while the app is open."
                     color: Theme.fgMuted
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap
@@ -165,6 +165,11 @@ Item {
                         loading: App.updateChecking
                         enabled: !App.updateChecking
                         onClicked: App.checkForUpdates(true)
+                    }
+
+                    ThemedButton {
+                        text: "Reload settings"
+                        onClicked: App.reloadSettingsFromDisk()
                     }
 
                     Label {
