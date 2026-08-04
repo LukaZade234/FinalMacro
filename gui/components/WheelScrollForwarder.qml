@@ -115,6 +115,11 @@ Item {
         return page && page !== nested && scrollFlickable(page, source)
     }
 
+    function handleGlobalWheel(globalX, globalY, source) {
+        var local = root.mapFromGlobal(globalX, globalY)
+        return handleWheel(local.x, local.y, source)
+    }
+
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton

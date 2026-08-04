@@ -153,6 +153,7 @@ class AppBridge(QObject):
     keysChanged = Signal()
     mudaeSettingsPresetsChanged = Signal()
     settingsApplyChanged = Signal()
+    wheelScrollRequested = Signal(float, float, float, float)
 
     def __init__(self) -> None:
         super().__init__()

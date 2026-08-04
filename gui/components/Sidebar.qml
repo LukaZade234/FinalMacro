@@ -77,6 +77,7 @@ Rectangle {
             }
 
             WheelScrollForwarder {
+                id: navWheelForwarder
                 anchors.fill: parent
                 flickable: navScroll.contentItem
                 nestedSearchRoot: navScroll.contentItem
@@ -106,5 +107,17 @@ Rectangle {
                 onClicked: Qt.quit()
             }
         }
+    }
+
+    Component.onCompleted: {
+        var w = Window.window
+        if (w)
+            w.sidebarWheelForwarder = navWheelForwarder
+    }
+
+    Component.onDestruction: {
+        var w = Window.window
+        if (w && w.sidebarWheelForwarder === navWheelForwarder)
+            w.sidebarWheelForwarder = null
     }
 }

@@ -16,6 +16,25 @@ ApplicationWindow {
     color: Theme.bgDark
 
     property int currentPage: 0
+    property var activeWheelForwarder: null
+    property var sidebarWheelForwarder: null
+
+    function dispatchWheelScroll(globalX, globalY, angleDeltaY, pixelDeltaY) {
+        var source = {
+            angleDelta: { y: angleDeltaY },
+            pixelDelta: { y: pixelDeltaY }
+        }
+        if (win.sidebarWheelForwarder) {
+            var sidebarPoint = sidebar.mapFromGlobal(globalX, globalY)
+            if (sidebarPoint.x >= 0 && sidebarPoint.y >= 0
+                && sidebarPoint.x <= sidebar.width && sidebarPoint.y <= sidebar.height) {
+                win.sidebarWheelForwarder.handleGlobalWheel(globalX, globalY, source)
+                return
+            }
+        }
+        if (win.activeWheelForwarder)
+            win.activeWheelForwarder.handleGlobalWheel(globalX, globalY, source)
+    }
 
     onClosing: function(close) {
         if (App.minimizeToTray) {
@@ -51,6 +70,9 @@ ApplicationWindow {
         }
         function onStatusChanged(text) {
             topBar.statusText = text
+        }
+        function onWheelScrollRequested(globalX, globalY, angleDeltaY, pixelDeltaY) {
+            win.dispatchWheelScroll(globalX, globalY, angleDeltaY, pixelDeltaY)
         }
     }
 

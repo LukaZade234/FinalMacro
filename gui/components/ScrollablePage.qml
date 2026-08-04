@@ -38,9 +38,22 @@ Item {
     }
 
     WheelScrollForwarder {
+        id: pageWheel
         anchors.fill: parent
         z: 1
         flickable: scroll.contentItem
         nestedSearchRoot: scroll.contentItem
+    }
+
+    Component.onCompleted: {
+        var w = Window.window
+        if (w)
+            w.activeWheelForwarder = pageWheel
+    }
+
+    Component.onDestruction: {
+        var w = Window.window
+        if (w && w.activeWheelForwarder === pageWheel)
+            w.activeWheelForwarder = null
     }
 }

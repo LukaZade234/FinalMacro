@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from gui.bridge import AppBridge
 from gui.tray import TrayController
+from gui.wheel_filter import WindowWheelFilter
 
 
 def main() -> None:
@@ -41,6 +42,8 @@ def main() -> None:
         set_icon = getattr(window, "setIcon", None)
         if callable(set_icon):
             set_icon(window_icon)
+
+    window.installEventFilter(WindowWheelFilter(bridge))
 
     tray = TrayController(
         app,
