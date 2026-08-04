@@ -256,9 +256,7 @@ Item {
                 }
 
                 // ---- Claims ----
-                ScrollView {
-                    clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ThemedScrollView {
                     contentWidth: availableWidth
                     ColumnLayout {
                         width: parent.width
@@ -316,10 +314,8 @@ Item {
                 }
 
                 // ---- Reactions ----
-                ScrollView {
+                ThemedScrollView {
                     id: kakeraStepScroll
-                    clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
                     contentWidth: availableWidth
                     ColumnLayout {
                         width: kakeraStepScroll.availableWidth
@@ -390,9 +386,7 @@ Item {
                 }
 
                 // ---- $us ----
-                ScrollView {
-                    clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                ThemedScrollView {
                     contentWidth: availableWidth
                     UsRollPanel {
                         width: parent.width

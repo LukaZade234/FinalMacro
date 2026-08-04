@@ -157,9 +157,8 @@ Item {
         }
     }
 
-    ColumnLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 12
 
         UpdateBanner {
             Layout.fillWidth: true
@@ -228,8 +227,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.minimumHeight: 160
+            Layout.minimumHeight: 320
             spacing: 16
 
             PanelCard {
@@ -238,12 +236,10 @@ Item {
                 Layout.maximumWidth: 288
                 Layout.minimumWidth: 220
                 Layout.fillWidth: false
-                Layout.fillHeight: true
-                fillContentVertically: true
+                Layout.alignment: Qt.AlignTop
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
                     spacing: 8
 
                     MacroControlBar {
@@ -261,43 +257,34 @@ Item {
                         color: Theme.border
                     }
 
-                    ScrollView {
-                        id: controlsScroll
+                    MacroControlBar {
+                        id: actionBar
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-                        MacroControlBar {
-                            id: actionBar
-                            width: controlsScroll.availableWidth
-                            actionsOnly: true
-                            onRunTuClicked: App.runTu()
-                            onRunUsCheckClicked: App.runUsCheck()
-                            onStartClicked: App.startMacro()
-                            onStopClicked: App.stopMacro()
-                            onPlayOhClicked: App.playOhSphere()
-                            onPlayOcClicked: App.playOcSphere()
-                            onPlayOqClicked: App.playOqSphere()
-                            onPlayAllMinigamesClicked: App.playAllMinigames()
-                            onPlayUsClicked: App.startUsMode()
-                        }
+                        actionsOnly: true
+                        onRunTuClicked: App.runTu()
+                        onRunUsCheckClicked: App.runUsCheck()
+                        onStartClicked: App.startMacro()
+                        onStopClicked: App.stopMacro()
+                        onPlayOhClicked: App.playOhSphere()
+                        onPlayOcClicked: App.playOcSphere()
+                        onPlayOqClicked: App.playOqSphere()
+                        onPlayAllMinigamesClicked: App.playAllMinigames()
+                        onPlayUsClicked: App.startUsMode()
                     }
                 }
             }
 
             PanelCard {
                 title: "Activity"
-                fillContentVertically: true
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.preferredHeight: 360
+                Layout.minimumHeight: 200
                 Layout.minimumWidth: 260
-                Layout.minimumHeight: 120
 
                 ActivityLogPanel {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 300
+                    Layout.minimumHeight: 160
                     entries: runRoot.activityEntries
                 }
             }

@@ -41,10 +41,9 @@ Rectangle {
             }
         }
 
-        ScrollView {
+        ThemedScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             Column {

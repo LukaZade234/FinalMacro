@@ -419,16 +419,12 @@ Item {
                     }
                 }
 
-                ScrollView {
+                ListView {
+                    id: soulmateList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-                    ListView {
-                        id: soulmateList
-                        width: parent.width
-                        model: filteredEntries()
+                    model: filteredEntries()
                         spacing: 2
 
                         delegate: Rectangle {
@@ -502,7 +498,6 @@ Item {
                             font.pixelSize: 12
                         }
                     }
-                }
             }
         }
     }

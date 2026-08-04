@@ -28,11 +28,9 @@ Item {
     onChannelProfileIdChanged: refresh()
     Component.onCompleted: refresh()
 
-    ScrollView {
+    ThemedScrollView {
         id: displayScroll
         anchors.fill: parent
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
             width: displayScroll.availableWidth

@@ -74,14 +74,18 @@ Item {
         }
     }
 
-    RowLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 16
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 16
 
         PanelCard {
             Layout.preferredWidth: 220
             Layout.maximumWidth: 260
-            Layout.fillHeight: true
+            Layout.minimumHeight: 360
+            Layout.alignment: Qt.AlignTop
             title: "Accounts"
             titleSize: 14
             fillContentVertically: true
@@ -115,8 +119,8 @@ Item {
                 ListView {
                     id: accountList
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.minimumHeight: 80
+                    Layout.preferredHeight: 240
+                    Layout.minimumHeight: 120
                     clip: true
                     model: accounts().length
                     currentIndex: selectedIndex
@@ -150,8 +154,7 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.maximumHeight: detailsCol.implicitHeight + 48
+            Layout.maximumWidth: 560
             Layout.alignment: Qt.AlignTop
             title: currentAccount() ? currentAccount().name : "Account details"
             titleSize: 14
@@ -236,6 +239,7 @@ Item {
                     onClicked: saveCurrent()
                 }
             }
+        }
         }
     }
 

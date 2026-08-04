@@ -131,16 +131,21 @@ Item {
         refreshPresets()
     }
 
-    RowLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 12
-        clip: true
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.minimumHeight: 640
+            spacing: 12
+            clip: true
 
         PanelCard {
             Layout.preferredWidth: 200
             Layout.maximumWidth: 220
             Layout.minimumWidth: 160
-            Layout.fillHeight: true
+            Layout.minimumHeight: 520
+            Layout.alignment: Qt.AlignTop
             title: "Presets"
             titleSize: 14
             fillContentVertically: true
@@ -214,15 +219,14 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
-            Layout.fillHeight: true
             Layout.minimumWidth: 240
+            Layout.minimumHeight: 520
+            Layout.alignment: Qt.AlignTop
             title: editorData.preset_name || "Preset commands"
             titleSize: 14
-            fillContentVertically: true
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
                 spacing: 8
 
                 ThemedTextField {
@@ -324,12 +328,11 @@ Item {
                     }
                 }
 
-                ScrollView {
+                ThemedScrollView {
                     id: editorScroll
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    Layout.preferredHeight: 360
+                    Layout.minimumHeight: 200
 
                     ColumnLayout {
                         id: editorColumn
@@ -376,14 +379,13 @@ Item {
             Layout.preferredWidth: 260
             Layout.maximumWidth: 300
             Layout.minimumWidth: 220
-            Layout.fillHeight: true
+            Layout.minimumHeight: 520
+            Layout.alignment: Qt.AlignTop
             title: "Apply to server"
             titleSize: 14
-            fillContentVertically: true
 
             ColumnLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
                 spacing: 8
 
                 Label {
@@ -441,11 +443,9 @@ Item {
                     wrapMode: Text.WordWrap
                 }
 
-                ScrollView {
+                ThemedScrollView {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 120
-                    clip: true
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                     ColumnLayout {
                         width: parent.width
                         spacing: 4
@@ -475,11 +475,10 @@ Item {
                     }
                 }
 
-                ScrollView {
+                ThemedScrollView {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    Layout.preferredHeight: 160
+                    Layout.minimumHeight: 80
                     TextArea {
                         width: parent.width
                         readOnly: true
@@ -525,6 +524,7 @@ Item {
                 }
             }
         }
+    }
     }
 
     MudaeSettingsSetupWizard {

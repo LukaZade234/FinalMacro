@@ -151,14 +151,19 @@ Item {
         }
     }
 
-    RowLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 12
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.minimumHeight: 640
+            spacing: 12
 
         PanelCard {
             Layout.preferredWidth: 200
             Layout.maximumWidth: 240
-            Layout.fillHeight: true
+            Layout.minimumHeight: 520
+            Layout.alignment: Qt.AlignTop
             title: "Presets"
             titleSize: 14
             fillContentVertically: true
@@ -260,7 +265,7 @@ Item {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.minimumHeight: 520
             spacing: 10
 
             RowLayout {
@@ -302,7 +307,7 @@ Item {
 
             StackLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.minimumHeight: 420
                 currentIndex: presetsRoot.activeSection
 
                 // ---- Rolling ----
@@ -655,6 +660,7 @@ Item {
                 }
             }
         }
+    }
     }
 
     PresetWizard {

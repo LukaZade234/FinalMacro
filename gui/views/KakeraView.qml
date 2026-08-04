@@ -427,16 +427,12 @@ Item {
                     }
                 }
 
-                ScrollView {
+                ListView {
+                    id: kakeraList
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-                    ListView {
-                        id: kakeraList
-                        width: parent.width
-                        model: filteredEntries()
+                    model: filteredEntries()
                         spacing: 2
 
                         delegate: Rectangle {
@@ -523,7 +519,6 @@ Item {
                             font.pixelSize: 12
                         }
                     }
-                }
             }
         }
     }

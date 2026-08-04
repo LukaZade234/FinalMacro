@@ -253,9 +253,8 @@ Item {
         }
     }
 
-    ColumnLayout {
+    ScrollablePage {
         anchors.fill: parent
-        spacing: 10
 
         RowLayout {
             Layout.fillWidth: true
@@ -275,23 +274,21 @@ Item {
 
         StackLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.minimumHeight: 720
             currentIndex: serversRoot.activeSection
             clip: true
 
             Item {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.minimumHeight: 720
 
                 ColumnLayout {
-                    anchors.fill: parent
+                    width: parent.width
                     spacing: 12
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredHeight: Math.max(240, Math.floor(serversRoot.height * 0.45))
-                        Layout.minimumHeight: 220
+                        Layout.minimumHeight: 280
                         spacing: 12
 
                         PanelCard {
@@ -518,8 +515,7 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumHeight: 180
+                        Layout.minimumHeight: 360
                         spacing: 12
 
                         PanelCard {
@@ -545,12 +541,11 @@ Item {
                             titleSize: 13
                             fillContentVertically: true
 
-                            ScrollView {
+                            ThemedScrollView {
                                 id: bonusScroll
                                 Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                clip: true
-                                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                Layout.preferredHeight: 240
+                                Layout.minimumHeight: 160
                                 TextArea {
                                     width: bonusScroll.availableWidth
                                     readOnly: true
@@ -569,7 +564,7 @@ Item {
 
             MudaeSettingsView {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.minimumHeight: 680
             }
         }
     }

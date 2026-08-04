@@ -13,25 +13,16 @@ Item {
 
     property int contentSpacing: 12
     property int bottomPadding: 20
-    readonly property real contentWidth: flick.width
+    readonly property real contentWidth: scroll.availableWidth
 
     default property alias content: contentHost.data
 
-    Flickable {
-        id: flick
+    ThemedScrollView {
+        id: scroll
         anchors.fill: parent
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        flickableDirection: Flickable.VerticalFlick
-        contentWidth: width
-        contentHeight: contentHost.implicitHeight + bottomPadding
-
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-        }
 
         ColumnLayout {
-            width: flick.width
+            width: scroll.availableWidth
             spacing: 0
 
             ColumnLayout {

@@ -49,4 +49,10 @@ Item {
             spacing: 10
         }
     }
+
+    WheelScrollForwarder {
+        anchors.fill: parent
+        z: 1
+        nestedSearchRoot: root
+    }
 }

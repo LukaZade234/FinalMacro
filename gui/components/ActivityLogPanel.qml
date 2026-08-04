@@ -143,13 +143,11 @@ ColumnLayout {
         }
     }
 
-    ScrollView {
+    ThemedScrollView {
         id: logScroll
         Layout.fillWidth: true
         Layout.fillHeight: true
         Layout.minimumHeight: 160
-        clip: true
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
         TextEdit {
             id: logText

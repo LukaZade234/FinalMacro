@@ -174,12 +174,10 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            ScrollView {
+            ThemedScrollView {
                 width: parent.width
                 height: root.legendHeight
                 visible: root.rowCount > 0
-                clip: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                 Column {
                     width: parent.width
