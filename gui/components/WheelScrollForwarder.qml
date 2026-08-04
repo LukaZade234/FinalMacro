@@ -2,30 +2,34 @@ import QtQuick
 import QtQuick.Controls
 
 // Catches wheel events over non-scrollable controls and scrolls the nearest target.
-// Used on ScrollablePage (full viewport) and standalone scroll panels (e.g. sidebar).
-MouseArea {
+// MouseArea with scrollGestureEnabled handles VNC / xpra wheel events reliably.
+Item {
     id: root
-    anchors.fill: parent
-    acceptedButtons: Qt.NoButton
-    hoverEnabled: false
 
     property var flickable: null
     property Item nestedSearchRoot: null
     // Match ThemedScrollView.wheelRotationScale (60 px per ±120° notch).
     property real pixelsPerWheelStep: 60
 
-    function wheelDelta(wheel) {
-        if (wheel.angleDelta.y !== 0)
-            return wheel.angleDelta.y * pixelsPerWheelStep / 120
-        if (wheel.pixelDelta.y !== 0)
-            return wheel.pixelDelta.y * 10
-        return 0
+    function wheelDelta(source) {
+        var angleY = 0
+        var pixelY = 0
+        if (source.angleDelta !== undefined)
+            angleY = source.angleDelta.y || 0
+        if (source.pixelDelta !== undefined)
+            pixelY = source.pixelDelta.y || 0
+        if (angleY !== 0)
+            return angleY * pixelsPerWheelStep / 120
+        if (pixelY !== 0)
+            return pixelY * 10
+        // Some VNC servers emit wheel clicks with no delta fields.
+        return pixelsPerWheelStep
     }
 
-    function scrollFlickable(flick, wheel) {
+    function scrollFlickable(flick, source) {
         if (!flick || flick.contentHeight <= flick.height)
             return false
-        var dy = wheelDelta(wheel)
+        var dy = wheelDelta(source)
         if (dy === 0)
             return false
         var maxY = Math.max(0, flick.contentHeight - flick.height)
@@ -56,7 +60,6 @@ MouseArea {
                && mapped.x <= item.width && mapped.y <= item.height
     }
 
-    // Post-order walk so deeper targets (e.g. ListView) come after shallow ScrollViews.
     function collectScrollTargets(item, out) {
         if (!item)
             return
@@ -104,14 +107,23 @@ MouseArea {
         return null
     }
 
-    onWheel: function(wheel) {
-        var nested = nestedFlickableAt(wheel.x, wheel.y)
-        if (nested && scrollFlickable(nested, wheel)) {
-            wheel.accepted = true
-            return
-        }
+    function handleWheel(vx, vy, source) {
+        var nested = nestedFlickableAt(vx, vy)
+        if (nested && scrollFlickable(nested, source))
+            return true
         var page = findPageFlickable()
-        if (page && page !== nested && scrollFlickable(page, wheel))
-            wheel.accepted = true
+        return page && page !== nested && scrollFlickable(page, source)
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        scrollGestureEnabled: true
+        hoverEnabled: false
+
+        onWheel: function(wheel) {
+            if (root.handleWheel(wheel.x, wheel.y, wheel))
+                wheel.accepted = true
+        }
     }
 }

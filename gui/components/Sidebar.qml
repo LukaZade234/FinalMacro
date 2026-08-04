@@ -50,22 +50,27 @@ Rectangle {
                 anchors.fill: parent
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                Column {
-                    id: navColumn
-                    width: sidebar.width
-                    spacing: 4
-                    topPadding: 4
-                    bottomPadding: 8
+                Item {
+                    width: navScroll.availableWidth
+                    height: navColumn.height
 
-                    Repeater {
-                        model: sidebar.navModel.length
+                    Column {
+                        id: navColumn
+                        width: sidebar.width
+                        spacing: 4
+                        topPadding: 4
+                        bottomPadding: 8
 
-                        delegate: NavItem {
-                            width: navColumn.width - 20
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: sidebar.navModel[index].label
-                            navActive: sidebar.currentIndex === index
-                            onClicked: sidebar.navigated(index)
+                        Repeater {
+                            model: sidebar.navModel.length
+
+                            delegate: NavItem {
+                                width: navColumn.width - 20
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: sidebar.navModel[index].label
+                                navActive: sidebar.currentIndex === index
+                                onClicked: sidebar.navigated(index)
+                            }
                         }
                     }
                 }

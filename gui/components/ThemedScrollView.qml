@@ -29,6 +29,7 @@ ScrollView {
         target: control.contentItem
         orientation: Qt.Vertical
         rotationScale: control.wheelRotationScale
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         enabled: control.contentItem !== null && !control.contentIsListView
     }
 }

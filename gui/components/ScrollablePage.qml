@@ -21,21 +21,18 @@ Item {
         id: scroll
         anchors.fill: parent
 
-        ColumnLayout {
+        // Explicit height so content exceeds the viewport when children are tall
+        // (ColumnLayout alone inside ScrollView often collapses to viewport height).
+        Item {
             width: scroll.availableWidth
-            spacing: 0
-            // Ensure ScrollView content height reflects all page children.
-            height: implicitHeight
+            height: contentHost.implicitHeight + root.bottomPadding
 
             ColumnLayout {
                 id: contentHost
-                Layout.fillWidth: true
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
                 spacing: contentSpacing
-            }
-
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: bottomPadding
             }
         }
     }
