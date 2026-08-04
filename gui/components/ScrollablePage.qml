@@ -24,6 +24,8 @@ Item {
         ColumnLayout {
             width: scroll.availableWidth
             spacing: 0
+            // Ensure ScrollView content height reflects all page children.
+            height: implicitHeight
 
             ColumnLayout {
                 id: contentHost
@@ -36,5 +38,12 @@ Item {
                 Layout.preferredHeight: bottomPadding
             }
         }
+    }
+
+    WheelScrollForwarder {
+        anchors.fill: parent
+        z: 1
+        flickable: scroll.contentItem
+        nestedSearchRoot: scroll.contentItem
     }
 }

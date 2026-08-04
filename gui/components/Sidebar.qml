@@ -41,29 +41,40 @@ Rectangle {
             }
         }
 
-        ThemedScrollView {
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            Column {
-                id: navColumn
-                width: sidebar.width
-                spacing: 4
-                topPadding: 4
-                bottomPadding: 8
+            ThemedScrollView {
+                id: navScroll
+                anchors.fill: parent
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                Repeater {
-                    model: sidebar.navModel.length
+                Column {
+                    id: navColumn
+                    width: sidebar.width
+                    spacing: 4
+                    topPadding: 4
+                    bottomPadding: 8
 
-                    delegate: NavItem {
-                        width: navColumn.width - 20
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: sidebar.navModel[index].label
-                        navActive: sidebar.currentIndex === index
-                        onClicked: sidebar.navigated(index)
+                    Repeater {
+                        model: sidebar.navModel.length
+
+                        delegate: NavItem {
+                            width: navColumn.width - 20
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: sidebar.navModel[index].label
+                            navActive: sidebar.currentIndex === index
+                            onClicked: sidebar.navigated(index)
+                        }
                     }
                 }
+            }
+
+            WheelScrollForwarder {
+                anchors.fill: parent
+                flickable: navScroll.contentItem
+                nestedSearchRoot: navScroll.contentItem
             }
         }
 

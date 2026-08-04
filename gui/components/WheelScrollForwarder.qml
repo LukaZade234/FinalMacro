@@ -1,8 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 
-// Forwards wheel events over buttons/labels to the nearest scrollable ancestor.
-// Use inside PanelCard only — do not overlay an entire ScrollView viewport.
+// Catches wheel events over non-scrollable controls and scrolls the nearest target.
+// Used on ScrollablePage (full viewport) and standalone scroll panels (e.g. sidebar).
 MouseArea {
     id: root
     anchors.fill: parent
@@ -82,6 +82,9 @@ MouseArea {
         while (item) {
             if (isScrollView(item))
                 return item.contentItem
+            if (item.contentY !== undefined && item.contentHeight !== undefined
+                && item.model === undefined)
+                return item
             item = item.parent
         }
         return null
