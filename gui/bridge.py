@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Property, Q_ARG, QMetaObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QGuiApplication
 
 from gui.accounts import AccountStore
 from gui.mudae_settings_presets import MudaeSettingsPresetStore
@@ -48,6 +49,7 @@ from mudae.settings_catalog import (
     fields_to_display_dict,
     merge_preset_fields,
 )
+from mudae.list_formatter import extract_character_names, format_mudae_character_list
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
@@ -2496,6 +2498,21 @@ class AppBridge(QObject):
             await self._monitor.send_command(command)
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot(str, result=str)
+    def formatMudaeCharacterList(self, text: str) -> str:
+        return format_mudae_character_list(text)
+
+    @Slot(str, result=str)
+    def parseMudaeCharacterListJson(self, text: str) -> str:
+        names = extract_character_names(text)
+        return json.dumps({"names": names, "count": len(names), "formatted": "$".join(names)})
+
+    @Slot(str)
+    def copyToClipboard(self, text: str) -> None:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(text)
 
     @Slot(result=str)
     def importLegacyConfig(self) -> str:

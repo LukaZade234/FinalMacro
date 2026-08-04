@@ -21,6 +21,13 @@ def has_rt_available(state: Any) -> bool:
     return getattr(state, "rt_available", None) is True
 
 
+def should_stop_after_wish_claim(state: Any) -> bool:
+    """True when a wish was just claimed and neither claim nor ``$rt`` remains."""
+    if getattr(state, "claim_available", None) is not False:
+        return False
+    return not has_rt_available(state)
+
+
 def apply_rt_response(state: Any, fields: dict[str, Any]) -> bool:
     """Apply parsed fields after ``$rt``. Returns True when a claim slot was opened."""
     sync_rt_fields_from_tu(state, fields)

@@ -28,6 +28,7 @@ from macro.perk8_runtime import Perk8Runtime
 from macro.post_roll import PostRollHandler, RollRecord
 from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
 from macro.roll_stop import ROLLS_LEFT_STOP, RollStopTracker
+from macro.rt_manager import should_stop_after_wish_claim
 from macro.reaction_power import sync_reaction_power_fields
 from macro.dk_manager import sync_dk_fields_from_tu
 from macro.sphere_reactor import SphereReactor
@@ -493,6 +494,8 @@ class RollCycleEngine:
                         self._log("Roll failed — stopping")
                         break
                     if done < normal_rolls:
+                        if self._stop.is_set():
+                            break
                         # An interrupt (e.g. wish-ping claim) ended the segment
                         # early. Rolls remain in this hour's pool — keep going
                         # instead of ending the whole macro session. rolls_left
@@ -702,6 +705,14 @@ class RollCycleEngine:
                 reason=interrupt.reason,
                 allow_rt=interrupt.code == "wish_ping",
             )
+            if (
+                not us_roll
+                and interrupt.code == "wish_ping"
+                and claimed
+                and should_stop_after_wish_claim(self._state)
+            ):
+                self._log("Wish claimed — no claim or $rt left, stopping macro")
+                self._stop.set()
             return _RollOutcome(
                 ok=True,
                 rolls_left=rl,

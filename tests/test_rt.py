@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from macro.config import CharacterClaimRules, MacroConfig
 from macro.post_roll import PostRollHandler, RollRecord
-from macro.rt_manager import apply_rt_response, has_rt_available, sync_rt_fields_from_tu
+from macro.rt_manager import apply_rt_response, has_rt_available, should_stop_after_wish_claim, sync_rt_fields_from_tu
 from macro.rule_eval import passes_character_claim
 from macro.state import AccountState
 from mudae.parsers.rt import extract_rt_fields, parse_rt
@@ -70,6 +70,25 @@ def test_sync_and_apply_rt_response():
     assert state.claim_available is True
     assert state.rt_available is False
     assert state.rt_next_minutes == 1200
+
+
+def test_has_rt_available():
+    state = AccountState(rt_available=True)
+    assert has_rt_available(state) is True
+    state.rt_available = False
+    assert has_rt_available(state) is False
+
+
+def test_should_stop_after_wish_claim():
+    assert should_stop_after_wish_claim(
+        AccountState(claim_available=False, rt_available=False)
+    ) is True
+    assert should_stop_after_wish_claim(
+        AccountState(claim_available=False, rt_available=True)
+    ) is False
+    assert should_stop_after_wish_claim(
+        AccountState(claim_available=True, rt_available=False)
+    ) is False
 
 
 def test_wish_ping_allows_rt_on_cooldown():

@@ -31,6 +31,7 @@ ApplicationWindow {
         { label: "Presets", title: "Presets" },
         { label: "Statistics", title: "Statistics" },
         { label: "Debug", title: "Debug" },
+        { label: "Utilities", title: "Utilities" },
         { label: "Settings", title: "Settings" }
     ]
 
@@ -105,7 +106,8 @@ ApplicationWindow {
                     case 3: return presetsPage
                     case 4: return statisticsPage
                     case 5: return debugPage
-                    case 6: return settingsPage
+                    case 6: return utilitiesPage
+                    case 7: return settingsPage
                     default: return runPage
                     }
                 }
@@ -133,6 +135,10 @@ ApplicationWindow {
                 Component {
                     id: debugPage
                     ParseLabView { anchors.fill: parent }
+                }
+                Component {
+                    id: utilitiesPage
+                    UtilitiesView { anchors.fill: parent }
                 }
                 Component {
                     id: settingsPage

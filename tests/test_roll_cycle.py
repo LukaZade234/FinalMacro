@@ -17,14 +17,14 @@ from macro.state import AccountState
 from mudae.types import MessageKind, ParseResult
 
 
-def _tu(rolls_left: int, reset_minutes: int) -> ParseResult:
+def _tu(rolls_left: int, reset_minutes: int, *, claim_available: bool = False) -> ParseResult:
     return ParseResult(
         kind=MessageKind.TU,
         summary="$tu",
         fields={
             "rolls_left": rolls_left,
             "rolls_reset_minutes": reset_minutes,
-            "claim_available": False,
+            "claim_available": claim_available,
         },
     )
 
@@ -209,9 +209,9 @@ class _ClaimCapableActions(_FakeActions):
 
 
 def test_normal_macro_keeps_rolling_hour_after_wish_ping_claim():
-    """A mid-hour wish-ping claim should not end the whole macro session."""
+    """A mid-hour wish-ping claim should not end the session while $rt remains."""
     actions = _ClaimCapableActions(
-        tu_script=[_tu(5, 30), _tu(0, 30)],
+        tu_script=[_tu(5, 30, claim_available=True), _tu(0, 30)],
         roll_script=[
             _roll(1, 4),
             _wish_roll(2, 3),
@@ -225,17 +225,52 @@ def test_normal_macro_keeps_rolling_hour_after_wish_ping_claim():
         roll_delay_sec=0.6,
         character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=True),
     )
-    state = AccountState(own_user_ids=[999])
+    state = AccountState(own_user_ids=[999], claim_available=True, rt_available=True)
     monitor = SimpleNamespace(macro_active=False)
     engine = RollCycleEngine(actions, config, state, monitor)
 
     _run_normal(engine)
 
-    # All 5 rolls of the hour still happen even though roll 2 triggered a claim.
+    # All 5 rolls of the hour still happen: wish claim spent the claim slot but
+    # $rt is still available for another wish later in the hour.
     assert len(actions.roll_commands()) == 5
     assert any("claim now" in entry.text for entry in state.activity_log)
     assert any("continuing after claim" in entry.text for entry in state.activity_log)
     assert any("Macro finished" in entry.text for entry in state.activity_log)
+
+
+def test_normal_macro_stops_after_wish_claim_without_claim_or_rt():
+    """After a wish claim with no claim slot and no $rt, stop rolling entirely."""
+    actions = _ClaimCapableActions(
+        tu_script=[_tu(5, 30, claim_available=True)],
+        roll_script=[
+            _roll(1, 4),
+            _wish_roll(2, 3),
+            _roll(3, 2),
+        ],
+    )
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.6,
+        character_claim=CharacterClaimRules(
+            enabled=False,
+            claim_on_wish_ping=True,
+            auto_use_rt=False,
+        ),
+    )
+    state = AccountState(
+        own_user_ids=[999],
+        claim_available=True,
+        rt_available=False,
+    )
+    monitor = SimpleNamespace(macro_active=False)
+    engine = RollCycleEngine(actions, config, state, monitor)
+
+    _run_normal(engine)
+
+    assert len(actions.roll_commands()) == 2
+    assert any("Wish claimed — no claim or $rt left" in entry.text for entry in state.activity_log)
+    assert not any("continuing after claim" in entry.text for entry in state.activity_log)
 
 
 def test_normal_macro_waits_and_rolls_next_hour():
