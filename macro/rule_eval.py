@@ -248,7 +248,8 @@ def passes_kakera_reaction(
     has_perk_8 = bool(fields.get("perk_8"))
     power_display = display_reaction_power(state.power_percent)
 
-    # Determine which color filter applies. low_power override wins below threshold.
+    # Determine which color filter applies. Perk-8 characters use the perk-8 list
+    # (from Reactions) even on $us rolls where ``types_allowed`` is a narrower override.
     if (
         rules.perk_8_budget_mode
         and bool(fields.get("perk_8"))

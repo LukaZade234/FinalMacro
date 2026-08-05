@@ -288,6 +288,12 @@ Item {
                             checked: draft.character_claim.only_final_hour
                             onToggled: setDraftField("character_claim", "only_final_hour", checked)
                         }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Remember $tu state between sessions"
+                            checked: !!draft.character_claim.persist_tu_state
+                            onToggled: setDraftField("character_claim", "persist_tu_state", checked)
+                        }
                         GridLayout {
                             columns: 2
                             columnSpacing: 12

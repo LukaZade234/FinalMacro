@@ -20,6 +20,14 @@ from macro.roll_scheduler import (
 from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
 from macro.config import MacroConfig
+from macro.runtime_store import (
+    RuntimeRestoreResult,
+    apply_to_state,
+    can_skip_initial_tu,
+    load_runtime_record,
+    save_runtime_record,
+    snapshot_from_state,
+)
 from macro.us_stop import UsModeStopOptions, us_stop_reason, _minimum_kakera_cost
 from mudae.discord_errors import is_fatal_runtime_error
 from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
@@ -94,6 +102,9 @@ class RollCycleEngine:
         self._on_state = on_state
         self._on_keys = on_keys
         self._on_persist = on_persist
+        self._daily_get = daily_resets_get
+        self._daily_save = daily_resets_save
+        self._channel_settings: dict[str, Any] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._roll_stop = RollStopTracker()
@@ -163,6 +174,35 @@ class RollCycleEngine:
     def _persist(self) -> None:
         if self._on_persist:
             self._on_persist()
+
+    def _persist_tu_state_enabled(self) -> bool:
+        return bool(self._config.character_claim.persist_tu_state)
+
+    def _save_runtime_state(self) -> None:
+        if not self._persist_tu_state_enabled():
+            return
+        if not self._daily_get or not self._daily_save:
+            return
+        daily = self._daily_get()
+        record = snapshot_from_state(
+            self._state,
+            settings=self._channel_settings,
+        )
+        self._daily_save(save_runtime_record(daily, record))
+        self._persist()
+
+    def _restore_runtime_state(self) -> RuntimeRestoreResult:
+        if not self._persist_tu_state_enabled() or not self._daily_get:
+            return RuntimeRestoreResult(False, True, "persist disabled")
+        record = load_runtime_record(self._daily_get())
+        result = apply_to_state(
+            self._state,
+            record,
+            settings=self._channel_settings,
+        )
+        if result.applied:
+            self._sync_claim_window_from_tu()
+        return result
 
     async def _release_connection_for_notifications(self) -> bool:
         return await self._recovery.release_for_notifications()
@@ -339,6 +379,7 @@ class RollCycleEngine:
         account_id: str,
         daily_resets_get: Callable[[], dict[str, Any]] | None = None,
         daily_resets_save: Callable[[dict[str, Any]], None] | None = None,
+        channel_settings: dict[str, Any] | None = None,
     ) -> None:
         """Rebind per-channel persistence after a live server/channel switch."""
         self._ctx.account_id = account_id
@@ -346,18 +387,25 @@ class RollCycleEngine:
             daily_get=daily_resets_get,
             daily_save=daily_resets_save,
         )
+        self._daily_get = daily_resets_get
+        self._daily_save = daily_resets_save
+        if channel_settings is not None:
+            self._channel_settings = dict(channel_settings)
         self._reset_roll_stop_tracker()
 
     def stop(self) -> None:
         self._stop.set()
-
-    @property
-    def stop_requested(self) -> bool:
-        return self._stop.is_set()
         self._state.phase = MacroPhase.STOPPING
         self._notify()
         if self._task and not self._task.done():
             self._task.cancel()
+
+    def save_runtime_state(self) -> None:
+        self._save_runtime_state()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop.is_set()
 
     async def run_tu(self) -> bool:
         """Send $tu and update account state. Returns False on timeout."""
@@ -397,6 +445,7 @@ class RollCycleEngine:
         )
         self._state.phase = MacroPhase.IDLE
         self._notify()
+        self._save_runtime_state()
         return True
 
     async def run_us_check(self) -> bool:
@@ -455,6 +504,15 @@ class RollCycleEngine:
             cmd = self._config.normalized_roll_command()
             roll_index = 0
             tu_fresh = False
+            if self._persist_tu_state_enabled():
+                restore = self._restore_runtime_state()
+                if can_skip_initial_tu(restore):
+                    tu_fresh = True
+                    self._log("Using saved $tu state — skipping initial $tu")
+                elif restore.message and restore.message != "persist disabled":
+                    self._log(
+                        f"Saved $tu state unavailable ({restore.message}) — running $tu"
+                    )
 
             self._log("Macro starting (continuous hourly mode)")
 
@@ -532,6 +590,7 @@ class RollCycleEngine:
         finally:
             if self._stop.is_set() and session_reason == "finished":
                 session_reason = "stopped"
+            self._save_runtime_state()
             self._finish_session(session_reason)
             self._monitor.macro_active = False
             self._state.phase = MacroPhase.IDLE
@@ -975,6 +1034,8 @@ class RollCycleEngine:
         left = self._state.rolls_left
         if left is not None and left > 0:
             self._state.rolls_left = left - 1
+        if self._persist_tu_state_enabled():
+            self._save_runtime_state()
 
     def _reset_roll_stop_tracker(self) -> None:
         self._sync_roll_stop_config()
@@ -1157,6 +1218,11 @@ class RollCycleEngine:
             failed_adds = 0
             roll_timeouts = 0
             skip_tu = False
+            if self._persist_tu_state_enabled():
+                restore = self._restore_runtime_state()
+                if can_skip_initial_tu(restore):
+                    skip_tu = True
+                    self._log("Using saved $tu state — skipping initial $tu")
 
             stop_bits: list[str] = []
             if self._us_stop.stop_on_power_exhausted:
@@ -1468,6 +1534,7 @@ class RollCycleEngine:
         finally:
             if self._stop.is_set() and session_reason == "finished":
                 session_reason = "stopped"
+            self._save_runtime_state()
             self._finish_session(session_reason)
             self._monitor.macro_active = False
             self._state.phase = MacroPhase.IDLE

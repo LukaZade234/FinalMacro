@@ -153,7 +153,6 @@ class AppBridge(QObject):
     keysChanged = Signal()
     mudaeSettingsPresetsChanged = Signal()
     settingsApplyChanged = Signal()
-    wheelScrollRequested = Signal(float, float, float, float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -1373,15 +1372,31 @@ class AppBridge(QObject):
                 resolved.account_id,
                 resolved.channel_profile_id,
             )
+            settings: dict[str, Any] | None = None
+            bundle = self._channel_settings_bundle(resolved.channel_profile_id)
+            if bundle:
+                _channel, settings = bundle
             self._engine.update_run_target(
                 account_id=resolved.account_id,
                 daily_resets_get=daily_get,
                 daily_resets_save=daily_save,
+                channel_settings=settings,
             )
             self._engine.update_config(resolved.macro_config)
 
     def _reset_macro_state_preserve_identity(self) -> None:
         """Clear channel-specific runtime state while keeping user identity and log."""
+        if (
+            self._macro_config.character_claim.persist_tu_state
+            and self._run_account_id
+            and self._run_channel_profile_id
+        ):
+            if self._load_persisted_runtime_state(
+                self._run_account_id,
+                self._run_channel_profile_id,
+            ):
+                return
+
         state = self._macro_state
         state.rolls_left = None
         state.rolls_us_bonus = None
@@ -1402,6 +1417,32 @@ class AppBridge(QObject):
         state.kakera_clicks_day = ""
         state.perk8_priority_mode = "inactive"
         state.perk8_click_max = None
+
+    def _load_persisted_runtime_state(
+        self,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> bool:
+        from macro.runtime_store import apply_to_state, load_runtime_record
+
+        daily = self._get_daily_resets_for(account_id, channel_profile_id)
+        record = load_runtime_record(daily)
+        settings: dict[str, Any] | None = None
+        bundle = self._channel_settings_bundle(channel_profile_id)
+        if bundle:
+            _channel, settings = bundle
+        result = apply_to_state(
+            self._macro_state,
+            record,
+            settings=settings,
+        )
+        if result.applied:
+            self._append_activity_log(
+                f"Restored saved $tu state — {result.message}"
+            )
+            self._notify_macro()
+            return True
+        return False
 
     def _append_activity_log(self, text: str) -> None:
         ActivityLog(self._macro_state, on_update=self._notify_macro).write(text)
@@ -1847,6 +1888,10 @@ class AppBridge(QObject):
             resolved.account_id,
             resolved.channel_profile_id,
         )
+        channel_settings: dict[str, Any] | None = None
+        bundle = self._channel_settings_bundle(resolved.channel_profile_id)
+        if bundle:
+            _channel, channel_settings = bundle
 
         self._bind_run_target_metadata(resolved)
 
@@ -1872,6 +1917,13 @@ class AppBridge(QObject):
             notification_reconnect=self._notification_reconnect,
             account_id=resolved.account_id,
         )
+        if channel_settings is not None:
+            self._engine.update_run_target(
+                account_id=resolved.account_id,
+                daily_resets_get=daily_get,
+                daily_resets_save=daily_save,
+                channel_settings=channel_settings,
+            )
 
         async def runner() -> None:
             ready = await self._monitor.start_background()
@@ -1885,6 +1937,8 @@ class AppBridge(QObject):
                 self._on_status("Connection timed out")
                 self._on_connected(False)
             await self._stop_event.wait()
+            if self._engine:
+                self._engine.save_runtime_state()
             if self._engine and self._engine.is_running:
                 self._engine.stop()
             await self._monitor.stop_background()
@@ -1951,6 +2005,11 @@ class AppBridge(QObject):
         self._run_preset_id = resolved.preset_id
         self._persist()
         self._macro_state = AccountState()
+        if resolved.macro_config.character_claim.persist_tu_state:
+            self._load_persisted_runtime_state(
+                resolved.account_id,
+                resolved.channel_profile_id,
+            )
         self._set_connecting(True)
         self._set_status("Connecting…")
         self._thread = threading.Thread(

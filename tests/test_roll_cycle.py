@@ -536,3 +536,53 @@ def test_maybe_refresh_perk8_defers_without_connection():
 
     asyncio.run(run())
     assert engine._pending_perk8_refresh is True
+
+
+def test_normal_macro_skips_initial_tu_when_persisted_state_valid():
+    saved = dt.datetime(2026, 8, 4, 12, 0, tzinfo=dt.timezone.utc)
+    reset_at = (saved + dt.timedelta(minutes=45)).isoformat()
+    daily = {
+        "macro_runtime": {
+            "saved_at": saved.isoformat(),
+            "rolls_left": 6,
+            "rolls_us_bonus": 0,
+            "claim_available": True,
+            "power_percent": 70.0,
+            "power_max_percent": 155.0,
+            "power_updated_at": saved.isoformat(),
+            "rolls_reset_at": reset_at,
+        }
+    }
+    actions = _FakeActions(
+        tu_script=[_tu(0, 45)],
+        roll_script=[_roll(1, 5), _roll(2, 4), _roll(3, 3), _roll(4, 2), _roll(5, 1), _roll(6, 0)],
+    )
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.6,
+        character_claim=CharacterClaimRules(
+            enabled=False,
+            claim_on_wish_ping=False,
+            persist_tu_state=True,
+        ),
+    )
+    state = AccountState()
+    monitor = SimpleNamespace(macro_active=False)
+    engine = RollCycleEngine(
+        actions,
+        config,
+        state,
+        monitor,
+        daily_resets_get=lambda: daily,
+        daily_resets_save=lambda d: daily.update(d),
+    )
+    now = saved + dt.timedelta(minutes=5)
+
+    with patch("macro.runtime_store._utc_now", return_value=now):
+        with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+            engine._stop.clear()
+            asyncio.run(engine._run_cycle())
+
+    assert not any(cmd == "tu" for cmd, _ in actions.sent[:1])
+    assert len(actions.roll_commands()) == 6
+    assert any("Using saved $tu state" in entry.text for entry in state.activity_log)

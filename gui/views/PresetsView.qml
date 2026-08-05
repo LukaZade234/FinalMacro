@@ -404,6 +404,27 @@ Item {
                         }
 
                         PanelCard {
+                            title: "Session memory"
+                            titleSize: 12
+                            Layout.fillWidth: true
+
+                            ThemedCheckBox {
+                                Layout.fillWidth: true
+                                text: "Remember $tu state between sessions (skip $tu on start; restore rolls, timers, and power with passive regen)"
+                                checked: rules.character_claim ? !!rules.character_claim.persist_tu_state : false
+                                onToggled: patch("character_claim", "persist_tu_state", checked)
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Saved per account and channel. Uses fetched $settings (rolls/claim reset schedule) to infer hourly and claim resets while away. Runs $tu only when state is missing or too old."
+                                color: Theme.fgMuted
+                                font.pixelSize: 10
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        PanelCard {
                             title: "Instant triggers"
                             titleSize: 12
                             Layout.fillWidth: true

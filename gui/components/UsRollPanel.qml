@@ -36,7 +36,7 @@ ColumnLayout {
 
         Label {
             Layout.fillWidth: true
-            text: "Hourly rolls always use the kakera settings on the Reactions tab. These options apply only to rolls added via $us."
+            text: "Hourly rolls always use the kakera settings on the Reactions tab. These options apply only to rolls added via $us. Perk-8 characters always follow the Reactions perk-8 color rules."
             color: Theme.fgMuted
             font.pixelSize: 10
             wrapMode: Text.WordWrap

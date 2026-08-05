@@ -69,6 +69,7 @@ class CharacterClaimRules:
     claim_on_wish_ping: bool = True
     only_final_hour: bool = True
     auto_use_rt: bool = False
+    persist_tu_state: bool = False
     min_kakera: int | None = None
     max_claim_rank: int | None = None  # instant claim when claim rank ≤ this value
 
@@ -81,6 +82,7 @@ class CharacterClaimRules:
             claim_on_wish_ping=bool(data.get("claim_on_wish_ping", True)),
             only_final_hour=bool(data.get("only_final_hour", True)),
             auto_use_rt=bool(data.get("auto_use_rt", False)),
+            persist_tu_state=bool(data.get("persist_tu_state", False)),
             min_kakera=_coerce_int_or_none(data.get("min_kakera")),
             max_claim_rank=_coerce_int_or_none(data.get("max_claim_rank")),
         )
@@ -287,8 +289,8 @@ class MacroConfig:
             return KakeraReactionRules(enabled=False)
         us_types = list(policy.types_allowed)
         if us_types:
-            # Explicit $us colors win — do not inherit base low_power / perk-8
-            # lists that could re-allow colors excluded from the $us preset.
+            # $us colors restrict non–perk-8 rolls; perk-8 characters still use the
+            # Reactions-tab perk-8 color list (see ``passes_kakera_reaction``).
             return KakeraReactionRules(
                 enabled=base.enabled,
                 types_allowed=us_types,
@@ -299,7 +301,7 @@ class MacroConfig:
                 low_power=None,
                 perk_8_budget_mode=base.perk_8_budget_mode,
                 perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
-                perk_8_types_allowed=us_types,
+                perk_8_types_allowed=list(base.perk_8_types_allowed),
                 auto_use_dk=base.auto_use_dk,
             )
         return KakeraReactionRules(

@@ -18,7 +18,7 @@ from typing import Any
 from macro.perk8_daily import PERK8_DAILY_KEY
 
 # Keys that belong inside an account slice, not at the channel root.
-_ACCOUNT_SLICE_KEYS = frozenset({PERK8_DAILY_KEY})
+_ACCOUNT_SLICE_KEYS = frozenset({PERK8_DAILY_KEY, "macro_runtime"})
 
 
 def is_legacy_flat_daily_store(channel_daily: dict[str, Any] | None) -> bool:

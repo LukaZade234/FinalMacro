@@ -606,7 +606,7 @@ def test_us_kakera_override_ignores_base_low_power_colors():
     )
     rules = cfg.kakera_rules_for_roll(us_roll=True)
     assert rules.low_power is None
-    assert rules.perk_8_types_allowed == ["kakeraP", "kakeraR"]
+    assert rules.perk_8_types_allowed == []
 
     fields = {
         "buttons": [
@@ -625,3 +625,47 @@ def test_us_kakera_override_ignores_base_low_power_colors():
     )
     assert not decision.should_click
     assert "kakeraC" not in (decision.reason or "")
+
+
+def test_us_kakera_perk_8_character_uses_base_perk_8_colors():
+    from macro.config import LowPowerOverride
+    from macro.rule_eval import passes_kakera_reaction
+    from macro.state import AccountState
+
+    cfg = MacroConfig(
+        kakera_reaction=KakeraReactionRules(
+            enabled=True,
+            types_allowed=["kakeraR"],
+            perk_8_budget_mode=True,
+            perk_8_types_allowed=["kakeraT", "kakeraR"],
+        ),
+        us_roll_kakera=UsRollKakeraRules(
+            override=True,
+            types_allowed=["kakeraP"],
+        ),
+    )
+    rules = cfg.kakera_rules_for_roll(us_roll=True)
+    assert rules.types_allowed == ["kakeraP"]
+    assert rules.perk_8_types_allowed == ["kakeraT", "kakeraR"]
+
+    fields = {
+        "perk_8": True,
+        "buttons": [
+            {
+                "is_kakera": True,
+                "emoji": "kakeraT",
+                "disabled": False,
+                "custom_id": "k1",
+            },
+            {
+                "is_kakera": True,
+                "emoji": "kakeraP",
+                "disabled": False,
+                "custom_id": "k2",
+            },
+        ],
+    }
+    state = AccountState(perk8_priority_mode="active", perk8_click_max=40, power_percent=100.0)
+    decision = passes_kakera_reaction(fields, rules, state)
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraT"
