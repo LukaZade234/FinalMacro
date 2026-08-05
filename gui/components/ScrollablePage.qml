@@ -13,47 +13,37 @@ Item {
 
     property int contentSpacing: 12
     property int bottomPadding: 20
-    readonly property real contentWidth: scroll.availableWidth
+    readonly property real contentWidth: flick.width
 
     default property alias content: contentHost.data
 
-    ThemedScrollView {
-        id: scroll
+    Flickable {
+        id: flick
         anchors.fill: parent
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        contentWidth: width
+        contentHeight: contentHost.implicitHeight + bottomPadding
 
-        // Explicit height so content exceeds the viewport when children are tall
-        // (ColumnLayout alone inside ScrollView often collapses to viewport height).
-        Item {
-            width: scroll.availableWidth
-            height: contentHost.implicitHeight + root.bottomPadding
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
+
+        ColumnLayout {
+            width: flick.width
+            spacing: 0
 
             ColumnLayout {
                 id: contentHost
-                anchors.top: parent.top
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
                 spacing: contentSpacing
             }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: bottomPadding
+            }
         }
-    }
-
-    WheelScrollForwarder {
-        id: pageWheel
-        anchors.fill: parent
-        z: 1
-        flickable: scroll.contentItem
-        nestedSearchRoot: scroll.contentItem
-    }
-
-    Component.onCompleted: {
-        var w = Window.window
-        if (w)
-            w.activeWheelForwarder = pageWheel
-    }
-
-    Component.onDestruction: {
-        var w = Window.window
-        if (w && w.activeWheelForwarder === pageWheel)
-            w.activeWheelForwarder = null
     }
 }

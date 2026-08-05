@@ -41,46 +41,30 @@ Rectangle {
             }
         }
 
-        Item {
+        ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            ThemedScrollView {
-                id: navScroll
-                anchors.fill: parent
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            Column {
+                id: navColumn
+                width: sidebar.width
+                spacing: 4
+                topPadding: 4
+                bottomPadding: 8
 
-                Item {
-                    width: navScroll.availableWidth
-                    height: navColumn.height
+                Repeater {
+                    model: sidebar.navModel.length
 
-                    Column {
-                        id: navColumn
-                        width: sidebar.width
-                        spacing: 4
-                        topPadding: 4
-                        bottomPadding: 8
-
-                        Repeater {
-                            model: sidebar.navModel.length
-
-                            delegate: NavItem {
-                                width: navColumn.width - 20
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: sidebar.navModel[index].label
-                                navActive: sidebar.currentIndex === index
-                                onClicked: sidebar.navigated(index)
-                            }
-                        }
+                    delegate: NavItem {
+                        width: navColumn.width - 20
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: sidebar.navModel[index].label
+                        navActive: sidebar.currentIndex === index
+                        onClicked: sidebar.navigated(index)
                     }
                 }
-            }
-
-            WheelScrollForwarder {
-                id: navWheelForwarder
-                anchors.fill: parent
-                flickable: navScroll.contentItem
-                nestedSearchRoot: navScroll.contentItem
             }
         }
 
@@ -107,17 +91,5 @@ Rectangle {
                 onClicked: Qt.quit()
             }
         }
-    }
-
-    Component.onCompleted: {
-        var w = Window.window
-        if (w)
-            w.sidebarWheelForwarder = navWheelForwarder
-    }
-
-    Component.onDestruction: {
-        var w = Window.window
-        if (w && w.sidebarWheelForwarder === navWheelForwarder)
-            w.sidebarWheelForwarder = null
     }
 }

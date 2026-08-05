@@ -157,8 +157,9 @@ Item {
         }
     }
 
-    ScrollablePage {
+    ColumnLayout {
         anchors.fill: parent
+        spacing: 12
 
         UpdateBanner {
             Layout.fillWidth: true
@@ -227,7 +228,8 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.minimumHeight: 320
+            Layout.fillHeight: true
+            Layout.minimumHeight: 160
             spacing: 16
 
             PanelCard {
@@ -236,10 +238,12 @@ Item {
                 Layout.maximumWidth: 288
                 Layout.minimumWidth: 220
                 Layout.fillWidth: false
-                Layout.alignment: Qt.AlignTop
+                Layout.fillHeight: true
+                fillContentVertically: true
 
                 ColumnLayout {
                     Layout.fillWidth: true
+                    Layout.fillHeight: true
                     spacing: 8
 
                     MacroControlBar {
@@ -257,34 +261,43 @@ Item {
                         color: Theme.border
                     }
 
-                    MacroControlBar {
-                        id: actionBar
+                    ScrollView {
+                        id: controlsScroll
                         Layout.fillWidth: true
-                        actionsOnly: true
-                        onRunTuClicked: App.runTu()
-                        onRunUsCheckClicked: App.runUsCheck()
-                        onStartClicked: App.startMacro()
-                        onStopClicked: App.stopMacro()
-                        onPlayOhClicked: App.playOhSphere()
-                        onPlayOcClicked: App.playOcSphere()
-                        onPlayOqClicked: App.playOqSphere()
-                        onPlayAllMinigamesClicked: App.playAllMinigames()
-                        onPlayUsClicked: App.startUsMode()
+                        Layout.fillHeight: true
+                        clip: true
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                        MacroControlBar {
+                            id: actionBar
+                            width: controlsScroll.availableWidth
+                            actionsOnly: true
+                            onRunTuClicked: App.runTu()
+                            onRunUsCheckClicked: App.runUsCheck()
+                            onStartClicked: App.startMacro()
+                            onStopClicked: App.stopMacro()
+                            onPlayOhClicked: App.playOhSphere()
+                            onPlayOcClicked: App.playOcSphere()
+                            onPlayOqClicked: App.playOqSphere()
+                            onPlayAllMinigamesClicked: App.playAllMinigames()
+                            onPlayUsClicked: App.startUsMode()
+                        }
                     }
                 }
             }
 
             PanelCard {
                 title: "Activity"
+                fillContentVertically: true
                 Layout.fillWidth: true
-                Layout.preferredHeight: 360
-                Layout.minimumHeight: 200
+                Layout.fillHeight: true
                 Layout.minimumWidth: 260
+                Layout.minimumHeight: 120
 
                 ActivityLogPanel {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 300
-                    Layout.minimumHeight: 160
+                    Layout.fillHeight: true
                     entries: runRoot.activityEntries
                 }
             }

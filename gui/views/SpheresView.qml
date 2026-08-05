@@ -428,12 +428,16 @@ Item {
                     }
                 }
 
-                ListView {
-                    id: sphereList
+                ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: filteredEntries()
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    ListView {
+                        id: sphereList
+                        width: parent.width
+                        model: filteredEntries()
                         spacing: 2
 
                         delegate: Rectangle {
@@ -521,6 +525,7 @@ Item {
                             font.pixelSize: 12
                         }
                     }
+                }
             }
         }
     }

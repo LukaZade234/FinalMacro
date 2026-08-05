@@ -78,7 +78,7 @@ Dialog {
                 color: Theme.fgSecondary
             }
 
-            ThemedScrollView {
+            ScrollView {
                 clip: true
                 TextArea {
                     id: diffBox

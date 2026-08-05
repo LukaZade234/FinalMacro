@@ -252,10 +252,12 @@ Item {
                 title: "Parse detail"
                 contentMargins: 12
 
-                ThemedScrollView {
+                ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    clip: true
                     contentWidth: availableWidth
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
                     ColumnLayout {
                         id: detailCol

@@ -113,9 +113,11 @@ Item {
                         titleSize: 12
                         fillContentVertically: true
 
-                        ThemedScrollView {
+                        ScrollView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
+                            clip: true
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                             TextArea {
                                 id: inputArea
@@ -148,9 +150,11 @@ Item {
                         titleSize: 12
                         fillContentVertically: true
 
-                        ThemedScrollView {
+                        ScrollView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
+                            clip: true
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                             TextArea {
                                 id: outputArea
