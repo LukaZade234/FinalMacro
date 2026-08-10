@@ -11,6 +11,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
 from gui.bridge import AppBridge
+from gui.single_instance import SingleInstanceServer, raise_window, try_notify_running_instance
 from gui.tray import TrayController
 
 
@@ -18,6 +19,9 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("FinalMacro")
     app.setDesktopFileName("finalmacro")
+
+    if try_notify_running_instance():
+        return
 
     project_root = Path(__file__).resolve().parent.parent
     icon_path = project_root / "assets" / "app-icon.png"
@@ -49,6 +53,11 @@ def main() -> None:
         icon_path=icon_path,
     )
     bridge.attach_tray(tray)
+
+    instance_server = SingleInstanceServer()
+    instance_server.listen(on_raise=lambda: (
+        tray.show_window() if tray.available else raise_window(window)
+    ))
 
     app.aboutToQuit.connect(bridge.shutdown)
     sys.exit(app.exec())

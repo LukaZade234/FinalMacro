@@ -8,6 +8,8 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from gui.single_instance import raise_window
+
 _NOTIFICATION_MS = 8000
 
 
@@ -56,25 +58,7 @@ class TrayController(QObject):
         return self._available and self._icon is not None
 
     def show_window(self) -> None:
-        if self._window is None:
-            return
-        show = getattr(self._window, "show", None)
-        if callable(show):
-            show()
-        set_state = getattr(self._window, "setWindowState", None)
-        window_state = getattr(self._window, "windowState", None)
-        if callable(set_state) and callable(window_state):
-            from PySide6.QtCore import Qt
-
-            state = window_state()
-            if state & Qt.WindowState.WindowMinimized:
-                set_state(state & ~Qt.WindowState.WindowMinimized)
-        raise_fn = getattr(self._window, "raise_", None)
-        if callable(raise_fn):
-            raise_fn()
-        activate = getattr(self._window, "requestActivate", None)
-        if callable(activate):
-            activate()
+        raise_window(self._window)
 
     def request_quit(self) -> None:
         shutdown = getattr(self._bridge, "shutdown", None)
