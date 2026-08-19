@@ -77,6 +77,7 @@ def test_emoji_to_oq_state():
     assert emoji_to_oq_state("spP") == "t"
     assert emoji_to_oq_state("sp") == "r"
     assert emoji_to_oq_state("spR") == "r"
+    assert emoji_to_oq_state("spW") == "r"
     assert emoji_to_oq_state("spB") == "0"
     assert emoji_to_oq_state("spT") == "1"
     assert emoji_to_oq_state("spG") == "2"
@@ -88,6 +89,12 @@ def test_emoji_to_oq_state():
 def test_observations_from_red_sp_emoji():
     buttons = [_btn(i, "spU") for i in range(25)]
     buttons[15] = _btn(15, "sp")
+    assert observations_from_buttons(buttons) == {15: "r"}
+
+
+def test_observations_from_rainbow_spw_emoji():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[15] = _btn(15, "spW")
     assert observations_from_buttons(buttons) == {15: "r"}
 
 
@@ -146,12 +153,36 @@ def test_choose_clickable_revealed_red():
     assert choice["custom_id"] == "cmd s15"
 
 
+def test_choose_clickable_revealed_rainbow():
+    """When the 4th purple becomes rainbow instead of red, claim ``spW`` first."""
+    buttons = [_btn(i, "spU") for i in range(25)]
+    for index in (0, 5, 10):
+        buttons[index] = _btn(index, "spP", disabled=True)
+    buttons[15] = _btn(15, "spW")  # spawned rainbow, still clickable
+    obs = {0: "t", 5: "t", 10: "t", 15: "r"}
+    choice = choose_oq_click(buttons, obs, clicks_spent=5, clicks_budget=CLICK_BUDGET)
+    assert choice is not None
+    assert choice["custom_id"] == "cmd s15"
+
+
 def test_revealed_red_before_harvest_cells():
     """Red must be collected before opening hidden harvest orbs."""
     buttons = [_btn(i, "spU") for i in range(25)]
     for index in (0, 5, 10):
         buttons[index] = _btn(index, "spP", disabled=True)
     buttons[15] = _btn(15, "sp")
+    obs = {0: "t", 5: "t", 10: "t", 15: "r", 1: "0", 2: "1"}
+    choice = choose_oq_click(buttons, obs, clicks_spent=4, clicks_budget=CLICK_BUDGET)
+    assert choice is not None
+    assert choice["custom_id"] == "cmd s15"
+
+
+def test_revealed_rainbow_before_harvest_cells():
+    """Rainbow must be collected before opening hidden harvest orbs."""
+    buttons = [_btn(i, "spU") for i in range(25)]
+    for index in (0, 5, 10):
+        buttons[index] = _btn(index, "spP", disabled=True)
+    buttons[15] = _btn(15, "spW")
     obs = {0: "t", 5: "t", 10: "t", 15: "r", 1: "0", 2: "1"}
     choice = choose_oq_click(buttons, obs, clicks_spent=4, clicks_budget=CLICK_BUDGET)
     assert choice is not None
@@ -165,6 +196,22 @@ def test_harvest_prefers_most_adjacent_mines():
     buttons[6] = _btn(6, "spP", disabled=True)
     buttons[24] = _btn(24, "spP", disabled=True)
     buttons[11] = _btn(11, "sp", disabled=True)  # red below-left of center
+    obs = {0: "t", 6: "t", 24: "t", 11: "r"}
+    ranking = harvest_ranking(buttons, obs)
+    top_adj, _payout, top_cell = ranking[0]
+    assert top_adj >= 2
+    choice = choose_oq_click(buttons, obs, clicks_spent=3, clicks_budget=CLICK_BUDGET)
+    assert choice is not None
+    assert choice["custom_id"] == f"cmd s{top_cell}"
+
+
+def test_harvest_counts_rainbow_as_mine():
+    """Rainbow on the grid counts toward harvest adjacency like red."""
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[0] = _btn(0, "spP", disabled=True)
+    buttons[6] = _btn(6, "spP", disabled=True)
+    buttons[24] = _btn(24, "spP", disabled=True)
+    buttons[11] = _btn(11, "spW", disabled=True)  # rainbow below-left of center
     obs = {0: "t", 6: "t", 24: "t", 11: "r"}
     ranking = harvest_ranking(buttons, obs)
     top_adj, _payout, top_cell = ranking[0]

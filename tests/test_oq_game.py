@@ -121,3 +121,47 @@ def test_oq_game_purple_click_does_not_spend_budget():
     )
     result = asyncio.run(game.play(prefix="$"))
     assert result["clicks"] == 0
+
+
+def test_oq_game_claims_rainbow_then_harvests():
+    """Rainbow replaces red; macro must claim it then keep harvesting."""
+    grid0 = _grid_snapshot([_btn(i) for i in range(25)])
+    # Three purples found; rainbow spawned at 15, still clickable.
+    grid1 = [_btn(i, "spU") for i in range(25)]
+    for index in (0, 5, 10):
+        grid1[index] = _btn(index, "spP", disabled=True)
+    grid1[15] = _btn(15, "spW")
+    grid1_snap = _grid_snapshot(grid1)
+    # After claiming rainbow, one hidden harvest cell at 16.
+    grid2 = [_btn(i, "spU") for i in range(25)]
+    for index in (0, 5, 10, 15):
+        grid2[index] = _btn(index, "spP" if index != 15 else "spW", disabled=True)
+    grid2[16] = _btn(16, "spY")
+    grid2_snap = _grid_snapshot(grid2)
+    scripted = [
+        grid0,
+        _reward_snapshot("<:spT:1> **+20**"),
+        grid1_snap,
+        _reward_snapshot("<:spT:1> **+20**\n<:spW:2> **+500**"),
+        grid2_snap,
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    clicks: list[str] = []
+
+    async def track_click(message_id: int, custom_id: str) -> bool:
+        clicks.append(custom_id)
+        return True
+
+    actions.click_button = track_click  # type: ignore[method-assign]
+    game = OqSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert f"cmd s{DEFAULT_OPENING_CELL}" in clicks
+    assert "cmd s15" in clicks  # rainbow claimed
+    assert result["clicks"] >= 2

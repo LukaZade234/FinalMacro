@@ -26,12 +26,14 @@ HARVEST_VALUE = (10, 20, 35, 55, 90)
 OQ_COLORS = frozenset({"0", "1", "2", "3", "4", "t", "r"})
 
 # Mudae uses bare ``sp`` for red on $oq grids (same as roll buttons).
-OQ_RED_EMOJIS = frozenset({"sp", "spR"})
-OQ_MINE_EMOJIS = frozenset({"spP", "sp", "spR"})
+# The 4th purple may become red or rainbow (``spW``); both are treated alike.
+OQ_RED_EMOJIS = frozenset({"sp", "spR", "spW"})
+OQ_MINE_EMOJIS = frozenset({"spP", "sp", "spR", "spW"})
 
 _EMOJI_TO_OQ: dict[str, str] = {
     "spP": "t",
     "spR": "r",
+    "spW": "r",
     "spB": "0",
     "spT": "1",
     "spG": "2",
