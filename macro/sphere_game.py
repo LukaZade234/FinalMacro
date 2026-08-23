@@ -333,6 +333,28 @@ def is_free_oh_click(button: dict[str, Any]) -> bool:
     return _emoji(button) in SPHERE_FREE_EMOJIS
 
 
+def purple_free_outcome(
+    custom_id: str,
+    before_reward: str,
+    after_reward: str,
+    buttons: list[dict[str, Any]],
+) -> bool:
+    """True when a paid click resolved to a free purple outcome.
+
+    Dark spheres stay ``spD`` on the grid but add an ``spP`` reward line.
+    Hidden buttons can flip to ``spP`` on the grid when revealed.
+    """
+    for outcome in new_reward_line_types(before_reward, after_reward):
+        if outcome in SPHERE_FREE_EMOJIS:
+            return True
+    for button in buttons:
+        if str(button.get("custom_id") or "") != custom_id:
+            continue
+        if _emoji(button) in SPHERE_FREE_EMOJIS:
+            return True
+    return False
+
+
 def choose_oh_click(
     buttons: list[dict[str, Any]],
     *,
@@ -467,15 +489,6 @@ class OhSphereGame:
                     self._log(f"$oh: click failed ({kind}) — stopping")
                     break
 
-                if free:
-                    free_clicks += 1
-                    self._log(f"$oh: free click → {kind} ({free_clicks} free)")
-                else:
-                    clicks_spent += 1
-                    self._log(
-                        f"$oh: click {clicks_spent}/{clicks_budget} → {kind}"
-                    )
-
                 updated, reward_content = await self._wait_for_click_resolution(
                     grid_id,
                     before_sig,
@@ -486,21 +499,35 @@ class OhSphereGame:
                     self._log("$oh: click ack timeout — stopping")
                     break
 
-                if updated is None and reward_content != before_reward:
-                    self._log("$oh: continuing from reward line (grid edit pending)")
-
-                self._reward_content = reward_content
-                for outcome in new_reward_line_types(before_reward, reward_content):
-                    if outcome == "spP" and not free:
-                        free_clicks += 1
-                        self._log(
-                            f"$oh: reward → purple (free bonus, {free_clicks} free)"
-                        )
-
                 if updated is not None:
                     buttons = list(updated.buttons)
                 else:
                     buttons = _disable_button(buttons, custom_id)
+
+                if updated is None and reward_content != before_reward:
+                    self._log("$oh: continuing from reward line (grid edit pending)")
+
+                self._reward_content = reward_content
+                resolved_free = free or purple_free_outcome(
+                    custom_id,
+                    before_reward,
+                    reward_content,
+                    buttons,
+                )
+                if resolved_free:
+                    free_clicks += 1
+                    if free:
+                        self._log(f"$oh: free click → {kind} ({free_clicks} free)")
+                    else:
+                        self._log(
+                            f"$oh: free click → purple reveal ({free_clicks} free)"
+                        )
+                else:
+                    clicks_spent += 1
+                    self._log(
+                        f"$oh: click {clicks_spent}/{clicks_budget} → {kind}"
+                    )
+
                 await asyncio.sleep(self._click_delay)
 
             if is_oh_game_over(buttons):

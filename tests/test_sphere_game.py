@@ -19,6 +19,7 @@ from macro.sphere_game import (
     is_oh_reward_message,
     new_reward_line_types,
     parse_clicks_allowed,
+    purple_free_outcome,
     reward_has_entries,
     reward_line_types,
     total_reward_from_content,
@@ -489,9 +490,18 @@ def test_oh_game_free_purple_does_not_consume_budget():
     assert result["free_clicks"] == 2
 
 
+def test_purple_free_outcome_from_reward_or_grid():
+    buttons = [_btn(5, "spP", disabled=True)]
+    assert purple_free_outcome("cmd s5", "", "<:spP:1> **+42**", buttons) is True
+    dark_buttons = [_btn(5, "spD", disabled=True)]
+    assert purple_free_outcome("cmd s5", "", "<:spD:1> **+10**", dark_buttons) is False
+    hidden_reveal = [_btn(5, "spP", disabled=True)] + [_btn(i, "spU") for i in range(25) if i != 5]
+    assert purple_free_outcome("cmd s5", "", "", hidden_reveal) is True
+
+
 def test_oh_game_dark_purple_bonus_from_reward_tracker():
     grid0 = _grid_snapshot(
-        [_btn(i, "spD" if i == 5 else "spU") for i in range(25)],
+        [_btn(i, "spD" if i == 5 else "spU", disabled=(i != 5)) for i in range(25)],
         content="You can click **1** times on the buttons below.",
     )
     scripted = [
@@ -510,6 +520,88 @@ def test_oh_game_dark_purple_bonus_from_reward_tracker():
     result = asyncio.run(game.play(prefix="$"))
 
     assert len(actions.clicks) == 1
+    assert result["clicks"] == 0
+    assert result["free_clicks"] == 1
+
+
+def test_oh_game_hidden_purple_reveal_on_grid_is_free():
+    grid0 = _grid_snapshot(
+        [_btn(i, "spU", disabled=(i != 5)) for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    grid1 = _grid_snapshot(
+        [_btn(5, "spP", disabled=True)] + [_btn(i, "spU", disabled=True) for i in range(25) if i != 5],
+        content="You can click **1** times on the buttons below.",
+    )
+    scripted = [
+        grid0,
+        grid1,
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert actions.clicks == [(1000, "cmd s5")]
+    assert result["clicks"] == 0
+    assert result["free_clicks"] == 1
+
+
+def test_oh_game_hidden_purple_allows_another_paid_click():
+    grid0 = _grid_snapshot(
+        [_btn(i, "spU", disabled=(i != 5)) for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    grid1 = [
+        _btn(5, "spP", disabled=True),
+        _btn(10, "spY"),
+    ] + [_btn(i, "spU", disabled=True) for i in range(25) if i not in (5, 10)]
+    grid1 = _grid_snapshot(
+        grid1,
+        content="You can click **1** times on the buttons below.",
+    )
+    grid2 = [
+        _btn(5, "spP", disabled=True),
+        _btn(10, "spY", disabled=True),
+    ] + [_btn(i, "spU", disabled=True) for i in range(25) if i not in (5, 10)]
+    grid2 = _grid_snapshot(
+        grid2,
+        content="You can click **1** times on the buttons below.",
+    )
+    scripted = [
+        grid0,
+        grid1,
+        _reward_snapshot("<:spY:1> **+59**"),
+        grid2,
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    clicks: list[str] = []
+
+    async def track_click(message_id: int, custom_id: str) -> bool:
+        clicks.append(custom_id)
+        return True
+
+    actions.click_button = track_click  # type: ignore[method-assign]
+
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert len(clicks) == 2
+    assert clicks[0] == "cmd s5"
+    assert clicks[1] == "cmd s10"
     assert result["clicks"] == 1
     assert result["free_clicks"] == 1
 
