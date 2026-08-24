@@ -126,6 +126,66 @@ def test_roll_limit_wins_over_roll_command_context():
     assert result.fields["rolls_reset_minutes"] == 34
 
 
+def test_parse_minigame_exhausted_message():
+    from mudae.parsers.minigame_exhausted import (
+        format_exhausted_activity,
+        is_minigame_exhausted_message,
+        parse_minigame_exhausted,
+    )
+
+    content = (
+        "You don't have enough $oh for today. "
+        "Time to wait before the refill: 3h 08 min."
+    )
+    assert is_minigame_exhausted_message(content) is True
+    result = parse_minigame_exhausted(content)
+    assert result.kind == MessageKind.MINIGAME_EXHAUSTED
+    assert result.fields["game"] == "oh"
+    assert result.fields["exhausted"] is True
+    assert result.fields["refill_minutes"] == 3 * 60 + 8
+    assert result.summary == "$oh: out of minigames for today · refill in 3h 08 min"
+    assert format_exhausted_activity(result.fields) == result.summary
+
+
+def test_parse_minigame_exhausted_oc_oq_ot():
+    from mudae.parsers.minigame_exhausted import parse_minigame_exhausted
+
+    for game in ("oc", "oq", "ot"):
+        content = (
+            f"You don't have enough ${game} for today. "
+            "Time to wait before the refill: 45 min."
+        )
+        result = parse_minigame_exhausted(content)
+        assert result.fields["game"] == game
+        assert result.fields["refill_minutes"] == 45
+        assert f"${game}: out of minigames for today" in result.summary
+
+
+def test_minigame_exhausted_wins_over_oh_command_context():
+    content = (
+        "You don't have enough $oh for today. "
+        "Time to wait before the refill: 3h 08 min."
+    )
+    snapshot = MudaeMessageSnapshot(
+        message_id=9,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=content,
+        embeds=[],
+        buttons=[],
+        created_at="12:00:00",
+    )
+    result = parse_message(snapshot, reply_to_command="oh")
+    assert result.kind == MessageKind.MINIGAME_EXHAUSTED
+    assert result.fields["game"] == "oh"
+    assert result.fields["refill_minutes"] == 188
+
+
 def test_parse_us_stack_response():
     from mudae.parsers.us import is_us_stack_response, parse_us, parse_us_stacked
 

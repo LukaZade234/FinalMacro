@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
 import "../clock.js" as Clock
+import "../emptyStates.js" as Empty
 import "../components"
 
 Item {
@@ -350,7 +351,7 @@ Item {
 
                 Label {
                     visible: methodBreakdown().length === 0
-                    text: "No kakera logged yet."
+                    text: Empty.statsBreakdownEmpty(App.connected, entries().length > 0)
                     color: Theme.fgMuted
                     font.pixelSize: 12
                 }
@@ -368,6 +369,7 @@ Item {
                 dailySeries: filteredDailySeries()
                 monthlySeries: filteredMonthlySeries()
                 rangeDays: trendRangeDays
+                emptyText: Empty.chartRangeEmpty(App.connected, entries().length > 0, "kakera earnings")
             }
         }
 
@@ -496,9 +498,7 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: kakeraList.count === 0
-                            text: entries().length === 0
-                                ? "No kakera logged yet — earn kakera while connected to record entries."
-                                : "No entries match the current filters."
+                            text: Empty.statsLogEmpty(App.connected, entries().length > 0, "kakera")
                             color: Theme.fgMuted
                             font.pixelSize: 12
                         }

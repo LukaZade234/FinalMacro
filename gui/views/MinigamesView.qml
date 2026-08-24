@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
+import "../emptyStates.js" as Empty
 import "../components"
 
 Item {
@@ -154,12 +155,16 @@ Item {
         var games = list.length
         var base = 0
         var ocGrants = 0
+        var oqGrants = 0
+        var otGrants = 0
         var scored = 0
         var wins = 0
         for (var i = 0; i < list.length; i++) {
             var entry = list[i]
             base += Number(entry.base_value || 0)
             ocGrants += ocGrantsFor(entry)
+            oqGrants += Number(entry.oq_bonus || 0)
+            otGrants += Number(entry.ot_bonus || 0)
             if (hasWinCondition(entry.game)) {
                 scored += 1
                 if (entry.won)
@@ -173,7 +178,9 @@ Item {
             win_rate: scored ? wins / scored : 0,
             base_value: base,
             avg_base_value: games ? base / games : 0,
-            oc_grants: ocGrants
+            oc_grants: ocGrants,
+            oq_grants: oqGrants,
+            ot_grants: otGrants
         }
     }
 
@@ -286,7 +293,7 @@ Item {
         if (gameFilter === "all")
             return "Win rate is $oc / $oq only. Pick a game to see spawn and click rates for that type."
         if (gameFilter === "oh")
-            return "Hidden $oh clicks that resolve as Hidden grant $oc. Light and dark keep their own identity."
+            return "Hidden $oh clicks that resolve as Hidden grant $oc. Perk 10 on the first $oh of the day can grant extra $oq, $ot, and flat SP. Light and dark keep their own identity."
         if (hasWinCondition(gameFilter))
             return "Win means we clicked red or rainbow. Value is base SP, not the chat total."
         return "This game has no red/rainbow win. Value is base SP, not the chat total."
@@ -468,22 +475,40 @@ Item {
                 }
 
                 Label {
-                    visible: gameFilter === "oh"
-                    text: "$oc granted from hidden clicks: "
-                          + formatSp(currentTotals.oc_grants)
-                    color: Theme.fgMuted
-                    font.pixelSize: 12
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
-
-                Label {
                     visible: minigamesRoot.clickRows.length === 0
                     text: "No clicks in the selected games."
                     color: Theme.fgMuted
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
+                }
+            }
+        }
+
+        PanelCard {
+            visible: gameFilter === "oh"
+            Layout.fillWidth: true
+            title: "Granted from $oh"
+            titleSize: 14
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Label {
+                    text: "$oc from hidden clicks: " + formatSp(currentTotals.oc_grants)
+                    color: Theme.fgPrimary
+                    font.pixelSize: 13
+                }
+                Label {
+                    text: "Extra $oq from perk 10: " + formatSp(currentTotals.oq_grants)
+                    color: Theme.fgPrimary
+                    font.pixelSize: 13
+                }
+                Label {
+                    text: "Extra $ot from perk 10: " + formatSp(currentTotals.ot_grants)
+                    color: Theme.fgPrimary
+                    font.pixelSize: 13
                 }
             }
         }
@@ -560,9 +585,7 @@ Item {
                     Label {
                         anchors.centerIn: parent
                         visible: gameList.count === 0
-                        text: entries().length === 0
-                            ? "No minigames logged yet. Play $oh / $oc / $oq while connected."
-                            : "No entries match the current filters."
+                        text: Empty.statsLogEmpty(App.connected, entries().length > 0, "minigames")
                         color: Theme.fgMuted
                         font.pixelSize: 12
                     }

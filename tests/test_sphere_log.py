@@ -22,6 +22,7 @@ from mudae.types import MessageKind, MudaeMessageSnapshot
 def test_minigame_source_ids():
     assert minigame_source("oh") == "minigame_oh"
     assert source_label("minigame_oc") == "$oc minigame"
+    assert source_label("perk10") == "Perk 10 (invested spheres)"
     assert "oc" in MINIGAME_IDS
 
 
@@ -75,14 +76,21 @@ def test_record_sphere_sources(tmp_path, monkeypatch):
         guild_name="Guild",
         now=now,
     )
+    record_sphere_earning(
+        snapshot,
+        {"amount": 5600},
+        source="perk10",
+        now=now,
+    )
 
     store = type("S", (), {"accounts": [AccountProfile(id="acc1", name="Main", type="Main")]})()
     payload = client_payload(store)
-    assert payload["totals"]["all_time"] == 46 + 12 + 1273
+    assert payload["totals"]["all_time"] == 46 + 12 + 1273 + 5600
     sources = {row["id"]: row["amount"] for row in payload["by_source"]}
     assert sources["sphere_click"] == 46
     assert sources["kakera_bonus"] == 12
     assert sources["minigame_oh"] == 1273
+    assert sources["perk10"] == 5600
 
 
 def test_build_stats_by_source():

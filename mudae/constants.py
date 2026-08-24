@@ -65,7 +65,7 @@ SPHERE_OH_TYPE_LABELS = {
 }
 
 # Base SP with no bonuses. Minigame logs and the $oq bake-off use this, not
-# the chat ``+N`` (perk 9, invested spheres, and $bonus inflate that).
+# the chat ``+N`` (perk 9, perk 10 invested spheres, and $bonus inflate that).
 # Purple 5 / blue 10 are confirmed. Teal→orange follow the same ladder as
 # $oq harvest-by-adjacency. Red 150 is the $oq/$oc jackpot.
 # Rainbow 500 is the $ot rare-ship / $oq "or more" figure.

@@ -37,6 +37,7 @@ def _merge_game_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "clicks": 0,
         "reward": 0,
         "oq_bonus": 0,
+        "ot_bonus": 0,
         "oc_bonus": 0,
         "spheres_bonus": 0,
         "reason": "done",
@@ -46,6 +47,7 @@ def _merge_game_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         merged["clicks"] += int(result.get("clicks") or 0)
         merged["reward"] += int(result.get("reward") or 0)
         merged["oq_bonus"] += int(result.get("oq_bonus") or 0)
+        merged["ot_bonus"] += int(result.get("ot_bonus") or 0)
         merged["oc_bonus"] += int(result.get("oc_bonus") or 0)
         merged["spheres_bonus"] += int(result.get("spheres_bonus") or 0)
         if result.get("reason") not in {None, "done"}:
@@ -100,6 +102,7 @@ class PlayAllMinigames:
         oh_uses = availability["oh_total"]
         oc_uses = availability["oc_total"]
         oq_uses = availability["oq_total"]
+        ot_uses = availability["ot_total"]
 
         if oh_uses > 0:
             oh_results = await self._play_batches(
@@ -110,13 +113,20 @@ class PlayAllMinigames:
             for result in oh_results:
                 self._record_reward("oh", result)
             oq_bonus = int(oh_result.get("oq_bonus") or 0)
+            ot_bonus = int(oh_result.get("ot_bonus") or 0)
             oc_bonus = int(oh_result.get("oc_bonus") or 0)
-            spheres_bonus = int(oh_result.get("spheres_bonus") or 0)
             if oq_bonus > 0:
                 oq_uses += oq_bonus
                 self.availability["oq_total"] = oq_uses
                 self._log(
-                    f"play-all: +{oq_bonus} $oq from invested spheres → $oq {oq_uses}"
+                    f"play-all: +{oq_bonus} $oq from perk 10 → $oq {oq_uses}"
+                )
+            if ot_bonus > 0:
+                ot_uses += ot_bonus
+                self.availability["ot_total"] = ot_uses
+                self._log(
+                    f"play-all: +{ot_bonus} $ot from perk 10 → $ot {ot_uses} "
+                    "(saved, not played)"
                 )
             if oc_bonus > 0:
                 oc_uses += oc_bonus
@@ -124,8 +134,6 @@ class PlayAllMinigames:
                 self._log(
                     f"play-all: +{oc_bonus} $oc from $oh hidden clicks → $oc {oc_uses}"
                 )
-            if spheres_bonus > 0 and self._on_game_reward:
-                self._on_game_reward("oh", spheres_bonus, 0)
             await asyncio.sleep(self._between_games_sec)
         else:
             self._log("play-all: no $oh uses — skipping")
@@ -154,7 +162,7 @@ class PlayAllMinigames:
         self._log(
             "play-all: finished · "
             f"$oh {oh_uses} · $oc {oc_uses} · $oq {oq_uses} · "
-            f"$ot {availability['ot_total']} unused"
+            f"$ot {ot_uses} unused"
         )
         return {
             "availability": dict(self.availability),

@@ -72,6 +72,14 @@ def test_ohu8_clicked_and_rolled_helpers():
     assert parse_refill_minutes(_OHU8_SAMPLE) == 669
 
 
+def test_parse_refill_minutes_after_colon():
+    assert parse_refill_minutes(
+        "Time to wait before the refill: 3h 08 min."
+    ) == 3 * 60 + 8
+    assert parse_refill_minutes("Time to wait before the refill: 45 min.") == 45
+    assert parse_refill_minutes("Time to wait before the refill: 2h.") == 120
+
+
 def test_mode_from_ohu8_done_at_max():
     mode = mode_from_ohu8_fields({"perk8_clicked_today": 40, "perk8_click_max": 40})
     assert mode is Perk8PriorityMode.DONE

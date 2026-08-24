@@ -2013,6 +2013,31 @@ class AppBridge(QObject):
             Qt.ConnectionType.QueuedConnection,
         )
 
+    def _record_perk10_spheres(self, amount: int) -> None:
+        if amount <= 0 or not self._monitor:
+            return
+        from mudae.sphere_log import record_perk10_earning
+
+        record_perk10_earning(
+            amount=amount,
+            channel_id=self._monitor.channel_id,
+            channel_name=self._run_channel_name,
+            guild_id=self._run_guild_id,
+            guild_name=self._run_guild_name,
+        )
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_spheres_notify",
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+    def _apply_minigame_play_status(self, result: dict[str, Any] | None) -> None:
+        if not result or result.get("reason") != "exhausted":
+            return
+        from mudae.parsers.minigame_exhausted import format_exhausted_activity
+
+        self._set_status(format_exhausted_activity(result))
+
     def _record_minigame_session(
         self,
         result: dict[str, Any] | None,
@@ -2023,6 +2048,8 @@ class AppBridge(QObject):
         if not result or not self._monitor:
             if log:
                 log("minigame stats skipped (no result or not connected)")
+            return
+        if result.get("reason") in {"exhausted", "no grid"}:
             return
         session = result.get("session")
         if not isinstance(session, dict):
@@ -2051,6 +2078,9 @@ class AppBridge(QObject):
             recorder.attach_minigame(session)
         if log:
             log(f"Minigame stats saved: {log_path()}")
+        perk10 = int(session.get("spheres_bonus") or result.get("spheres_bonus") or 0)
+        if perk10 > 0:
+            self._record_perk10_spheres(perk10)
         QMetaObject.invokeMethod(
             self,
             "_deliver_minigames_notify",
@@ -2462,6 +2492,7 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
+                self._apply_minigame_play_status(result)
                 self._record_minigame_session(
                     result, recorder=recorder, log=activity.write
                 )
@@ -2469,9 +2500,6 @@ class AppBridge(QObject):
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
                     self._record_minigame_spheres("oh", reward, clicks=clicks)
-                spheres_bonus = int(result.get("spheres_bonus") or 0)
-                if spheres_bonus > 0:
-                    self._record_minigame_spheres("oh", spheres_bonus, clicks=0)
             except Exception as exc:  # noqa: BLE001 - surface to the activity log
                 reason = "error"
                 activity.write(f"$oh error: {exc}")
@@ -2507,6 +2535,7 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
+                self._apply_minigame_play_status(result)
                 self._record_minigame_session(
                     result, recorder=recorder, log=activity.write
                 )
@@ -2549,6 +2578,7 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
+                self._apply_minigame_play_status(result)
                 self._record_minigame_session(
                     result, recorder=recorder, log=activity.write
                 )
@@ -2609,6 +2639,10 @@ class AppBridge(QObject):
                 self._minigame_availability = dict(result.get("availability") or {})
                 if result.get("reason") == "ohu failed":
                     reason = "error"
+                for game_result in (result.get("played") or {}).values():
+                    if game_result.get("reason") == "exhausted":
+                        self._apply_minigame_play_status(game_result)
+                        break
             except Exception as exc:  # noqa: BLE001 - surface to the activity log
                 reason = "error"
                 activity.write(f"play-all error: {exc}")

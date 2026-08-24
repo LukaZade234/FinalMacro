@@ -43,6 +43,13 @@ _OH_GRID_WITH_BONUS = (
     "Blue spheres unveil 3 buttons, teal unveil 1."
 )
 
+_OH_GRID_WITH_OT = (
+    "+2 $oq, +1 $ot and +5,600 :sp: from your invested spheres!\n"
+    "You can click 5 times on the buttons below (for 2 minutes. Only you can click).\n"
+    "Spheres buttons have different values depending on their color, like kakera.\n"
+    "Blue spheres unveil 3 buttons, teal unveil 1.\n"
+)
+
 
 def test_minigame_command_multiplier():
     assert minigame_command("oh", 1) == "oh"
@@ -107,9 +114,15 @@ def test_parse_ohu8_includes_minigame_totals():
 
 def test_parse_oh_invested_bonus():
     bonus = parse_oh_invested_bonus(_OH_GRID_WITH_BONUS)
-    assert bonus == {"oq_bonus": 2, "spheres_bonus": 5344}
+    assert bonus == {"oq_bonus": 2, "ot_bonus": 0, "spheres_bonus": 5344}
+    assert parse_oh_invested_bonus(_OH_GRID_WITH_OT) == {
+        "oq_bonus": 2,
+        "ot_bonus": 1,
+        "spheres_bonus": 5600,
+    }
     assert parse_oh_invested_bonus("You can click **5** times") == {
         "oq_bonus": 0,
+        "ot_bonus": 0,
         "spheres_bonus": 0,
     }
 
@@ -159,6 +172,7 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
                 "clicks": 5,
                 "reward": 100,
                 "oq_bonus": 2,
+                "ot_bonus": 1,
                 "oc_bonus": 3,
                 "spheres_bonus": 5344,
                 "reason": "done",
@@ -206,13 +220,14 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
     assert sent == ["oh:7:$", "oc:7:$", "oq:10:$", "oq:1:$"]
     assert result["availability"]["oq_total"] == 11
     assert result["availability"]["oc_total"] == 7
-    assert result["availability"]["ot_total"] == 3
+    assert result["availability"]["ot_total"] == 4
     assert ("oh", 100, 5) in rewards
-    assert ("oh", 5344, 0) in rewards
+    assert ("oh", 5344, 0) not in rewards
     assert ("oc", 50, 5) in rewards
     assert ("oq", 80, 7) in rewards
     assert any("$ot 3 (saved, not played)" in line for line in logs)
     assert any("$oc from $oh hidden clicks" in line for line in logs)
+    assert any("perk 10 → $ot 4" in line for line in logs)
 
 
 def test_play_all_skips_zero_uses(monkeypatch):

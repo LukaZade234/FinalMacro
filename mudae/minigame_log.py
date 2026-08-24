@@ -139,7 +139,7 @@ def record_minigame_session(
 ) -> dict[str, Any] | None:
     """Append one finished minigame. Skip sessions that never showed a grid."""
     reason = str(session.get("reason") or "")
-    if reason == "no grid":
+    if reason in {"no grid", "exhausted"}:
         return None
     clicks = list(session.get("clicks") or [])
     board = list(session.get("board") or [])
@@ -168,6 +168,9 @@ def record_minigame_session(
         "clicks_paid": int(session.get("clicks_paid") or 0),
         "clicks_budget": int(session.get("clicks_budget") or 0),
         "oc_bonus": int(session.get("oc_bonus") or 0),
+        "oq_bonus": int(session.get("oq_bonus") or 0),
+        "ot_bonus": int(session.get("ot_bonus") or 0),
+        "spheres_bonus": int(session.get("spheres_bonus") or 0),
         "reason": reason,
         "recorded_at": stamp.isoformat(),
         "date_key": utc_date_key(stamp),
@@ -243,6 +246,8 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
     wins = 0
     base_value = sum(int(entry.get("base_value") or 0) for entry in entries)
     oc_grants = 0
+    oq_grants = 0
+    ot_grants = 0
     by_game: dict[str, dict[str, Any]] = {}
     spawn_counts: dict[str, int] = {}
     click_counts: dict[str, int] = {}
@@ -260,6 +265,8 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
                 "wins": 0,
                 "base_value": 0,
                 "oc_bonus": 0,
+                "oq_bonus": 0,
+                "ot_bonus": 0,
                 "has_win": game in WIN_GAMES,
             },
         )
@@ -275,6 +282,12 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
             grants = sum(int(click.get("oc_bonus") or 0) for click in entry.get("clicks") or [])
         bucket["oc_bonus"] += grants
         oc_grants += grants
+        oq_grant = int(entry.get("oq_bonus") or 0)
+        ot_grant = int(entry.get("ot_bonus") or 0)
+        bucket["oq_bonus"] += oq_grant
+        bucket["ot_bonus"] += ot_grant
+        oq_grants += oq_grant
+        ot_grants += ot_grant
         for raw in entry.get("board") or []:
             emoji = str(raw or "").strip()
             if emoji in {"", "spU"}:
@@ -311,6 +324,8 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
             "avg_base_value": (base_value / games) if games else 0.0,
             "revealed_cells": revealed,
             "oc_grants": oc_grants,
+            "oq_grants": oq_grants,
+            "ot_grants": ot_grants,
         },
         "by_game": by_game_series,
         "spawn": _counts_to_series(spawn_counts, revealed),

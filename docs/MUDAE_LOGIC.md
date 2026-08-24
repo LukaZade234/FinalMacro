@@ -214,7 +214,12 @@ include power exhausted and “stop after N rolls”.
 
 `$ohu` reports daily uses left / stored for `$oh`, `$oc`, `$oq`, `$ot`.
 **Play all minigames** queries `$ohu`, then spends `$oh` / `$oc` / `$oq`.
-`$ot` is parsed but not played yet.
+`$ot` is parsed but not played yet. Extra `$oq` / `$ot` from perk 10 on
+the first `$oh` of the day are counted (play-all spends the extra `$oq`).
+Playing a game with no uses left gets
+``You don't have enough $oh for today. Time to wait before the refill: 3h 08 min.``
+(``$oc`` / ``$oq`` / ``$ot`` in place of ``$oh``); the activity log reports
+out of minigames instead of a grid timeout.
 
 Each finished `$oh` / `$oc` / `$oq` writes one row to `data/minigame_log.json`
 (Statistics → Minigames): the 5×5 after the final reveal, clicks in order,
@@ -263,6 +268,26 @@ the real cap (`10 + SP9`).
 - The macro increments by one on each confirmed **sphere button click**
   (`MessageKind.SPHERE_CLICK`, excluding `spM`). No adaptive skip logic yet —
   `SphereReactionRules.types_allowed` still governs which colours to click.
+
+---
+
+## Perk 10 (invested spheres)
+
+Perk 10 pays on the **first `$oh` of the UTC day**. The grid message can
+include a line like:
+
+```
++2 $oq, +1 $ot and +5,600 :sp: from your invested spheres!
+```
+
+Older lines omit `$ot`: `+2 $oq and +5,344 :sp: from your invested spheres!`
+
+- **Flat SP** is logged as sphere source `perk10` (Statistics → Spheres),
+  not as `$oh` minigame earnings.
+- Extra **`$oq` / `$ot` uses** are stored on that `$oh` session
+  (`oq_bonus` / `ot_bonus`). Statistics → Minigames → `$oh` shows the
+  totals. Play-all spends the extra `$oq` (like bonus `$oc` from hidden
+  clicks). Extra `$ot` is counted in `$ohu` availability but not played yet.
 
 ---
 

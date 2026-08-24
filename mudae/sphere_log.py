@@ -25,6 +25,7 @@ _writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
 SOURCE_LABELS: dict[str, str] = {
     "sphere_click": "Sphere button click",
     "kakera_bonus": "Bonus from kakera click",
+    "perk10": "Perk 10 (invested spheres)",
     "minigame_oh": "$oh minigame",
     "minigame_oc": "$oc minigame",
     "minigame_oq": "$oq minigame",
@@ -208,6 +209,43 @@ def record_minigame_earning(
         snapshot,
         fields,
         source=minigame_source(game_id),
+        amount=int(amount),
+        account_id=account_id,
+        account_name=account_name,
+        now=now,
+    )
+
+
+def record_perk10_earning(
+    *,
+    amount: int,
+    channel_id: int,
+    channel_name: str | None = None,
+    guild_id: int | None = None,
+    guild_name: str | None = None,
+    account_id: str | None = None,
+    account_name: str | None = None,
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Log flat SP from perk 10 on the first ``$oh`` of the day."""
+    snapshot = MudaeMessageSnapshot(
+        message_id=0,
+        channel_id=int(channel_id),
+        channel_name=str(channel_name or ""),
+        guild_id=guild_id,
+        guild_name=guild_name,
+        author_id=0,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[],
+        buttons=[],
+        created_at=dt.datetime.now(dt.timezone.utc).strftime("%H:%M:%S"),
+    )
+    return record_sphere_earning(
+        snapshot,
+        {"amount": int(amount)},
+        source="perk10",
         amount=int(amount),
         account_id=account_id,
         account_name=account_name,

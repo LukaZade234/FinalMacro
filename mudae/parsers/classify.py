@@ -10,6 +10,7 @@ from mudae.parsers.claim import is_custom_claim, is_marriage_claim
 from mudae.parsers.claim_interval import is_claim_interval_message
 from mudae.parsers.dk import is_dk_claim
 from mudae.parsers.reaction_power import is_kakera_react_denied
+from mudae.parsers.minigame_exhausted import is_minigame_exhausted_message
 from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
 from mudae.parsers.embed import (
@@ -84,6 +85,8 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.CLAIM_INTERVAL
     if is_roll_limit_message(content):
         return MessageKind.ROLL_LIMIT
+    if is_minigame_exhausted_message(content):
+        return MessageKind.MINIGAME_EXHAUSTED
 
     if snapshot.embeds and is_character_embed(snapshot.embeds[0]):
         if has_kakera_buttons(snapshot):

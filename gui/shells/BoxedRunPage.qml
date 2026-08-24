@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import gui 1.0
+import "../emptyStates.js" as Empty
 
 /*
     Boxed — Run page.
@@ -249,7 +250,7 @@ Item {
                     height: 24
                     verticalAlignment: Text.AlignVCenter
                     visible: feed.count === 0
-                    text: run.connected ? "no activity yet" : "not connected — no activity"
+                    text: Empty.runFeedEmpty(run.connected)
                     color: Theme.mute
                     font.family: Theme.monoFamily
                     font.pixelSize: Theme.sizeBody

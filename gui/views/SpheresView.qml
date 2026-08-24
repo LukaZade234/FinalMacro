@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
 import "../clock.js" as Clock
+import "../emptyStates.js" as Empty
 import "../components"
 
 Item {
@@ -208,7 +209,7 @@ Item {
         anchors.fill: parent
 
         Label {
-            text: "Spheres from roll button clicks, kakera click bonuses, and minigames while connected. $oh, $oc, and $oq minigames are tracked."
+            text: "Spheres from roll button clicks, kakera click bonuses, perk 10 invested-sphere bonuses, and minigames while connected. $oh, $oc, and $oq minigames are tracked."
             color: Theme.fgMuted
             font.pixelSize: 11
             wrapMode: Text.WordWrap
@@ -350,7 +351,7 @@ Item {
 
                 Label {
                     visible: sourceBreakdown().length === 0
-                    text: "No spheres logged yet."
+                    text: Empty.statsBreakdownEmpty(App.connected, entries().length > 0)
                     color: Theme.fgMuted
                     font.pixelSize: 12
                 }
@@ -368,7 +369,7 @@ Item {
                 dailySeries: filteredDailySeries()
                 monthlySeries: filteredMonthlySeries()
                 rangeDays: trendRangeDays
-                emptyText: "No sphere earnings in this range."
+                emptyText: Empty.chartRangeEmpty(App.connected, entries().length > 0, "sphere earnings")
             }
         }
 
@@ -498,9 +499,7 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: sphereList.count === 0
-                            text: entries().length === 0
-                                ? "No spheres logged yet — earn spheres while connected to record entries."
-                                : "No entries match the current filters."
+                            text: Empty.statsLogEmpty(App.connected, entries().length > 0, "spheres")
                             color: Theme.fgMuted
                             font.pixelSize: 12
                         }

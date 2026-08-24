@@ -167,6 +167,29 @@ def test_hidden_oh_click_grants_oc_not_sp():
     assert stats["spawn"] == []
 
 
+def test_oh_perk10_grants_on_session():
+    session = build_session(
+        "oh",
+        [make_click(0, "spY", paid=True)],
+        ["spY"] + ["spU"] * 24,
+        clicks_paid=1,
+        clicks_budget=5,
+        reason="done",
+        oq_bonus=2,
+        ot_bonus=1,
+        spheres_bonus=5600,
+    )
+    assert session["oq_bonus"] == 2
+    assert session["ot_bonus"] == 1
+    assert session["spheres_bonus"] == 5600
+    stats = build_stats([session])
+    assert stats["totals"]["oq_grants"] == 2
+    assert stats["totals"]["ot_grants"] == 1
+    by_id = {row["id"]: row for row in stats["by_game"]}
+    assert by_id["oh"]["oq_bonus"] == 2
+    assert by_id["oh"]["ot_bonus"] == 1
+
+
 def test_oh_does_not_affect_win_rate():
     oh = build_session(
         "oh",
@@ -209,6 +232,10 @@ def test_record_minigame_session_skips_no_grid(tmp_path, monkeypatch):
     monkeypatch.setattr(minigame_log, "_LOG_PATH", tmp_path / "minigame_log.json")
     minigame_log._events = []
     assert record_minigame_session({"reason": "no grid", "game": "oh"}, channel_id=1) is None
+    assert record_minigame_session(
+        {"reason": "exhausted", "game": "oh", "refill_minutes": 188},
+        channel_id=1,
+    ) is None
     assert minigame_log._events == []
 
 

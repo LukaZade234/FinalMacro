@@ -30,13 +30,24 @@ _OT_LEFT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# First $oh of the day can grant bonus $oq (and spheres) from invested stock:
+# First $oh of the day can grant perk-10 bonuses from invested stock:
 # ``+2 $oq and +5,344 <:sp:…> from your invested spheres!``
-_INVESTED_BONUS_RE = re.compile(
-    r"\*{0,2}\+\*{0,2}(\d+)\*{0,2}\s*\$oq"
-    r"(?:\s+and\s+\*{0,2}\+\*{0,2}([\d,]+)\*{0,2})?"
-    r".*?from your invested spheres",
-    re.IGNORECASE | re.DOTALL,
+# ``+2 $oq, +1 $ot and +5,600 :sp: from your invested spheres!``
+_INVESTED_ANCHOR_RE = re.compile(
+    r"from your invested spheres",
+    re.IGNORECASE,
+)
+_OQ_BONUS_RE = re.compile(
+    r"\*{0,2}\+\*{0,2}(\d+)\*{0,2}\s*\$oq",
+    re.IGNORECASE,
+)
+_OT_BONUS_RE = re.compile(
+    r"\*{0,2}\+\*{0,2}(\d+)\*{0,2}\s*\$ot",
+    re.IGNORECASE,
+)
+_SP_BONUS_RE = re.compile(
+    r"\*{0,2}\+\*{0,2}([\d,]+)\*{0,2}\s*(?:<:sp:|:sp:)",
+    re.IGNORECASE,
 )
 
 
@@ -75,14 +86,22 @@ def parse_minigame_availability(content: str) -> dict[str, int]:
 
 
 def parse_oh_invested_bonus(content: str) -> dict[str, int]:
-    """Parse ``+N $oq and +M sp from your invested spheres!`` on an ``$oh`` grid."""
-    match = _INVESTED_BONUS_RE.search(content or "")
-    if match is None:
-        return {"oq_bonus": 0, "spheres_bonus": 0}
-    oq_bonus = int(match.group(1))
-    spheres_raw = match.group(2)
-    spheres_bonus = int(spheres_raw.replace(",", "")) if spheres_raw else 0
-    return {"oq_bonus": oq_bonus, "spheres_bonus": spheres_bonus}
+    """Parse perk-10 ``$oq`` / ``$ot`` / SP on the first ``$oh`` of the day."""
+    empty = {"oq_bonus": 0, "ot_bonus": 0, "spheres_bonus": 0}
+    if not content:
+        return empty
+    anchor = _INVESTED_ANCHOR_RE.search(content)
+    if anchor is None:
+        return empty
+    head = content[: anchor.end()]
+    oq = _OQ_BONUS_RE.search(head)
+    ot = _OT_BONUS_RE.search(head)
+    spheres = _SP_BONUS_RE.search(head)
+    return {
+        "oq_bonus": int(oq.group(1)) if oq else 0,
+        "ot_bonus": int(ot.group(1)) if ot else 0,
+        "spheres_bonus": int(spheres.group(1).replace(",", "")) if spheres else 0,
+    }
 
 
 def is_ohu_response(content: str) -> bool:

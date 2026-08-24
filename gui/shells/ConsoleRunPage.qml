@@ -3,6 +3,7 @@ import QtQuick.Layouts
 
 import gui 1.0
 import "../components"
+import "../emptyStates.js" as Empty
 
 /*
     Console — Run page.
@@ -288,7 +289,7 @@ Item {
                         height: 25
                         verticalAlignment: Text.AlignVCenter
                         visible: feed.count === 0
-                        text: run.connected ? "no activity yet" : "not connected — no activity"
+                        text: Empty.runFeedEmpty(run.connected)
                         color: Theme.mute
                         font.family: Theme.monoFamily
                         font.pixelSize: Theme.sizeBody

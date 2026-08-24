@@ -35,6 +35,19 @@ _REFILL_M_RE = re.compile(
     r"\*{0,2}(\d+)\*{0,2}\s*min(?:ute)?s?\s+before the refill",
     re.IGNORECASE,
 )
+# Exhausted-minigame form: ``Time to wait before the refill: 3h 08 min.``
+_REFILL_AFTER_HM_RE = re.compile(
+    r"before the refill:\s*\*{0,2}(\d+)\*{0,2}\s*h\s*\*{0,2}(\d+)\*{0,2}\s*min",
+    re.IGNORECASE,
+)
+_REFILL_AFTER_H_RE = re.compile(
+    r"before the refill:\s*\*{0,2}(\d+)\*{0,2}\s*h(?:ours?)?(?!\s*\*{0,2}\d)",
+    re.IGNORECASE,
+)
+_REFILL_AFTER_M_RE = re.compile(
+    r"before the refill:\s*\*{0,2}(\d+)\*{0,2}\s*min(?:ute)?s?",
+    re.IGNORECASE,
+)
 
 _OHU8_NEW_SAMPLE = (
     "0 $oh left for today, 0 $oc, 0 $oq and 0 $ot (+1 stored).\n"
@@ -55,6 +68,15 @@ def parse_refill_minutes(content: str) -> int | None:
     if match:
         return int(match.group(1)) * 60
     match = _REFILL_M_RE.search(content)
+    if match:
+        return int(match.group(1))
+    match = _REFILL_AFTER_HM_RE.search(content)
+    if match:
+        return int(match.group(1)) * 60 + int(match.group(2))
+    match = _REFILL_AFTER_H_RE.search(content)
+    if match:
+        return int(match.group(1)) * 60
+    match = _REFILL_AFTER_M_RE.search(content)
     if match:
         return int(match.group(1))
     return None

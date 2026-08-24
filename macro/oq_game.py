@@ -13,7 +13,13 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from macro.minigame_util import minigame_command
+from macro.minigame_util import (
+    empty_minigame_result,
+    log_minigame_exhausted,
+    minigame_command,
+    snapshot_is_minigame_exhausted,
+    wait_for_grid_or_exhausted,
+)
 from macro.minigame_board import (
     board_emojis,
     build_session,
@@ -127,10 +133,13 @@ class OqSphereGame:
             self._log(f"{label}: starting sphere game")
             await self._actions.send_command(cmd, prefix=prefix)
 
-            grid = await self._wait_for_grid()
+            grid, exhausted = await self._wait_for_grid()
+            if exhausted is not None:
+                log_minigame_exhausted(self._log, exhausted)
+                return empty_minigame_result("exhausted", exhausted=exhausted)
             if grid is None:
                 self._log(f"{label}: grid did not appear (timeout)")
-                return {"clicks": 0, "reward": 0, "reason": "no grid"}
+                return empty_minigame_result("no grid")
 
             grid_id = grid.message_id
             buttons = list(grid.buttons)
@@ -321,12 +330,15 @@ class OqSphereGame:
         row, col = divmod(index, 5)
         return f"({row + 1},{col + 1})"
 
-    async def _wait_for_grid(self) -> Any | None:
-        result = await self._actions.wait_for(
-            self._make_predicate(lambda snapshot: is_oq_grid_message(snapshot)),
+    async def _wait_for_grid(self) -> tuple[Any | None, dict[str, Any] | None]:
+        return await wait_for_grid_or_exhausted(
+            self._actions,
+            self._make_predicate(
+                lambda snapshot: is_oq_grid_message(snapshot)
+                or snapshot_is_minigame_exhausted(snapshot)
+            ),
             timeout=self._grid_timeout,
         )
-        return result[0] if result else None
 
     async def _wait_for_click_resolution(
         self,

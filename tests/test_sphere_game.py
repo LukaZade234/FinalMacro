@@ -767,3 +767,25 @@ def test_oh_game_handles_missing_grid():
     result = asyncio.run(game.play())
     assert result["clicks"] == 0
     assert result["reason"] == "no grid"
+
+
+def test_oh_game_handles_exhausted_uses():
+    snap = SimpleNamespace(
+        message_id=9,
+        is_mudae=True,
+        content=(
+            "You don't have enough $oh for today. "
+            "Time to wait before the refill: 3h 08 min."
+        ),
+        buttons=[],
+    )
+    logs: list[str] = []
+    actions = _FakeActions([snap])
+    monitor = SimpleNamespace(macro_active=False)
+    game = OhSphereGame(actions, monitor, log=logs.append, click_delay=0.0)
+    result = asyncio.run(game.play())
+    assert result["reason"] == "exhausted"
+    assert result["game"] == "oh"
+    assert result["refill_minutes"] == 188
+    assert any("out of minigames for today" in line for line in logs)
+    assert any("3h 08 min" in line for line in logs)

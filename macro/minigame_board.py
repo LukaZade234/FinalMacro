@@ -195,6 +195,9 @@ def build_session(
     clicks_budget: int,
     reason: str,
     oc_bonus: int | None = None,
+    oq_bonus: int = 0,
+    ot_bonus: int = 0,
+    spheres_bonus: int = 0,
 ) -> dict[str, Any]:
     normalized_board = [normalize_sphere_emoji(cell) for cell in board]
     while len(normalized_board) < GRID_CELLS:
@@ -221,5 +224,8 @@ def build_session(
         "clicks_paid": int(clicks_paid),
         "clicks_budget": int(clicks_budget),
         "oc_bonus": grants,
+        "oq_bonus": int(oq_bonus),
+        "ot_bonus": int(ot_bonus),
+        "spheres_bonus": int(spheres_bonus),
         "reason": str(reason or ""),
     }

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
+import "../emptyStates.js" as Empty
 
 // Filterable, color-coded activity log for the Run tab (selectable for copy/paste).
 ColumnLayout {
@@ -65,8 +66,8 @@ ColumnLayout {
         var rows = filteredEntries()
         if (rows.length === 0) {
             var empty = root.entries.length === 0
-                ? "No activity yet."
-                : "No lines match this filter."
+                ? Empty.activityLogEmpty(App.connected, false)
+                : Empty.activityLogEmpty(App.connected, true)
             return '<span style="color:' + Theme.fgMuted + '">' + empty + "</span>"
         }
         var parts = []

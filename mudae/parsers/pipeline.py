@@ -20,6 +20,10 @@ from mudae.parsers.settings import parse_settings
 from mudae.parsers.sphere import parse_sphere_click
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
+from mudae.parsers.minigame_exhausted import (
+    is_minigame_exhausted_message,
+    parse_minigame_exhausted,
+)
 from mudae.parsers.ohu import parse_ohu
 from mudae.parsers.ohu8 import parse_ohu8
 from mudae.parsers.dk import parse_dk
@@ -47,6 +51,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.CLAIM: "claim",
     MessageKind.CLAIM_INTERVAL: "claim interval",
     MessageKind.ROLL_LIMIT: "roll limit",
+    MessageKind.MINIGAME_EXHAUSTED: "minigame exhausted",
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
 }
@@ -127,6 +132,8 @@ def parse_mudae_message(
     content = snapshot.content or ""
     if is_roll_limit_message(content):
         return parse_roll_limit(content)
+    if is_minigame_exhausted_message(content):
+        return parse_minigame_exhausted(content)
 
     resolved = resolve_command(
         reply_to_command,
@@ -172,6 +179,8 @@ def parse_mudae_message(
         return parse_claim_interval(snapshot.content)
     if kind == MessageKind.ROLL_LIMIT:
         return parse_roll_limit(snapshot.content)
+    if kind == MessageKind.MINIGAME_EXHAUSTED:
+        return parse_minigame_exhausted(snapshot.content)
     if kind == MessageKind.OWNERSHIP_UPDATE:
         return parse_ownership_update(snapshot)
     if kind == MessageKind.CHARACTER_EMBED and snapshot.embeds:

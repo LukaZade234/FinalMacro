@@ -4,6 +4,7 @@ import Qt5Compat.GraphicalEffects
 
 import gui 1.0
 import "../components"
+import "../emptyStates.js" as Empty
 
 /*
     Haul — Run page.
@@ -312,7 +313,7 @@ Item {
                             height: 28
                             verticalAlignment: Text.AlignVCenter
                             visible: feed.count === 0
-                            text: run.connected ? "No activity yet" : "Not connected — no activity"
+                            text: Empty.runFeedEmpty(run.connected)
                             color: Theme.mute
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.sizeBody

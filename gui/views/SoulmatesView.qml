@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
+import "../emptyStates.js" as Empty
 import "../components"
 
 Item {
@@ -333,9 +334,7 @@ Item {
                     chartData: activeChartData()
                     selectable: chartMode === "server" && chartServerFocus === ""
                     selectedId: chartServerFocus
-                    emptyText: entries.length === 0
-                        ? "No soulmates logged yet."
-                        : "No data for this view."
+                    emptyText: Empty.soulmateChartEmpty(App.connected, entries.length > 0)
                     onSliceClicked: function(id, label) {
                         if (chartMode === "server" && chartServerFocus === "")
                             focusServer(id)
@@ -495,9 +494,7 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: soulmateList.count === 0
-                            text: entries.length === 0
-                                ? "No soulmates logged yet — roll while connected to record entries."
-                                : "No entries match the current filters."
+                            text: Empty.statsLogEmpty(App.connected, entries.length > 0, "soulmates")
                             color: Theme.fgMuted
                             font.pixelSize: 12
                         }

@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
 import "../clock.js" as Clock
+import "../emptyStates.js" as Empty
 import "../components"
 
 Item {
@@ -508,7 +509,7 @@ Item {
                         monthlySeries: keysRoot.chartMode === 1 ? filteredMonthlySeries() : []
                         omegaDailySeries: keysRoot.chartMode === 2 ? filteredOmegaDailySeries() : []
                         rangeDays: trendRangeDays
-                        emptyText: "No key gains in this range."
+                        emptyText: Empty.chartRangeEmpty(App.connected, entries().length > 0, "key gains")
                         showOnly: keysRoot.chartMode
                     }
                 }
@@ -567,7 +568,7 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: sourceBreakdown().length === 0
-                            text: "No data yet"
+                            text: Empty.statsBreakdownEmpty(App.connected, entries().length > 0)
                             color: Theme.fgMuted
                             font.pixelSize: 12
                         }
@@ -666,7 +667,7 @@ Item {
                     Label {
                         anchors.centerIn: parent
                         visible: recentEntries().length === 0
-                        text: "No key gains logged yet."
+                        text: Empty.statsLogEmpty(App.connected, entries().length > 0, "keys")
                         color: Theme.fgMuted
                         font.pixelSize: 12
                     }
