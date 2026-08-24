@@ -23,6 +23,10 @@ _COMPONENT_RE = re.compile(
     r"(?:\$)?(\w+(?:\s+\w+)?)\s*=\s*\*\*([^*]+)\*\*",
     re.IGNORECASE,
 )
+_SLUGIFY_RE = re.compile(r"[^a-z0-9]+")
+_RANGE_RE = re.compile(r"\d+-\d+")
+_PERCENT_RE = re.compile(r"\+?(\d+(?:\.\d+)?)%")
+_INTERVAL_PCT_RE = re.compile(r"([\d.]+%)")
 
 
 def _normalize_content(content: str) -> str:
@@ -40,16 +44,16 @@ def _command_keys(suffix: str) -> list[str]:
 
 
 def _slugify(text: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    slug = _SLUGIFY_RE.sub("_", text.lower()).strip("_")
     return slug[:64] or "bonus_line"
 
 
 def _coerce_value(raw: str) -> Any:
     text = raw.strip().replace(",", "")
-    if re.fullmatch(r"\d+-\d+", text):
+    if _RANGE_RE.fullmatch(text):
         lo, hi = text.split("-", 1)
         return {"min": int(lo), "max": int(hi)}
-    pct = re.fullmatch(r"\+?(\d+(?:\.\d+)?)%", text)
+    pct = _PERCENT_RE.fullmatch(text)
     if pct:
         number = pct.group(1)
         return float(number) if "." in number else int(number)
@@ -169,7 +173,7 @@ def _parse_line(
     if extras:
         for extra in extras:
             if "interval" in extra.lower():
-                match = re.search(r"([\d.]+%)", extra)
+                match = _INTERVAL_PCT_RE.search(extra)
                 if match:
                     parsed[_unique_key(f"{base_key}_interval", used)] = _coerce_value(
                         match.group(1)

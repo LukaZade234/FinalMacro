@@ -9,6 +9,8 @@ _SERVLIM_LIMITS_RE = re.compile(
     r"([\d,]+)\s*\$wa.*?([\d,]+)\s*\$ha.*?([\d,]+)\s*\$wg.*?([\d,]+)\s*\$hg",
     re.IGNORECASE,
 )
+_DIGITS_ONLY_RE = re.compile(r"[^\d]")
+_LONE_DIGIT_RE = re.compile(r"\d+")
 
 _TOGGLEBUTTON_MAP = {
     "for public wishes only": 0,
@@ -22,7 +24,7 @@ _TOGGLEBUTTON_MAP = {
 
 
 def _parse_int(text: str) -> int:
-    return int(re.sub(r"[^\d]", "", text))
+    return int(_DIGITS_ONLY_RE.sub("", text))
 
 
 def parse_servlimroul(raw: Any) -> dict[str, int] | None:
@@ -54,7 +56,7 @@ def parse_togglebutton(raw: Any) -> int | None:
     for needle, value in _TOGGLEBUTTON_MAP.items():
         if needle in lower:
             return value
-    lone = re.fullmatch(r"\d+", str(raw).strip())
+    lone = _LONE_DIGIT_RE.fullmatch(str(raw).strip())
     if lone:
         num = int(lone.group(0))
         if num in (0, 1, 2):

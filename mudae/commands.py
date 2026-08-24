@@ -52,6 +52,12 @@ COMMAND_ALIASES: dict[str, str] = {
 # (canonical parser id, detector)
 ResponseDetector = Callable[[str], bool]
 
+_TU_HAS_ROLLS_RE = re.compile(r"rolls?.*(?:left|restantes)", re.IGNORECASE)
+_TU_HAS_CLAIM_RE = re.compile(
+    r"(?:you __can__|can't claim|você __pode__|calma aí)",
+    re.IGNORECASE,
+)
+
 
 def is_roll_command(command: str) -> bool:
     return normalize_command(command) == "roll"
@@ -110,10 +116,8 @@ def is_tu_response(content: str) -> bool:
     if not content:
         return False
     lower = content.lower()
-    has_rolls = bool(re.search(r"rolls?.*(?:left|restantes)", lower))
-    has_claim = bool(
-        re.search(r"(?:you __can__|can't claim|você __pode__|calma aí)", lower)
-    )
+    has_rolls = bool(_TU_HAS_ROLLS_RE.search(lower))
+    has_claim = bool(_TU_HAS_CLAIM_RE.search(lower))
     return has_rolls and has_claim
 
 

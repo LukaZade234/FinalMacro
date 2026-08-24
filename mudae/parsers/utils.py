@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 from typing import Match
 
+_NON_DIGIT_RE = re.compile(r"\D")
+_BOLD_HM_MIN_RE = re.compile(r"\*\*(\d+)h\s*(\d+)\*\*\s*min", re.IGNORECASE)
+_BOLD_MIN_RE = re.compile(r"\*\*(\d+)\*\*\s*min", re.IGNORECASE)
+
 
 def parse_hours_minutes(match: Match[str] | None) -> tuple[int, int]:
     if not match:
@@ -12,8 +16,8 @@ def parse_hours_minutes(match: Match[str] | None) -> tuple[int, int]:
     groups = match.groups()
     h_str = groups[0] if len(groups) > 0 else ""
     m_str = groups[1] if len(groups) > 1 else ""
-    h = int(re.sub(r"\D", "", h_str or "0") or "0")
-    m = int(re.sub(r"\D", "", m_str or "0") or "0")
+    h = int(_NON_DIGIT_RE.sub("", h_str or "0") or "0")
+    m = int(_NON_DIGIT_RE.sub("", m_str or "0") or "0")
     return h, m
 
 
@@ -34,10 +38,10 @@ def extract_bold_minutes(text: str, *, start: int = 0, window: int = 72) -> int 
             best_pos = pos
             best_minutes = minutes
 
-    for match in re.finditer(r"\*\*(\d+)h\s*(\d+)\*\*\s*min", chunk, re.IGNORECASE):
+    for match in _BOLD_HM_MIN_RE.finditer(chunk):
         consider(match.start(), int(match.group(1)) * 60 + int(match.group(2)))
 
-    for match in re.finditer(r"\*\*(\d+)\*\*\s*min", chunk, re.IGNORECASE):
+    for match in _BOLD_MIN_RE.finditer(chunk):
         consider(match.start(), int(match.group(1)))
 
     return best_minutes

@@ -16,6 +16,20 @@ _SKIP_LINE_RE = re.compile(
     r"(?:<:kakera:|:kakera:|<:sp:|default kakera value)",
     re.IGNORECASE,
 )
+_KAKERA_BONUS_FALLBACK_RE = re.compile(
+    r"\+([\d,]+)\s*(?:<:kakera:|:kakera:)([^<\n]*)",
+    re.IGNORECASE,
+)
+_CLAIM_SPHERES_RE = re.compile(
+    r"\+\s*\*{0,2}([\d,]+)\*{0,2}\s*<:sp:",
+    re.IGNORECASE,
+)
+_BOLD_NAME_RE = re.compile(r"\*\*([^*]+)\*\*")
+_NUMERIC_BOLD_RE = re.compile(r"[\d,.]+")
+_MARRIAGE_RE = re.compile(
+    r"(?:💖\s*)?(.*?)\s+and\s+(.*?)\s+are now married",
+    re.IGNORECASE,
+)
 
 
 def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
@@ -35,11 +49,7 @@ def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
 
     clean = strip_markdown(content)
     fallback: list[dict[str, Any]] = []
-    for match in re.finditer(
-        r"\+([\d,]+)\s*(?:<:kakera:|:kakera:)([^<\n]*)",
-        clean,
-        re.IGNORECASE,
-    ):
+    for match in _KAKERA_BONUS_FALLBACK_RE.finditer(clean):
         amount = int(match.group(1).replace(",", ""))
         label = (match.group(2) or "").strip().strip("()")
         fallback.append({"amount": amount, "label": label or None})
@@ -49,11 +59,7 @@ def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
 
 
 def _parse_claim_spheres(content: str) -> int | None:
-    match = re.search(
-        r"\+\s*\*{0,2}([\d,]+)\*{0,2}\s*<:sp:",
-        content,
-        re.IGNORECASE,
-    )
+    match = _CLAIM_SPHERES_RE.search(content)
     if match:
         return int(match.group(1).replace(",", ""))
     return None
@@ -72,11 +78,11 @@ def extract_claim_names(content: str) -> list[str]:
     for line in content.splitlines():
         if not line.strip() or _SKIP_LINE_RE.search(line):
             continue
-        for match in re.finditer(r"\*\*([^*]+)\*\*", line):
+        for match in _BOLD_NAME_RE.finditer(line):
             text = match.group(1).strip()
             if not text or text.startswith("+"):
                 continue
-            if re.fullmatch(r"[\d,.]+", text):
+            if _NUMERIC_BOLD_RE.fullmatch(text):
                 continue
             names.append(text)
     return names
@@ -90,11 +96,7 @@ def is_custom_claim(content: str) -> bool:
 
 
 def _parse_claim_participants(content: str) -> tuple[str | None, str | None]:
-    marriage = re.search(
-        r"(?:💖\s*)?(.*?)\s+and\s+(.*?)\s+are now married",
-        content,
-        re.IGNORECASE,
-    )
+    marriage = _MARRIAGE_RE.search(content)
     if marriage:
         return (
             strip_markdown(marriage.group(1)).strip(),

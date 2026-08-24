@@ -12,6 +12,12 @@ _KAKERA_REACT_DENIED_RE = re.compile(
     r"can't react to kakera for \*\*(?:(\d+)h\s*)?(\d+)\*\* min",
     re.IGNORECASE,
 )
+_POWER_PERCENT_RE = re.compile(r"power:\s*\*\*(\d+)%\*\*", re.IGNORECASE)
+_POWER_CONSUMPTION_RE = re.compile(
+    r"(?:each kakera reaction consumes|cada reação de kakera consume)\s*(\d+)%",
+    re.IGNORECASE,
+)
+_DENIED_USER_RE = re.compile(r"\*\*([^*]+)\*\*")
 
 
 def parse_reaction_power_fields(content: str) -> dict[str, Any]:
@@ -19,14 +25,11 @@ def parse_reaction_power_fields(content: str) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     lower = (content or "").lower()
 
-    power_match = re.search(r"power:\s*\*\*(\d+)%\*\*", lower)
+    power_match = _POWER_PERCENT_RE.search(lower)
     if power_match:
         fields["power_percent"] = int(power_match.group(1))
 
-    consumption_match = re.search(
-        r"(?:each kakera reaction consumes|cada reação de kakera consume)\s*(\d+)%",
-        lower,
-    )
+    consumption_match = _POWER_CONSUMPTION_RE.search(lower)
     if consumption_match:
         fields["power_consumption_percent"] = int(consumption_match.group(1))
 
@@ -83,7 +86,7 @@ def parse_kakera_react_denied(content: str) -> ParseResult:
     if match:
         h, m = parse_hours_minutes(match)
         fields["kakera_cooldown_minutes"] = h * 60 + m
-    user_match = re.match(r"\*\*([^*]+)\*\*", content.strip())
+    user_match = _DENIED_USER_RE.match(content.strip())
     if user_match:
         fields["claimed_by"] = user_match.group(1).strip()
     cd = fields.get("kakera_cooldown_minutes")

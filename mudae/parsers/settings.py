@@ -16,6 +16,13 @@ _SERVLIM_RE = re.compile(
     re.IGNORECASE,
 )
 _MARKDOWN_RE = re.compile(r"\*\*([^*]*)\*\*|__([^_]*)__")
+_EVERY_MIN_RE = re.compile(r"every\s+(\d[\d,]*)\s*min", re.IGNORECASE)
+_EXACT_MIN_RE = re.compile(r"xx:\s*(\d+)", re.IGNORECASE)
+_SHIFTED_MIN_RE = re.compile(r"by\s*\+?\s*(\d+)\s*min", re.IGNORECASE)
+_SEC_RE = re.compile(r"(\d[\d,]*)\s*sec", re.IGNORECASE)
+_PLUS_NUM_RE = re.compile(r"\+(\d[\d,]*)")
+_PLAIN_NUM_RE = re.compile(r"[\d,]+")
+_LONE_INT_RE = re.compile(r"\d+")
 
 # Known keys across game modes; missing lines stay null in output.
 SETTINGS_FIELD_KEYS: tuple[str, ...] = (
@@ -102,34 +109,34 @@ def _coerce_value(raw: str) -> Any:
     if lower in {"no", "yes"}:
         return lower == "yes"
 
-    every_min = re.search(r"every\s+(\d[\d,]*)\s*min", lower)
+    every_min = _EVERY_MIN_RE.search(lower)
     if every_min:
         return int(every_min.group(1).replace(",", ""))
 
-    exact_min = re.search(r"xx:\s*(\d+)", lower)
+    exact_min = _EXACT_MIN_RE.search(lower)
     if exact_min:
         return int(exact_min.group(1))
 
     # "Reset shifted: by +N min. ($shifthour)" — despite the command name this is
     # MINUTES past the hour for the server's hourly reset, not an hour of the day.
     # Daily counters (perk 8, spheres) always reset at 00:00 UTC regardless.
-    shifted = re.search(r"by\s*\+?\s*(\d+)\s*min", lower)
+    shifted = _SHIFTED_MIN_RE.search(lower)
     if shifted:
         return int(shifted.group(1))
 
-    sec = re.search(r"(\d[\d,]*)\s*sec", lower)
+    sec = _SEC_RE.search(lower)
     if sec:
         return int(sec.group(1).replace(",", ""))
 
-    plus_num = re.match(r"\+(\d[\d,]*)", text)
+    plus_num = _PLUS_NUM_RE.match(text)
     if plus_num:
         return int(plus_num.group(1).replace(",", ""))
 
-    plain_num = re.fullmatch(r"[\d,]+", text)
+    plain_num = _PLAIN_NUM_RE.fullmatch(text)
     if plain_num:
         return int(text.replace(",", ""))
 
-    lone_int = re.fullmatch(r"\d+", text)
+    lone_int = _LONE_INT_RE.fullmatch(text)
     if lone_int:
         return int(text)
 

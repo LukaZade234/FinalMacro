@@ -11,7 +11,7 @@ Follow **Unlock path** unless you specifically want a quick win or a single high
 Cheapest first. “Easy” means a sitting or two and little new machinery.
 
 1. ~~**Empty states** — copy.~~ `gui/emptyStates.js`: disconnected vs nothing recorded vs filters.
-2. **Compile leftover parser regexes** — mechanical.
+2. ~~**Compile leftover parser regexes** — mechanical.~~ Module-level `_…_RE` in `tu`, `roll`, `settings`, `claim`, `kakera`, `bonus`, `utils`, etc.
 3. **Humanized delays** — jitter existing sleeps.
 4. **Reaction power max on the account page** — the cap is on `$bonus`; wait for the wave 2 audit instead of a hardcoded `155`.
 5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
@@ -73,7 +73,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - `$p` / `$daily`, perk 8 power save, `$us` clock, humanized delays.
 - Extend `daily_resets` (already used for perk 8) to `$oh` / `$oc` / `$oq` / `$ot` and sphere stock — this *is* most of “full daily autonomy”.
 - `$dl` / `$adl` / `$wl` one-click if you want a GUI win in the same stretch.
-- Shared Run action gating (pending + minigame flags) on Haul / Console / Boxed; put the update banner where every layout can see it. `$us` stop options only exist on Classic today.
+- Shared Run action gating (pending + minigame flags) on Haul / Console / Boxed. `$us` stop options only exist on Classic today.
 
 **Wave 4 — spend the daily budget better**
 
@@ -146,7 +146,7 @@ Do the shared model first; the copy-paste and most of the slowness go away with 
 ## Later (not blocking)
 
 - **Split `gui/bridge.py`** — ~2.7k lines, 90+ slots. Logical groups already exist (run, config, stats, mudae settings, updates). Separate context properties once the stats payload is off the JSON string. Leave `macro/roll_cycle.py` alone; it is long because the domain is.
-- **Compile leftover parser regexes** — many `mudae/parsers/` patterns are still built inside functions. Move to module constants on the hot path.
+- ~~Compile leftover parser regexes~~ — hot-path patterns hoisted to module constants in `mudae/parsers/`.
 - ~~**`$oq` opening move**~~ — Colblitz overlay `(1,1)` (0-based, index 6). Short-circuits on a blank board. Hunt is MIXED; leave the Bellman DP.
 - **Achievements** — soulmate / chaos-key / rainbow milestones. After the logs are one `EventLog`.
 
@@ -181,7 +181,7 @@ Pass over the running app after the rankings above. Items already listed earlier
 Classic Run (`RunView` + `MacroControlBar`) and Haul/Console/Boxed (`RunModel` + `*RunPage`) are two products:
 
 - `$us` stop-on-power / stop-after-N only on Classic.
-- Update banner only on Classic; tray text says “see the Run tab”.
+- ~~Update banner only on Classic; tray text says “see the Run tab”.~~ Compact notice above every layout (`UpdateNotice` in `ShellSwitcher`); changelog + Update live on Settings. Tray points at Settings.
 - Session haul / last claim / perk 8·9 chips only on the new shells; Classic never reads `runSummaryJson`.
 - `RunModel.dkNextMinutes` and `TargetModel.warning` are computed and not shown.
 - Notification-standby banner only on Classic.
@@ -194,7 +194,7 @@ Classic Run (`RunView` + `MacroControlBar`) and Haul/Console/Boxed (`RunModel` +
 ### Ideas that fit this app
 
 - **Shared `RunControls`** — one gating/loading implementation; Classic migrates onto `RunModel`.
-- **Update banner in `Main.qml` / Settings** — pull + restart on every layout.
+- ~~**Update banner in `Main.qml` / Settings**~~ — compact notice on all layouts; pull + restart on Settings.
 - **Confirm + command preview before live `$settings` Apply.**
 - **Tray: notify on wish/claim** (tray already exists; menu is Show + Quit only). Optional Connect / Start / Stop.
 - **Claim-interval hold** — on `CLAIM_INTERVAL`, set cooldown from `next_interval_minutes` instead of timing out.

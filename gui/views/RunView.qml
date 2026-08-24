@@ -161,10 +161,6 @@ Item {
         anchors.fill: parent
         spacing: 12
 
-        UpdateBanner {
-            Layout.fillWidth: true
-        }
-
         PanelCard {
             Layout.fillWidth: true
             title: "Session"

@@ -26,14 +26,31 @@ Item {
             return "Check failed: " + App.updateError
         }
         if (App.updatePending)
-            return App.updateBehindCount + " change" + (App.updateBehindCount === 1 ? "" : "s") + " available on " + App.updateBranch
-                + (App.updateAvailable ? "" : " · banner dismissed")
+            return App.updateBehindCount + " change" + (App.updateBehindCount === 1 ? "" : "s")
+                + " available on " + App.updateBranch
         if (App.updateLastCheckedEpoch > 0) {
             var d = new Date(App.updateLastCheckedEpoch * 1000)
             return "Up to date · last checked " + d.toLocaleTimeString(Qt.locale(), "hh:mm")
         }
         return "Not checked yet"
     }
+
+    property var updateCommits: []
+
+    function refreshUpdateCommits() {
+        try {
+            updateCommits = JSON.parse(App.updateCommitsJson)
+        } catch (e) {
+            updateCommits = []
+        }
+    }
+
+    Connections {
+        target: App
+        function onUpdateStatusChanged() { settingsRoot.refreshUpdateCommits() }
+    }
+
+    Component.onCompleted: refreshUpdateCommits()
 
     function indexById(list, id) {
         if (!list)
@@ -375,6 +392,88 @@ Item {
                         color: settingsRoot.updateStatusIsError() ? Theme.warning : Theme.fgMuted
                         font.pixelSize: 10
                         wrapMode: Text.WordWrap
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    visible: App.updatePending || App.updatePulling || App.updatePullMessage !== ""
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        ThemedButton {
+                            text: App.updatePulling ? "Updating…" : "Update now"
+                            accent: true
+                            loading: App.updatePulling
+                            visible: App.updatePending && App.updateCanPull
+                            enabled: !App.updatePulling && !App.sessionActive
+                            onClicked: App.pullUpdate()
+                        }
+
+                        ThemedButton {
+                            text: "Restart now"
+                            accent: true
+                            visible: !App.updatePending && App.updatePullMessage !== "" && App.updatePullOk
+                            onClicked: App.requestQuit()
+                        }
+
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: App.updatePending && !App.updateCanPull
+                        text: "Local changes or commits are blocking an automatic update — run `git pull` yourself when ready."
+                        color: Theme.warning
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: App.updatePending && App.updateCanPull && App.sessionActive
+                        text: "Disconnect first — updating while connected could interrupt the macro."
+                        color: Theme.warning
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: App.updatePullMessage !== ""
+                        text: App.updatePullMessage
+                        color: App.updatePullOk ? Theme.success : Theme.warning
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        visible: App.updatePending && settingsRoot.updateCommits.length > 0
+                        text: "Changes"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 3
+                        visible: App.updatePending && settingsRoot.updateCommits.length > 0
+
+                        Repeater {
+                            model: settingsRoot.updateCommits
+                            delegate: Label {
+                                Layout.fillWidth: true
+                                text: "• " + modelData
+                                color: Theme.fgSecondary
+                                font.pixelSize: 10
+                                wrapMode: Text.WordWrap
+                            }
+                        }
                     }
                 }
             }

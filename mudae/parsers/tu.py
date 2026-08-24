@@ -11,6 +11,30 @@ from mudae.parsers.utils import extract_bold_minutes, parse_hours_minutes
 from mudae.parsers.ohu8 import parse_refill_minutes
 from mudae.types import MessageKind, ParseResult
 
+_CLAIM_CAN_RE = re.compile(r"you __can__ claim(?:\s+right now)?!?", re.IGNORECASE)
+_CLAIM_CAN_PT_RE = re.compile(r"você __pode__ se casar", re.IGNORECASE)
+_CANT_CLAIM_EN_RE = re.compile(
+    r"can't claim for another \*\*(\d+h)?\s*(\d+)\*\* min",
+    re.IGNORECASE,
+)
+_CANT_CLAIM_PT_RE = re.compile(
+    r"calma aí.*\*\*(\d+h)?\s*(\d+)\*\* min",
+    re.IGNORECASE,
+)
+_ROLLS_LEFT_RE = re.compile(
+    r"(?:you have|você tem)\s*\*{0,2}([\d,.]+)\*{0,2}\s*rolls?"
+    r"(?:\s*\(\+\*{0,2}([\d,.]+)\*{0,2}\s*\$(mk|smk|us|ru)\))?"
+    r"\s*(?:left|restantes)?",
+    re.IGNORECASE,
+)
+_DIGITS_ONLY_RE = re.compile(r"[^\d]")
+_DK_COUNT_RE = re.compile(
+    r"\*\*(\d+)\*\*\s*\$dk\s*(?:available|dispon)",
+    re.IGNORECASE,
+)
+_DK_AVAILABLE_RE = re.compile(r"\$dk\s+(?:is\s+)?available", re.IGNORECASE)
+_DK_DISPON_RE = re.compile(r"\$dk\s+dispon", re.IGNORECASE)
+
 
 def _minutes_after_phrase(content: str, phrase: str, *, window: int = 72) -> int | None:
     lower = content.lower()
@@ -26,17 +50,13 @@ def parse_tu(content: str) -> ParseResult:
     lower = content.lower()
 
     # 1. Claim available now
-    if re.search(r"you __can__ claim(?:\s+right now)?!?", lower):
+    if _CLAIM_CAN_RE.search(lower):
         fields["claim_available"] = True
-    elif re.search(r"você __pode__ se casar", lower):
+    elif _CLAIM_CAN_PT_RE.search(lower):
         fields["claim_available"] = True
     else:
-        cant_claim_en = re.search(
-            r"can't claim for another \*\*(\d+h)?\s*(\d+)\*\* min", lower
-        )
-        cant_claim_pt = re.search(
-            r"calma aí.*\*\*(\d+h)?\s*(\d+)\*\* min", lower
-        )
+        cant_claim_en = _CANT_CLAIM_EN_RE.search(lower)
+        cant_claim_pt = _CANT_CLAIM_PT_RE.search(lower)
         if cant_claim_en or cant_claim_pt:
             match = cant_claim_en or cant_claim_pt
             h, m = parse_hours_minutes(match)
@@ -54,18 +74,13 @@ def parse_tu(content: str) -> ParseResult:
     # 3. Rolls (+ optional bonus pool: $mk / $smk monthly, or $us / $ru stacked).
     # Bonus rolls are usable immediately; "$us"/"$ru" come from the $us stack and
     # are wiped on the next rolls reset.
-    rolls_match = re.search(
-        r"(?:you have|você tem)\s*\*{0,2}([\d,.]+)\*{0,2}\s*rolls?"
-        r"(?:\s*\(\+\*{0,2}([\d,.]+)\*{0,2}\s*\$(mk|smk|us|ru)\))?"
-        r"\s*(?:left|restantes)?",
-        lower,
-    )
+    rolls_match = _ROLLS_LEFT_RE.search(lower)
     if rolls_match:
-        fields["rolls_left"] = int(re.sub(r"[^\d]", "", rolls_match.group(1)))
+        fields["rolls_left"] = int(_DIGITS_ONLY_RE.sub("", rolls_match.group(1)))
         bonus_raw = rolls_match.group(2)
         currency = rolls_match.group(3)
         if bonus_raw and currency:
-            bonus = int(re.sub(r"[^\d]", "", bonus_raw))
+            bonus = int(_DIGITS_ONLY_RE.sub("", bonus_raw))
             if currency in {"us", "ru"}:
                 fields["rolls_us_bonus"] = bonus
             else:
@@ -97,12 +112,10 @@ def parse_tu(content: str) -> ParseResult:
         fields["rt_available"] = False
 
     # 7. $dk stock / recharge timer
-    dk_count = re.search(r"\*\*(\d+)\*\*\s*\$dk\s*(?:available|dispon)", lower)
+    dk_count = _DK_COUNT_RE.search(lower)
     if dk_count:
         fields["dk_stock"] = int(dk_count.group(1))
-    elif re.search(r"\$dk\s+(?:is\s+)?available", lower) or re.search(
-        r"\$dk\s+dispon", lower
-    ):
+    elif _DK_AVAILABLE_RE.search(lower) or _DK_DISPON_RE.search(lower):
         fields["dk_stock"] = 1
 
     next_dk = _minutes_after_phrase(content, "next $dk in")

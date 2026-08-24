@@ -9,6 +9,15 @@ from mudae.buttons import is_claim_button
 from mudae.parsers.kakera import parse_individual_kakera, parse_keys, parse_kakera_value
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
+_OWNER_BOLD_RE = re.compile(
+    r"(?:belongs to|pertence a)\s+\*\*(.+?)\*\*",
+    re.IGNORECASE,
+)
+_OWNER_PLAIN_RE = re.compile(
+    r"(?:belongs to|pertence a)\s+(.+)$",
+    re.IGNORECASE,
+)
+
 
 def is_ownership_footer(footer: str) -> bool:
     lower = footer.lower()
@@ -29,10 +38,10 @@ def is_ownership_update_footer(footer: str) -> bool:
 def get_character_owner(footer: str) -> str | None:
     if not footer:
         return None
-    match = re.search(r"(?:belongs to|pertence a)\s+\*\*(.+?)\*\*", footer, re.IGNORECASE)
+    match = _OWNER_BOLD_RE.search(footer)
     if match:
         return match.group(1).strip()
-    match = re.search(r"(?:belongs to|pertence a)\s+(.+)$", footer, re.IGNORECASE)
+    match = _OWNER_PLAIN_RE.search(footer)
     if match:
         return match.group(1).strip()
     return None

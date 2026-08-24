@@ -27,6 +27,17 @@ _CLAIM_TAIL_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+_CLAIM_SPHERES_RE = re.compile(r"\+([\d,]+)\s*<:sp:", re.IGNORECASE)
+_BREAKDOWN_SPLIT_RE = re.compile(r"breaks down into", re.IGNORECASE)
+_KAKERA_VALUE_RE = re.compile(
+    r"\*{0,2}(\d{1,3}(?:,\d{3})*|\d+)\*{0,2}\s*(?:<:kakera:|:kakera:|kakera)",
+    re.IGNORECASE,
+)
+_INDIVIDUAL_KAKERA_RE = re.compile(
+    r"\*{0,2}(\d{1,3}(?:,\d{3})*|\d+)\*{0,2}\s*"
+    r"<:(kakera[A-Z]?):\d+>",
+    re.IGNORECASE,
+)
 
 
 def _parse_spheres_from_claim(content: str) -> int | None:
@@ -35,11 +46,7 @@ def _parse_spheres_from_claim(content: str) -> int | None:
     lower = clean.lower()
     idx = lower.find("($k)")
     chunk = clean[idx + 4 :] if idx >= 0 else clean
-    match = re.search(
-        r"\+([\d,]+)\s*<:sp:",
-        chunk,
-        re.IGNORECASE,
-    )
+    match = _CLAIM_SPHERES_RE.search(chunk)
     if match:
         return int(match.group(1).replace(",", ""))
     return None
@@ -49,7 +56,7 @@ def _parse_source_kakera_type(content: str) -> str | None:
     """Clicked kakera — for white/light, the type before ``breaks down into``."""
     lower = content.lower()
     if "breaks down into" in lower:
-        head = re.split(r"breaks down into", content, maxsplit=1, flags=re.IGNORECASE)[0]
+        head = _BREAKDOWN_SPLIT_RE.split(content, maxsplit=1)[0]
         match = _KAKERA_EMOJI_RE.search(head)
         if match:
             return match.group(1)
@@ -118,11 +125,7 @@ def parse_kakera_claim(content: str) -> ParseResult:
 def parse_kakera_value(description: str) -> int:
     if not description:
         return 0
-    match = re.search(
-        r"\*{0,2}(\d{1,3}(?:,\d{3})*|\d+)\*{0,2}\s*(?:<:kakera:|:kakera:|kakera)",
-        description,
-        re.IGNORECASE,
-    )
+    match = _KAKERA_VALUE_RE.search(description)
     if match:
         return int(match.group(1).replace(",", ""))
     return 0
@@ -132,11 +135,7 @@ def parse_individual_kakera(description: str) -> dict[str, int]:
     if not description:
         return {}
     kakera_map: dict[str, int] = {}
-    pattern = (
-        r"\*{0,2}(\d{1,3}(?:,\d{3})*|\d+)\*{0,2}\s*"
-        r"<:(kakera[A-Z]?):\d+>"
-    )
-    for match in re.finditer(pattern, description, re.IGNORECASE):
+    for match in _INDIVIDUAL_KAKERA_RE.finditer(description):
         try:
             kakera_map[match.group(2)] = int(match.group(1).replace(",", ""))
         except (ValueError, IndexError):
@@ -144,16 +143,20 @@ def parse_individual_kakera(description: str) -> dict[str, int]:
     return kakera_map
 
 
-_KEY_LEVEL_PATTERNS: tuple[str, ...] = (
-    # Discord markup: <:chaoskey:690110264166842421> (**77**) or (**1,004**)
-    r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}\s*([\d,]+)\*{0,2}\)",
-    # Plain/static emoji text: :chaoskey: (98) or :chaoskey: (1,004)
-    r":(bronze|silver|gold|chaos)key:\s*\(\*{0,2}\s*([\d,]+)\*{0,2}\)",
+_KEY_LEVEL_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(
+        r"<:(bronze|silver|gold|chaos)key:\d+>\s*\(\*{0,2}\s*([\d,]+)\*{0,2}\)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r":(bronze|silver|gold|chaos)key:\s*\(\*{0,2}\s*([\d,]+)\*{0,2}\)",
+        re.IGNORECASE,
+    ),
 )
 
-_OMEGA_GAIN_PATTERNS: tuple[str, ...] = (
-    r"<:omegakey:\d+>\s*\*{0,2}\s*\+([\d,]+)\*{0,2}",
-    r":omegakey:\s*\*{0,2}\s*\+([\d,]+)\*{0,2}",
+_OMEGA_GAIN_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"<:omegakey:\d+>\s*\*{0,2}\s*\+([\d,]+)\*{0,2}", re.IGNORECASE),
+    re.compile(r":omegakey:\s*\*{0,2}\s*\+([\d,]+)\*{0,2}", re.IGNORECASE),
 )
 
 
@@ -163,7 +166,7 @@ def parse_keys(description: str) -> list[dict[str, Any]]:
     keys: list[dict[str, Any]] = []
     seen_spans: list[tuple[int, int]] = []
     for pattern in _KEY_LEVEL_PATTERNS:
-        for match in re.finditer(pattern, description, re.IGNORECASE):
+        for match in pattern.finditer(description):
             span = match.span()
             if any(not (span[1] <= start or span[0] >= end) for start, end in seen_spans):
                 continue
@@ -188,7 +191,7 @@ def parse_omega_keys(description: str) -> list[dict[str, Any]]:
     keys: list[dict[str, Any]] = []
     seen_spans: list[tuple[int, int]] = []
     for pattern in _OMEGA_GAIN_PATTERNS:
-        for match in re.finditer(pattern, description, re.IGNORECASE):
+        for match in pattern.finditer(description):
             span = match.span()
             if any(not (span[1] <= start or span[0] >= end) for start, end in seen_spans):
                 continue

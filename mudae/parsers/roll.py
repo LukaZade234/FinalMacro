@@ -17,6 +17,33 @@ from mudae.soulmate_log import record_new_soulmate
 from mudae.parsers.utils import strip_discord_emojis, strip_markdown
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
+_SERIES_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*\s*·")
+_CLAIMS_RANK_RE = re.compile(r"Claims:\s*#([\d,]+)", re.IGNORECASE)
+_LIKES_RANK_RE = re.compile(r"Likes:\s*#([\d,]+)", re.IGNORECASE)
+_STARWISH_RE = re.compile(r"<:sw:", re.IGNORECASE)
+_NEW_SOULMATE_RE = re.compile(
+    r"now your\s+\*{0,2}soulmate\*{0,2}!?",
+    re.IGNORECASE,
+)
+_SPAWNED_BY_RE = re.compile(r"\[SPAWNED BY\s+([^\]]+)\]", re.IGNORECASE)
+_PERK8_HEAD_DIGIT_RE = re.compile(r"^\d")
+_PERK8_HALF_RE = re.compile(r"/\s*2(?:\s|\u200b|$)")
+_MENTION_RE = re.compile(r"<@!?(\d+)>")
+_ROLLS_LEFT_WARNING_RE = re.compile(
+    r"(\d{1,3}(?:,\d{3})*|\d+)\s+rolls?\s+left",
+    re.IGNORECASE,
+)
+_BELONGS_SPLIT_RE = re.compile(
+    r"\s*·\s*(?=belongs to|pertence a)",
+    re.IGNORECASE,
+)
+_FOOTER_SPHERE_PREFIX_RE = re.compile(r"^(\d{1,3}(?:,\d{3})*|\d+)")
+_SPHERE_VALUE_RE = re.compile(
+    r"(\d{1,3}(?:,\d{3})*|\d+)\s*<:sp:",
+    re.IGNORECASE,
+)
+_BKU_RESET_AMOUNT_RE = re.compile(r"\*\*\+([\d,]+)\*\*")
+
 # Fields exposed for roll part 1 (stats only — no raw embed blobs).
 ROLL_FIELD_KEYS: tuple[str, ...] = (
     "character_name",
@@ -62,7 +89,7 @@ def _parse_series(description: str) -> str | None:
         return None
 
     first = lines[0]
-    series_bold = re.match(r"\*\*([^*]+)\*\*\s*·", first)
+    series_bold = _SERIES_BOLD_RE.match(first)
     if series_bold:
         return series_bold.group(1).strip()
 
@@ -71,21 +98,24 @@ def _parse_series(description: str) -> str | None:
 
 
 def _parse_rank(description: str, label: str) -> int | None:
-    match = re.search(rf"{label}:\s*#([\d,]+)", description, re.IGNORECASE)
+    if label == "Claims":
+        match = _CLAIMS_RANK_RE.search(description)
+    elif label == "Likes":
+        match = _LIKES_RANK_RE.search(description)
+    else:
+        match = None
     if not match:
         return None
     return int(match.group(1).replace(",", ""))
 
 
 def _is_starwish(description: str) -> bool:
-    return bool(re.search(r"<:sw:", description, re.IGNORECASE))
+    return bool(_STARWISH_RE.search(description))
 
 
 def _is_new_soulmate(description: str) -> bool:
     """True when chaos keys just hit 10 — ``Now your **SOULMATE**!`` on this roll."""
-    return bool(
-        re.search(r"now your\s+\*{0,2}soulmate\*{0,2}!?", description, re.IGNORECASE)
-    )
+    return bool(_NEW_SOULMATE_RE.search(description))
 
 
 def _is_profile_embed(description: str) -> bool:
@@ -96,7 +126,7 @@ def _is_profile_embed(description: str) -> bool:
 
 def _parse_perk_6_spawn(description: str) -> tuple[bool, str | None]:
     """Perk 6 extra spawn — ``[SPAWNED BY Name]`` in description (often after ``<:spG:...>``)."""
-    match = re.search(r"\[SPAWNED BY\s+([^\]]+)\]", description, re.IGNORECASE)
+    match = _SPAWNED_BY_RE.search(description)
     if not match:
         return False, None
     spawner = strip_markdown(match.group(1)).strip()
@@ -122,9 +152,9 @@ def _has_perk_8(footer: str) -> bool:
     if not footer:
         return False
     head = footer[:24]
-    if re.match(r"^\d", head):
+    if _PERK8_HEAD_DIGIT_RE.match(head):
         return False
-    return bool(re.search(r"/\s*2(?:\s|\u200b|$)", head))
+    return bool(_PERK8_HALF_RE.search(head))
 
 
 def _parse_wished_by(content: str) -> list[int]:
@@ -137,7 +167,7 @@ def _parse_wished_by(content: str) -> list[int]:
     chunk = content[idx:]
     ids: list[int] = []
     seen: set[int] = set()
-    for match in re.finditer(r"<@!?(\d+)>", chunk):
+    for match in _MENTION_RE.finditer(chunk):
         user_id = int(match.group(1))
         if user_id not in seen:
             seen.add(user_id)
@@ -149,11 +179,7 @@ def _parse_rolls_left_warning(footer: str) -> int | None:
     """Low-roll warning in footer, e.g. ``⚠️ 2 ROLLS LEFT ⚠️``."""
     if not footer:
         return None
-    match = re.search(
-        r"(\d{1,3}(?:,\d{3})*|\d+)\s+rolls?\s+left",
-        footer,
-        re.IGNORECASE,
-    )
+    match = _ROLLS_LEFT_WARNING_RE.search(footer)
     if match:
         return int(match.group(1).replace(",", ""))
     return None
@@ -165,16 +191,11 @@ def _parse_spheres_from_footer(footer: str) -> int | None:
         return None
 
     prefix = footer
-    belongs_split = re.split(
-        r"\s*·\s*(?=belongs to|pertence a)",
-        footer,
-        maxsplit=1,
-        flags=re.IGNORECASE,
-    )
+    belongs_split = _BELONGS_SPLIT_RE.split(footer, maxsplit=1)
     if len(belongs_split) > 1:
         prefix = belongs_split[0].strip()
 
-    match = re.match(r"^(\d{1,3}(?:,\d{3})*|\d+)", prefix)
+    match = _FOOTER_SPHERE_PREFIX_RE.match(prefix)
     if match:
         return int(match.group(1).replace(",", ""))
     return None
@@ -185,11 +206,7 @@ def _parse_spheres(description: str, footer: str = "") -> int | None:
     for text in (description, footer):
         if not text:
             continue
-        match = re.search(
-            r"(\d{1,3}(?:,\d{3})*|\d+)\s*<:sp:",
-            text,
-            re.IGNORECASE,
-        )
+        match = _SPHERE_VALUE_RE.search(text)
         if match:
             return int(match.group(1).replace(",", ""))
 
@@ -226,7 +243,7 @@ def _parse_roll_kakera(
     bku: int | None = None
     if bku_reset:
         idx = lower.find("$bku completed")
-        reset_match = re.search(r"\*\*\+([\d,]+)\*\*", description[idx:])
+        reset_match = _BKU_RESET_AMOUNT_RE.search(description[idx:])
         if reset_match:
             bku = int(reset_match.group(1).replace(",", ""))
     elif plus_amounts:

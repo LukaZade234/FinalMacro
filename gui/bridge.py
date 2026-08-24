@@ -375,7 +375,7 @@ class AppBridge(QObject):
 
     @Property(bool, constant=False, notify=updateStatusChanged)
     def updateAvailable(self) -> bool:
-        """True when an update exists and the Run-page banner has not been dismissed."""
+        """True when an update exists and the compact notice has not been dismissed."""
         status = self._update_status
         if not status or not status.available:
             return False
@@ -1348,7 +1348,7 @@ class AppBridge(QObject):
                 change_word = "change" if count == 1 else "changes"
                 notify(
                     "FinalMacro update available",
-                    f"{count} {change_word} ready — see the Run tab.",
+                    f"{count} {change_word} ready — open Settings to update.",
                 )
 
     @Slot()

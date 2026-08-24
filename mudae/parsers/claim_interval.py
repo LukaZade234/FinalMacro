@@ -8,6 +8,16 @@ from typing import Any
 from mudae.parsers.utils import extract_bold_minutes, strip_markdown
 from mudae.types import MessageKind, ParseResult
 
+_MENTION_RE = re.compile(r"<@!?(\d+)>")
+_INTERVAL_HOURS_RE = re.compile(
+    r"interval of\s+(\d+)\s*h(?:ou)?r?s?",
+    re.IGNORECASE,
+)
+_NEXT_INTERVAL_MIN_RE = re.compile(
+    r"next interval begins in\s+(\d+)\s*min",
+    re.IGNORECASE,
+)
+
 
 def is_claim_interval_message(content: str) -> bool:
     lower = (content or "").lower()
@@ -22,17 +32,13 @@ def parse_claim_interval(content: str) -> ParseResult:
     warnings: list[str] = []
     fields: dict[str, Any] = {"raw_content": content}
 
-    mention = re.search(r"<@!?(\d+)>", content)
+    mention = _MENTION_RE.search(content)
     if mention:
         fields["user_id"] = int(mention.group(1))
     else:
         warnings.append("Could not parse pinged user id")
 
-    interval_match = re.search(
-        r"interval of\s+(\d+)\s*h(?:ou)?r?s?",
-        content,
-        re.IGNORECASE,
-    )
+    interval_match = _INTERVAL_HOURS_RE.search(content)
     if interval_match:
         fields["interval_hours"] = int(interval_match.group(1))
     else:
@@ -41,11 +47,7 @@ def parse_claim_interval(content: str) -> ParseResult:
     clean = strip_markdown(content)
     minutes = extract_bold_minutes(clean, start=clean.lower().find("next interval begins"))
     if minutes is None:
-        minutes_match = re.search(
-            r"next interval begins in\s+(\d+)\s*min",
-            clean,
-            re.IGNORECASE,
-        )
+        minutes_match = _NEXT_INTERVAL_MIN_RE.search(clean)
         if minutes_match:
             minutes = int(minutes_match.group(1))
     if minutes is not None:
