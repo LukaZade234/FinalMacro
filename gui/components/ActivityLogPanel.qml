@@ -191,7 +191,7 @@ ColumnLayout {
             target: logScroll.contentItem
             function onContentYChanged() {
                 var flick = logScroll.contentItem
-                if (!flick)
+                if (!flick || (!flick.moving && !flick.flicking))
                     return
                 var maxY = Math.max(
                     0,

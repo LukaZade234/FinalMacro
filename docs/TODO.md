@@ -19,7 +19,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 7. **Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.
 8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
 9. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
-10. **Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.
+10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
 11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
 13. **EventLog + JSONL** then **shared stats model** — medium, but one design kills five GUI bugs.
@@ -59,7 +59,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - ~~After `force_reconnect`, restore `macro_active` if it was set.~~ `startMacro` refuses while a minigame is running.
 - ~~`$oq` MIXED hunt.~~ Replay harness in `macro/oq_replay.py` (`scripts/oq_bakeoff.py`). Opening is Colblitz `(1,1)` (index 6). Finding 3 purples auto-reveals the 4th as a clickable red — we claim it, we do not search hidden cells. Two-purple hunt uses expectimax. Full replay MIXED **95.6% red / 344.8 avg** (Colblitz 95.4% / 342.7).
 - ~~Timezones.~~ Mudae dailies / `date_key` / stats “today” are UTC (`mudae/clock.py`, `gui/clock.js`). In-app live feed stays local time (Classic `ActivityLogPanel` + Haul `RunModel.timeOf`).
-- Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. First `$oh` invested-sphere line is **perk 10** (`$oq` / `$ot` / flat SP) — SP source `perk10`, extra `$oq`/`$ot` on the `$oh` minigame session. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
+- ~~Sphere tracking audit~~ — colour on `sphere_click`, `$oc` granted from `$oh` (not SP), no double-count vs perk 10 / kakera / perk 9; Statistics “today” verified. First `$oh` invested-sphere line is **perk 10** (`$oq` / `$ot` / flat SP) — SP source `perk10`, extra `$oq`/`$ot` on the `$oh` minigame session. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
 - ~~Chaos parser in the same key/sphere pass.~~ Capture first: every Mudae message after a `kakeraC` click until the next commanded roll **or 8s of silence** goes to `data/chaos_log.json` (`kind: unparsed`). File is written on the first follow-up (not only when the window closes). Silence covers the last roll of an hour, when no `$wa` follows. Parser later.
 - ~~Empty states~~ — disconnected / nothing recorded / filters (`gui/emptyStates.js`). Reaction-power max waits on `$bonus`.
 

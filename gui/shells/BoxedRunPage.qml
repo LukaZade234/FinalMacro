@@ -196,9 +196,19 @@ Item {
                     model: run.visibleFeed
                     boundsBehavior: Flickable.StopAtBounds
 
-                    property bool atTail: true
-                    onContentYChanged: atTail = (contentY + height) >= (contentHeight - 24)
-                    onCountChanged: if (atTail) positionViewAtEnd()
+                    property bool stickToBottom: true
+
+                    function updateStickToBottom() {
+                        if (!moving && !flicking)
+                            return
+                        var maxY = Math.max(0, contentHeight - height)
+                        stickToBottom = (contentY + height) >= (maxY - 24)
+                    }
+
+                    onMovingChanged: updateStickToBottom()
+                    onFlickingChanged: updateStickToBottom()
+                    onCountChanged: if (stickToBottom) Qt.callLater(positionViewAtEnd)
+                    Component.onCompleted: Qt.callLater(positionViewAtEnd)
 
                     delegate: Item {
                         required property var modelData
