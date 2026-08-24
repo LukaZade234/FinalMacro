@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import gui 1.0
+import "../components"
 
 /*
     Collapsed icon rail that grows on hover to show tab names.
@@ -91,17 +92,9 @@ Item {
                 Layout.leftMargin: 14
                 Layout.alignment: Qt.AlignLeft
 
-                GradientPanel {
-                    anchors.fill: parent
-                    radius: 9
-                    colorFrom: Theme.accent
-                    colorTo: Theme.accent2
-                }
-
-                GemMark {
+                ThemeSphere {
                     anchors.centerIn: parent
-                    size: 12
-                    color: Theme.bg
+                    size: 26
                 }
             }
 

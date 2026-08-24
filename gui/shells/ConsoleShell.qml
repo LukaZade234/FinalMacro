@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import gui 1.0
+import "../components"
 
 /*
     Console — app shell.
@@ -55,10 +56,9 @@ Item {
                     Layout.rightMargin: 14
                     spacing: 7
 
-                    GemMark {
+                    ThemeSphere {
                         anchors.verticalCenter: parent.verticalCenter
-                        size: 11
-                        color: Theme.accent
+                        size: 20
                     }
 
                     Text {

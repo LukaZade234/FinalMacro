@@ -122,7 +122,11 @@ Item {
     readonly property int perk8Max: numberOr(today.perk8_max, -1)
     readonly property string perk8Text: perk8Max > 0 ? perk8Used + " / " + perk8Max : String(perk8Used)
     readonly property real perk8Fraction: perk8Max > 0 ? Math.min(1, perk8Used / perk8Max) : -1
-    readonly property int perk9Today: numberOr(today.perk9_spheres, 0)
+    readonly property int perk9Used: numberOr(today.perk9_used, numberOr(today.perk9_spheres, 0))
+    readonly property int perk9Max: numberOr(today.perk9_max, 20)
+    readonly property string perk9Text: perk9Max > 0 ? perk9Used + " / " + perk9Max : String(perk9Used)
+    readonly property real perk9Fraction: perk9Max > 0 ? Math.min(1, perk9Used / perk9Max) : -1
+    readonly property int perk9Today: perk9Used
 
     // ---- session haul ------------------------------------------------------
 

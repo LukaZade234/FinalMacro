@@ -244,6 +244,28 @@ counts, sphere stock) are not generalized yet — see `docs/TODO.md`.
 
 ---
 
+## Perk 9 (daily sphere-button budget)
+
+Perk 9 adds **sphere react buttons** on characters you have rolled today.
+Each click consumes one slot from a daily budget (shown on `$ohu9` as
+``6/20 buttons clicked`` in the shared minigame header). The macro tracks
+this as **clicks used / 20** on the Run page until `$bonus` parsing gives
+the real cap (`10 + SP9`).
+
+- Query with **`$ohu9`** — same layout as `$ohu8` / `$ohu`: minigame
+  counts, refill timer, ``buttons clicked``, megasphere stock line, then
+  ``(Perk 9) Rolled today: 44/154`` and the list of characters rolled.
+- Sphere buttons on those characters are **perk 9 spawns**; after the budget
+  is used, no more spawn until the daily refill (same window as `$oh` /
+  sphere stock).
+- **Megasphere** (`spM`) on a roll is a free bonus, not a perk 9 click —
+  the Run counter ignores it.
+- The macro increments by one on each confirmed **sphere button click**
+  (`MessageKind.SPHERE_CLICK`, excluding `spM`). No adaptive skip logic yet —
+  `SphereReactionRules.types_allowed` still governs which colours to click.
+
+---
+
 ## `$settings` and `$bonus`
 
 `$settings` is the server's rule sheet: prefix, claim/roll timers, sniping,

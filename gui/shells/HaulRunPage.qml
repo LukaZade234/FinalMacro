@@ -666,11 +666,26 @@ Item {
                             Text {
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: run.perk9Today + (run.perk9Today === 1 ? " sphere" : " spheres")
+                                text: run.perk9Text
                                 color: Theme.fg
                                 font.family: Theme.monoFamily
                                 font.pixelSize: Theme.sizeBody
                                 font.weight: Font.DemiBold
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 4
+                            radius: 2
+                            color: Theme.raised
+                            visible: run.perk9Fraction >= 0
+
+                            Rectangle {
+                                width: parent.width * Math.min(1, Math.max(0, run.perk9Fraction))
+                                height: parent.height
+                                radius: parent.radius
+                                color: Theme.accent2
                             }
                         }
 

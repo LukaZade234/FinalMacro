@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
@@ -33,9 +36,11 @@ def chaos(tmp_path, monkeypatch):
     mod._events = []
     mod._open = None
     yield mod
+    mod._cancel_idle_timer()
     mod._events = []
     mod._open = None
     mod._writer.cancel_pending()
+    mod.bind_notify(None, None)
 
 
 def test_keeps_follow_ups_until_commanded_roll(chaos):
@@ -134,3 +139,55 @@ def test_next_chaos_flushes_previous_window(chaos):
     assert chaos._events[0]["closed_reason"] == "next_chaos"
     assert chaos._events[0]["clicked_message_id"] == 10
     assert chaos.open_window()["clicked_message_id"] == 20
+
+
+def test_first_follow_up_writes_log_file(chaos):
+    chaos.begin_window(clicked_message_id=10, character_name="Rem")
+    chaos.note_parsed(
+        _snapshot(11, content="+$k"),
+        ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="+$k", fields={"amount": 1}),
+    )
+    path = chaos.log_path()
+    assert path.is_file()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload[0]["closed_reason"] == "open"
+    assert payload[0]["messages"][0]["kind"] == "kakera_claim"
+
+
+def test_idle_silence_closes_window(chaos, monkeypatch):
+    monkeypatch.setattr(chaos, "_IDLE_SEC", 0.05)
+    chaos.begin_window(clicked_message_id=10, character_name="Rem")
+    chaos.note_parsed(
+        _snapshot(11, content="+$k"),
+        ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="+$k", fields={"amount": 1}),
+    )
+    assert chaos.open_window() is not None
+    deadline = time.monotonic() + 1.0
+    while chaos.open_window() is not None and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert chaos.open_window() is None
+    assert chaos._events[-1]["closed_reason"] == "idle"
+    payload = json.loads(chaos.log_path().read_text(encoding="utf-8"))
+    assert payload[-1]["closed_reason"] == "idle"
+
+
+def test_idle_timer_resets_on_new_message(chaos, monkeypatch):
+    monkeypatch.setattr(chaos, "_IDLE_SEC", 0.12)
+    chaos.begin_window(clicked_message_id=10, character_name="Rem")
+    chaos.note_parsed(
+        _snapshot(11, content="+$k"),
+        ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="+$k", fields={"amount": 1}),
+    )
+    time.sleep(0.06)
+    chaos.note_parsed(
+        _snapshot(12, content="$kl 10"),
+        ParseResult(kind=MessageKind.UNKNOWN, summary="$kl 10", fields={}),
+    )
+    time.sleep(0.06)
+    assert chaos.open_window() is not None
+    deadline = time.monotonic() + 1.0
+    while chaos.open_window() is not None and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert chaos.open_window() is None
+    kinds = [row["kind"] for row in chaos._events[-1]["messages"]]
+    assert kinds == ["kakera_claim", "unknown"]

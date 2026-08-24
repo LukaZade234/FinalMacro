@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import gui 1.0
+import "../components"
 
 /*
     Console — Run page.
@@ -152,19 +153,20 @@ Item {
                     anchors.centerIn: parent
                     spacing: 9
 
-                    Rectangle {
+                    ThemeSphere {
+                        id: phaseMark
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 8
-                        height: 8
-                        color: Theme.bg
-                        visible: run.macroRunning
+                        size: 16
+                        opacity: run.macroRunning && !phaseMark.blinkOn ? 0 : 1
+                        property bool blinkOn: true
 
-                        // The mockup blinks in hard steps, not a fade.
+                        // Hard steps, matching the mockup's blink — not a fade.
                         Timer {
                             interval: 500
                             running: run.macroRunning
                             repeat: true
-                            onTriggered: parent.opacity = parent.opacity > 0.5 ? 0 : 1
+                            onTriggered: phaseMark.blinkOn = !phaseMark.blinkOn
+                            onRunningChanged: if (!running) phaseMark.blinkOn = true
                         }
                     }
 
@@ -440,7 +442,7 @@ Item {
                         title: "perks"
                         rows: [
                             { label: "perk 8", value: run.perk8Text, tone: "accent" },
-                            { label: "perk 9 today", value: String(run.perk9Today), tone: "" },
+                            { label: "perk 9 today", value: run.perk9Text, tone: "" },
                             { label: "rolls reset", value: run.resetText, tone: "" },
                             { label: "next claim", value: run.nextClaimText, tone: "" }
                         ]

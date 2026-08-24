@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any
 
 from macro.reaction_power import display_reaction_power
+from macro.perk9_daily import PERK9_CLICK_MAX_DEFAULT
 from mudae.clock import utc_date_key
 
 
@@ -43,6 +44,9 @@ class AccountState:
     kakera_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
     perk8_priority_mode: str = "inactive"
     perk8_click_max: int | None = None
+    perk9_clicks_today: int = 0
+    perk9_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
+    perk9_click_max: int = PERK9_CLICK_MAX_DEFAULT
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +73,8 @@ class AccountState:
             "kakera_clicks_today": self.kakera_clicks_today,
             "perk8_priority_mode": self.perk8_priority_mode,
             "perk8_click_max": self.perk8_click_max,
+            "perk9_clicks_today": self.perk9_clicks_today,
+            "perk9_click_max": self.perk9_click_max,
         }
 
     def _today_key(self) -> str:
@@ -89,6 +95,18 @@ class AccountState:
             return
         self.rollover_kakera_budget_if_needed()
         self.kakera_clicks_today += int(count)
+
+    def rollover_perk9_if_needed(self) -> None:
+        today = self._today_key()
+        if self.perk9_clicks_day != today:
+            self.perk9_clicks_day = today
+            self.perk9_clicks_today = 0
+
+    def record_perk9_click(self, count: int = 1) -> None:
+        if count <= 0:
+            return
+        self.rollover_perk9_if_needed()
+        self.perk9_clicks_today += int(count)
 
     def claim_label(self) -> str:
         if self.claim_available is True:

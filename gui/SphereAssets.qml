@@ -3,7 +3,7 @@ import QtQuick
 
 // Sphere button artwork lives alongside kakera assets (``Sp*.webp``).
 QtObject {
-    readonly property string assetBase: "../assets/kakera/"
+    readonly property string assetBase: String(Qt.resolvedUrl("assets/kakera/"))
 
     readonly property var _labels: ({
         "spM": "Megasphere",
@@ -56,13 +56,14 @@ QtObject {
         if (sphereId === undefined || sphereId === null || sphereId === "")
             return ""
         var id = String(sphereId)
+        var letter = ""
         if (id === "sp")
-            return assetBase + "SpR.webp"
-        if (id.length >= 3 && id.indexOf("sp") === 0) {
-            var letter = id.charAt(2).toUpperCase()
-            return assetBase + "Sp" + letter + ".webp"
-        }
-        return ""
+            letter = "R"
+        else if (id.length >= 3 && id.indexOf("sp") === 0)
+            letter = id.charAt(2).toUpperCase()
+        else
+            return ""
+        return Qt.resolvedUrl("assets/kakera/Sp" + letter + ".webp")
     }
 
     function label(sphereId) {

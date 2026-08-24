@@ -77,7 +77,9 @@ def apply(bridge: Any) -> None:
             "perk8_used": 12,
             "perk8_max": 40,
             "perk8_mode": "active",
-            "perk9_spheres": 7,
+            "perk9_used": 6,
+            "perk9_max": 20,
+            "perk9_spheres": 6,
         },
         "last_claim": {
             "character": "Yor Forger",

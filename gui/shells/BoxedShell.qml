@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import gui 1.0
+import "../components"
 
 /*
     Boxed — app shell.
@@ -103,16 +104,26 @@ Item {
                 font.weight: Font.DemiBold
             }
 
-            Text {
+            Row {
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                text: targets.accountLabel
-                color: Theme.bg
-                opacity: 0.75
-                font.family: Theme.monoFamily
-                font.pixelSize: Theme.sizeSmall
-                font.weight: Font.DemiBold
+                spacing: 8
+
+                ThemeSphere {
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: 14
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: targets.accountLabel
+                    color: Theme.bg
+                    opacity: 0.75
+                    font.family: Theme.monoFamily
+                    font.pixelSize: Theme.sizeSmall
+                    font.weight: Font.DemiBold
+                }
             }
         }
 
@@ -242,15 +253,25 @@ Item {
                 }
             }
 
-            Text {
+            Row {
                 anchors.right: parent.right
                 anchors.rightMargin: 14
                 anchors.verticalCenter: parent.verticalCenter
-                text: run.phase.toUpperCase() + " · " + shell.clock
-                color: Theme.bg
-                font.family: Theme.monoFamily
-                font.pixelSize: Theme.sizeSmall
-                font.weight: Font.DemiBold
+                spacing: 8
+
+                ThemeSphere {
+                    anchors.verticalCenter: parent.verticalCenter
+                    size: 14
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: run.phase.toUpperCase() + " · " + shell.clock
+                    color: Theme.bg
+                    font.family: Theme.monoFamily
+                    font.pixelSize: Theme.sizeSmall
+                    font.weight: Font.DemiBold
+                }
             }
         }
     }

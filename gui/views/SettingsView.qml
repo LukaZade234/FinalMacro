@@ -164,8 +164,8 @@ Item {
                                 readonly property var item: Theme.paletteList[index]
                                 readonly property bool active: App.uiPalette === item.id
 
-                                width: 132
-                                height: 44
+                                width: 148
+                                height: 48
                                 radius: Theme.radiusMd
                                 color: item.surface
                                 border.width: active ? 2 : 1
@@ -178,27 +178,10 @@ Item {
                                     anchors.leftMargin: 10
                                     spacing: 8
 
-                                    Item {
+                                    ThemeSphere {
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 26
-                                        height: 16
-
-                                        Rectangle {
-                                            x: 0
-                                            width: 16
-                                            height: 16
-                                            radius: 8
-                                            color: paletteCard.item.accent
-                                        }
-                                        Rectangle {
-                                            x: 10
-                                            width: 16
-                                            height: 16
-                                            radius: 8
-                                            color: paletteCard.item.accent2
-                                            border.width: 1
-                                            border.color: paletteCard.item.surface
-                                        }
+                                        size: 28
+                                        sphereId: paletteCard.item.sphere || "spP"
                                     }
 
                                     Label {

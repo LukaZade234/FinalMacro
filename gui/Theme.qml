@@ -68,6 +68,9 @@ QtObject {
     readonly property color border: line
     readonly property color inputBg: bg
 
+    // App mark: mudae sphere whose colour follows the active palette.
+    readonly property string markSphereId: colors.sphere || "spP"
+
     // ---- typography --------------------------------------------------------
 
     readonly property string fontFamily: systemFonts

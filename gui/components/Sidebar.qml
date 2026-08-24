@@ -18,12 +18,17 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
+            Layout.preferredHeight: 86
 
             Column {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 0
+                spacing: 4
+
+                ThemeSphere {
+                    size: 22
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
 
                 Text {
                     text: "Final"

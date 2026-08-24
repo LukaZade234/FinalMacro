@@ -9,8 +9,8 @@ this assembles it from what the app already records:
 * claims come from the activity log, which is cleared per session — there is no
   dedicated claim log;
 * perk 8 lives on the macro state (clicks used against the daily cap);
-* perk 9 has no tracking of its own, so it is reported as today's sphere count,
-  which is the tally the perk governs.
+* perk 9 counts sphere-button clicks today (excluding megasphere), also on
+  macro state — bootstrapped from ``sphere_click`` log entries on connect.
 """
 
 from __future__ import annotations
@@ -148,7 +148,10 @@ def build_run_summary(
             "perk8_used": int(getattr(state, "kakera_clicks_today", 0) or 0),
             "perk8_max": int(perk8_max) if perk8_max else None,
             "perk8_mode": str(getattr(state, "perk8_priority_mode", "") or ""),
-            "perk9_spheres": _count_events(sphere_events, since=None, date_key=today_key),
+            "perk9_used": int(getattr(state, "perk9_clicks_today", 0) or 0),
+            "perk9_max": int(getattr(state, "perk9_click_max", 0) or 0) or None,
+            # Legacy key — kept so older QML bindings do not break mid-session.
+            "perk9_spheres": int(getattr(state, "perk9_clicks_today", 0) or 0),
         },
         "last_claim": last_claim,
     }

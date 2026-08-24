@@ -9,18 +9,29 @@ Rectangle {
     readonly property bool active: phase !== "Idle"
 
     implicitHeight: 28
-    implicitWidth: Math.max(88, label.implicitWidth + 20)
+    implicitWidth: Math.max(88, row.implicitWidth + 20)
     radius: Theme.radiusPill
     color: pill.active ? Qt.rgba(0.48, 0.64, 0.97, 0.16) : Theme.bgDark
     border.color: pill.active ? Theme.accentPrimary : Theme.border
     border.width: 1
 
-    Text {
-        id: label
+    Row {
+        id: row
         anchors.centerIn: parent
-        text: pill.phase
-        color: pill.active ? Theme.accentPrimary : Theme.fgMuted
-        font.pixelSize: 11
-        font.weight: Font.DemiBold
+        spacing: 6
+
+        ThemeSphere {
+            anchors.verticalCenter: parent.verticalCenter
+            size: 14
+        }
+
+        Text {
+            id: label
+            anchors.verticalCenter: parent.verticalCenter
+            text: pill.phase
+            color: pill.active ? Theme.accentPrimary : Theme.fgMuted
+            font.pixelSize: 11
+            font.weight: Font.DemiBold
+        }
     }
 }

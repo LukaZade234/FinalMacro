@@ -1,6 +1,7 @@
 import QtQuick
 
 import gui 1.0
+import "../components"
 
 /*
     One `.vt` tile from the Haul vitals row: uppercase key, a large value with an
@@ -65,19 +66,17 @@ Item {
             width: parent.width
             spacing: 7
 
-            Rectangle {
+            ThemeSphere {
                 visible: vital.phase
-                width: 7
-                height: 7
-                radius: 3.5
+                size: 16
                 anchors.verticalCenter: parent.verticalCenter
-                color: Theme.accent
 
                 SequentialAnimation on opacity {
                     running: vital.pulsing
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.25; duration: 750 }
                     NumberAnimation { to: 1.0; duration: 750 }
+                    onRunningChanged: if (!running) parent.opacity = 1
                 }
             }
 

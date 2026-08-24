@@ -6,12 +6,17 @@ with 1–4 free kakera buttons, or a wish spawn. Those cases are not parsed yet.
 
 Until they are documented, every Mudae message after a confirmed ``kakeraC``
 click is stored until the next *commanded* roll (the reply to a ``$wa`` / ``$wg``
-we sent). Unsolicited character / wish embeds from chaos stay in the window.
+we sent) **or** a few seconds of silence — last roll of the hour has no next
+``$wa``, so silence is what closes the window and writes ``data/chaos_log.json``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +32,32 @@ _recording_account_id: str = ""
 _recording_account_name: str = ""
 
 _MAX_MESSAGES = 80
+# Last roll of a session never sends another $wa. Stop listening after this
+# much silence so the window is flushed instead of sitting open until refill.
+_IDLE_SEC = 8.0
 
-_writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
+_lock = threading.Lock()
+_idle_timer: threading.Timer | None = None
+_idle_gen = 0
+_last_activity_mono = 0.0
+_log_line: Callable[[str], None] | None = None
+_notify_loop: asyncio.AbstractEventLoop | None = None
+
+_writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _disk_events())
 
 
 def log_path() -> Path:
     return _LOG_PATH
+
+
+def bind_notify(
+    log: Callable[[str], None] | None,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> None:
+    """Activity-log line + event loop for idle closes (timer thread)."""
+    global _log_line, _notify_loop
+    _log_line = log
+    _notify_loop = loop
 
 
 def _load_disk_log() -> None:
@@ -44,7 +69,32 @@ def _load_disk_log() -> None:
     except (json.JSONDecodeError, OSError):
         return
     if isinstance(raw, list):
-        _events = [entry for entry in raw if isinstance(entry, dict)]
+        loaded: list[dict[str, Any]] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("closed_reason") == "open":
+                entry = dict(entry)
+                entry["closed_reason"] = "interrupted"
+            loaded.append(entry)
+        _events = loaded
+
+
+def _window_for_disk(window: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    out = {key: value for key, value in window.items() if not str(key).startswith("_")}
+    messages = list(out.get("messages") or [])
+    out["messages"] = messages
+    out["message_count"] = len(messages)
+    out["closed_reason"] = reason
+    return out
+
+
+def _disk_events() -> list[dict[str, Any]]:
+    with _lock:
+        payload = [dict(entry) for entry in _events]
+        if _open and _open.get("messages"):
+            payload.append(_window_for_disk(_open, reason="open"))
+        return payload
 
 
 def _save_disk_log() -> None:
@@ -133,6 +183,57 @@ def _fill_context(window: dict[str, Any], snapshot: MudaeMessageSnapshot) -> Non
         window["channel_name"] = snapshot.channel_name
 
 
+def _cancel_idle_timer() -> None:
+    global _idle_timer
+    if _idle_timer is not None:
+        _idle_timer.cancel()
+        _idle_timer = None
+
+
+def _arm_idle_timer() -> None:
+    """Restart the silence watchdog. No-op when nothing is open."""
+    global _idle_timer, _idle_gen, _last_activity_mono
+    with _lock:
+        if _open is None:
+            return
+        _last_activity_mono = time.monotonic()
+        _idle_gen += 1
+        gen = _idle_gen
+        _cancel_idle_timer()
+        timer = threading.Timer(_IDLE_SEC, _on_idle, args=(gen,))
+        timer.daemon = True
+        _idle_timer = timer
+        timer.start()
+
+
+def _on_idle(gen: int) -> None:
+    with _lock:
+        if gen != _idle_gen or _open is None:
+            return
+    close_open_window("idle")
+
+
+def _emit_closed(window: dict[str, Any]) -> None:
+    log = _log_line
+    if log is None:
+        return
+    n = int(window.get("message_count") or 0)
+    reason = str(window.get("closed_reason") or "?")
+    line = f"chaos capture: {n} message(s) ({reason})"
+    loop = _notify_loop
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if loop is not None and running is not loop:
+        try:
+            loop.call_soon_threadsafe(log, line)
+            return
+        except RuntimeError:
+            pass
+    log(line)
+
+
 def begin_window(
     *,
     clicked_message_id: int,
@@ -149,41 +250,44 @@ def begin_window(
     acc_name = str(
         account_name if account_name is not None else _recording_account_name or "Main"
     ).strip() or "Main"
-    _open = {
-        "kind": "unparsed",
-        "clicked_message_id": int(clicked_message_id),
-        "character_name": str(character_name or ""),
-        "account_id": acc_id,
-        "account_name": acc_name,
-        "guild_id": None,
-        "guild_name": "",
-        "channel_id": None,
-        "channel_name": "",
-        "clicked_at": stamp.isoformat(timespec="seconds"),
-        "date_key": utc_date_key(stamp),
-        "messages": [],
-    }
+    with _lock:
+        _open = {
+            "kind": "unparsed",
+            "clicked_message_id": int(clicked_message_id),
+            "character_name": str(character_name or ""),
+            "account_id": acc_id,
+            "account_name": acc_name,
+            "guild_id": None,
+            "guild_name": "",
+            "channel_id": None,
+            "channel_name": "",
+            "clicked_at": stamp.isoformat(timespec="seconds"),
+            "date_key": utc_date_key(stamp),
+            "messages": [],
+        }
 
 
 def close_open_window(reason: str) -> dict[str, Any] | None:
     """Persist the open window if it captured any messages. Return it or None."""
     global _open
-    window = _open
-    _open = None
+    with _lock:
+        _cancel_idle_timer()
+        window = _open
+        _open = None
     if window is None:
         return None
     messages = list(window.get("messages") or [])
     if not messages:
         return None
     stamp = utc_now()
-    window["messages"] = messages
-    window["closed_at"] = stamp.isoformat(timespec="seconds")
-    window["closed_reason"] = str(reason or "unknown")
-    window["message_count"] = len(messages)
-    _events.append(window)
+    stored = _window_for_disk(window, reason=str(reason or "unknown"))
+    stored["closed_at"] = stamp.isoformat(timespec="seconds")
+    with _lock:
+        _events.append(stored)
     _save_disk_log()
     flush_disk_log()
-    return window
+    _emit_closed(stored)
+    return stored
 
 
 def note_parsed(
@@ -203,17 +307,35 @@ def note_parsed(
         return close_open_window("next_roll")
     _fill_context(window, snapshot)
     stamp = utc_now().isoformat(timespec="seconds")
-    window["messages"].append(_message_record(snapshot, parsed, recorded_at=stamp))
-    if len(window["messages"]) >= _MAX_MESSAGES:
+    first = False
+    with _lock:
+        if _open is not window:
+            return None
+        window["messages"].append(_message_record(snapshot, parsed, recorded_at=stamp))
+        first = len(window["messages"]) == 1
+        capped = len(window["messages"]) >= _MAX_MESSAGES
+    _arm_idle_timer()
+    _save_disk_log()
+    if first:
+        # So data/chaos_log.json exists as soon as Mudae replies, not only after
+        # the next roll (which may never come at the end of an hour).
+        flush_disk_log()
+    if capped:
         return close_open_window("cap")
     return None
 
 
+def arm_idle_watch() -> None:
+    """Start/reset the silence timer after a confirmed chaos click."""
+    _arm_idle_timer()
+
+
 def open_window() -> dict[str, Any] | None:
     """Currently capturing window, or None. Tests / debug only."""
-    if _open is None:
-        return None
-    return dict(_open)
+    with _lock:
+        if _open is None:
+            return None
+        return dict(_open)
 
 
 _load_disk_log()

@@ -1512,6 +1512,10 @@ class AppBridge(QObject):
         set_minigame_account(resolved.account_id, account_name)
         set_chaos_account(resolved.account_id, account_name)
 
+        from macro.perk9_daily import sync_perk9_clicks_from_log
+
+        sync_perk9_clicks_from_log(self._macro_state)
+
         channel_profile = self._profiles.find_channel_by_profile_id(
             resolved.channel_profile_id
         )
@@ -1586,6 +1590,13 @@ class AppBridge(QObject):
         state.kakera_clicks_day = ""
         state.perk8_priority_mode = "inactive"
         state.perk8_click_max = None
+        state.perk9_clicks_today = 0
+        state.perk9_clicks_day = ""
+
+        from macro.perk9_daily import PERK9_CLICK_MAX_DEFAULT, sync_perk9_clicks_from_log
+
+        state.perk9_click_max = PERK9_CLICK_MAX_DEFAULT
+        sync_perk9_clicks_from_log(state)
 
     def _load_persisted_runtime_state(
         self,
@@ -1810,13 +1821,7 @@ class AppBridge(QObject):
             self._actions.feed(snapshot, parsed)
         from mudae.chaos_capture import note_parsed as note_chaos_parsed
 
-        closed = note_chaos_parsed(snapshot, parsed)
-        if closed:
-            n = int(closed.get("message_count") or 0)
-            reason = str(closed.get("closed_reason") or "?")
-            log = getattr(self._engine, "_log", None)
-            if callable(log):
-                log(f"chaos capture: {n} message(s) ({reason})")
+        note_chaos_parsed(snapshot, parsed)
         profile_kind = profile_kind_from_parse(parsed)
         if profile_kind:
             payload = json.dumps(
@@ -1965,6 +1970,10 @@ class AppBridge(QObject):
         ):
             return False
         record_sphere_earning(snapshot, parsed.fields, source="sphere_click")
+        from macro.perk9_daily import is_perk9_sphere_click
+
+        if is_perk9_sphere_click(parsed.fields.get("sphere_type")):
+            self._macro_state.record_perk9_click()
         return True
 
     def _try_record_key_events(

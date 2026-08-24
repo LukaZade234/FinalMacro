@@ -31,7 +31,7 @@ from macro.rule_eval import (
     perk8_mode_from_state,
 )
 from macro.state import AccountState
-from mudae.chaos_capture import begin_window, close_open_window
+from mudae.chaos_capture import arm_idle_watch, begin_window, bind_notify, close_open_window
 from mudae.types import MessageKind, ParseResult
 
 _CHAOS_EMOJI = "kakeraC"
@@ -217,6 +217,7 @@ class KakeraReactor:
     ) -> bool:
         chaos = (choice.emoji or "") == _CHAOS_EMOJI
         if chaos:
+            bind_notify(self.log, asyncio.get_running_loop())
             begin_window(clicked_message_id=message_id, character_name=character)
         confirmed = False
         try:
@@ -323,6 +324,7 @@ class KakeraReactor:
                 self._notify_state()
                 confirmed = True
                 if chaos:
+                    arm_idle_watch()
                     self._debug(
                         f"chaos capture: watching follow-ups after {character}"
                     )

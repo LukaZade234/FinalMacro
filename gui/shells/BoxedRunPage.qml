@@ -320,7 +320,7 @@ Item {
                         BoxedStatRow {
                             width: parent.width
                             label: "Perk 9 today"
-                            value: String(run.perk9Today)
+                            value: run.perk9Text
                         }
                     }
                 }
