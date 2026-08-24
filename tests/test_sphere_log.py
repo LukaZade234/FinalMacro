@@ -84,6 +84,7 @@ def test_record_sphere_sources(tmp_path, monkeypatch):
 
     store = type("S", (), {"accounts": [AccountProfile(id="acc1", name="Main", type="Main")]})()
     payload = client_payload(store)
+    assert "entries" not in payload
     assert payload["totals"]["all_time"] == 46 + 12 + 1273 + 5600
     sources = {row["id"]: row["amount"] for row in payload["by_source"]}
     assert sources["sphere_click"] == 46

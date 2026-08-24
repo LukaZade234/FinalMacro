@@ -463,9 +463,9 @@ class AppBridge(QObject):
 
     @Property(str, constant=False, notify=soulmatesChanged)
     def soulmatesJson(self) -> str:
-        from mudae.soulmate_log import events_for_client
+        from mudae.soulmate_log import client_payload
 
-        return json.dumps(events_for_client(self._accounts))
+        return json.dumps(client_payload(self._accounts))
 
     @Property(str, constant=False, notify=kakeraChanged)
     def kakeraJson(self) -> str:
@@ -496,6 +496,33 @@ class AppBridge(QObject):
         from mudae.key_log import client_payload
 
         return json.dumps(client_payload(self._accounts))
+
+    @Slot(str, str, str, str, str, int, int, result=str)
+    def statsQuery(
+        self,
+        kind: str,
+        account: str,
+        server: str,
+        method: str,
+        extra: str,
+        offset: int,
+        limit: int,
+    ) -> str:
+        """Filtered Statistics summary + one page of events (newest first)."""
+        from mudae.stats_index import PAGE_SIZE, payload
+
+        return json.dumps(
+            payload(
+                str(kind or ""),
+                self._accounts,
+                account=account,
+                server=server,
+                method=method,
+                type_id=extra,
+                offset=int(offset or 0),
+                limit=int(limit or PAGE_SIZE),
+            )
+        )
 
     def _sync_initial_target(self) -> None:
         account = self._accounts.active_account()

@@ -65,8 +65,27 @@ def imported_legacy() -> bool:
     return _imported_legacy
 
 
+def _notify_index_add(kind: str, entry: dict[str, Any]) -> None:
+    from mudae import stats_index
+
+    stats_index.add(kind, entry)
+
+
+def _notify_index_rebuild() -> None:
+    from mudae import stats_index
+
+    stats_index.rebuild()
+
+
+def _notify_index_rebuild_kind(kind: str) -> None:
+    from mudae import stats_index
+
+    stats_index.rebuild_kind(kind)
+
+
 def ensure_loaded() -> None:
     global _loaded, _imported_legacy
+    should_rebuild = False
     with _lock:
         if _loaded:
             return
@@ -77,13 +96,17 @@ def ensure_loaded() -> None:
         if _path.is_file() and _path.stat().st_size > 0:
             _load_jsonl(_path)
             _imported_legacy = False
-            return
-        imported = _import_legacy_files(_data_dir)
-        _imported_legacy = imported > 0
-        if imported:
-            _writer.reset_sync()
-            _writer.mark_dirty(rewrite=True)
-            _writer.flush()
+            should_rebuild = True
+        else:
+            imported = _import_legacy_files(_data_dir)
+            _imported_legacy = imported > 0
+            if imported:
+                _writer.reset_sync()
+                _writer.mark_dirty(rewrite=True)
+                _writer.flush()
+            should_rebuild = True
+    if should_rebuild:
+        _notify_index_rebuild()
 
 
 def append(kind: str, entry: dict[str, Any]) -> dict[str, Any]:
@@ -96,6 +119,7 @@ def append(kind: str, entry: dict[str, Any]) -> dict[str, Any]:
         _by_kind[kind].append(entry)
         _all.append(entry)
     _writer.mark_dirty()
+    _notify_index_add(kind, entry)
     return entry
 
 
@@ -114,6 +138,7 @@ def replace(kind: str, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
             live.append(row)
             _all.append(row)
     _writer.mark_dirty(rewrite=True)
+    _notify_index_rebuild_kind(kind)
     return live
 
 
@@ -144,6 +169,7 @@ def reset_for_tests(path: Path | None = None) -> None:
             _path = Path(path)
             _data_dir = _path.parent
         _writer.reset_sync()
+    _notify_index_rebuild()
 
 
 def load_from_data_dir(directory: Path) -> None:
@@ -162,13 +188,14 @@ def load_from_data_dir(directory: Path) -> None:
         if jsonl.is_file() and jsonl.stat().st_size > 0:
             _load_jsonl(jsonl)
             _imported_legacy = False
-            return
-        imported = _import_legacy_files(directory)
-        _imported_legacy = imported > 0
-        if imported:
-            _writer.reset_sync()
-            _writer.mark_dirty(rewrite=True)
-            _writer.flush()
+        else:
+            imported = _import_legacy_files(directory)
+            _imported_legacy = imported > 0
+            if imported:
+                _writer.reset_sync()
+                _writer.mark_dirty(rewrite=True)
+                _writer.flush()
+    _notify_index_rebuild()
 
 
 def _load_jsonl(path: Path) -> None:

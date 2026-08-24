@@ -6,7 +6,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-from mudae.account_context import defaults_from_store, resolve_log_account
+from mudae.account_context import resolve_log_account
 from mudae.clock import utc_date_key
 from mudae import event_log
 from macro.state import MacroPhase
@@ -432,28 +432,28 @@ def build_stats(
     }
 
 
-def client_payload(accounts_store: Any) -> dict[str, Any]:
-    main_id, main_name, account_by_id = defaults_from_store(accounts_store)
-    enriched = [
-        enrich_entry(
-            entry,
-            account_by_id=account_by_id,
-            main_account_id=main_id,
-            main_account_name=main_name,
-        )
-        for entry in _events
-    ]
-    enriched.reverse()
-    stats = build_stats(enriched)
-    return {
-        "entries": enriched,
-        "totals_by_type": stats["totals_by_type"],
-        "daily_series": stats["daily_series"],
-        "monthly_series": stats["monthly_series"],
-        "omega_daily_series": stats["omega_daily_series"],
-        "by_source": stats["by_source"],
-        "by_key_type": stats["by_key_type"],
-    }
+def client_payload(
+    accounts_store: Any,
+    *,
+    account: str = "all",
+    server: str = "all",
+    method: str = "all",
+    type_id: str = "all",
+    offset: int = 0,
+    limit: int = 80,
+) -> dict[str, Any]:
+    from mudae.stats_index import PAGE_SIZE, payload
+
+    return payload(
+        "key",
+        accounts_store,
+        account=account,
+        server=server,
+        method=method,
+        type_id=type_id,
+        offset=offset,
+        limit=limit or PAGE_SIZE,
+    )
 
 
 def get_key_events() -> list[dict[str, Any]]:

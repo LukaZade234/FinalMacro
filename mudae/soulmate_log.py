@@ -30,6 +30,9 @@ def _load_disk_log() -> None:
     if _backfill_account_name_from_owner():
         event_log.mark_dirty(rewrite=True)
         event_log.flush()
+        from mudae import stats_index
+
+        stats_index.rebuild_kind("soulmate")
 
 
 def _save_disk_log() -> None:
@@ -99,6 +102,9 @@ def persist_legacy_account_ids(accounts_store: Any) -> int:
         updated += 1
     if updated:
         _save_disk_log()
+        from mudae import stats_index
+
+        stats_index.rebuild_kind("soulmate")
     return updated
 
 
@@ -231,6 +237,30 @@ def dedupe_stored_events() -> int:
 
 def get_soulmate_events() -> list[dict[str, Any]]:
     return [dict(entry) for entry in _events]
+
+
+def client_payload(
+    accounts_store: Any,
+    *,
+    account: str = "all",
+    server: str = "all",
+    method: str = "all",
+    type_id: str = "all",
+    offset: int = 0,
+    limit: int = 80,
+) -> dict[str, Any]:
+    from mudae.stats_index import PAGE_SIZE, payload
+
+    return payload(
+        "soulmate",
+        accounts_store,
+        account=account,
+        server=server,
+        method=method,
+        type_id=type_id,
+        offset=offset,
+        limit=limit or PAGE_SIZE,
+    )
 
 
 def events_for_client(accounts_store: Any) -> list[dict[str, Any]]:

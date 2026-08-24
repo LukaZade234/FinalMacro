@@ -90,10 +90,13 @@ def test_record_and_stats(tmp_path, monkeypatch):
 
     store = type("S", (), {"accounts": [AccountProfile(id="acc1", name="Main", type="Main")]})()
     payload = client_payload(store)
+    assert "entries" not in payload
     assert payload["totals"]["all_time"] == 1700
+    assert payload["event_count"] == 2
+    assert len(payload["recent"]) == 2
     assert len(payload["by_method"]) == 2
-    assert payload["entries"][0]["earn_method_label"] == earn_method_label("bku_reset")
-    assert payload["entries"][1]["earn_method_label"] == earn_method_label("kakera_click")
+    assert payload["recent"][0]["earn_method_label"] == earn_method_label("bku_reset")
+    assert payload["recent"][1]["earn_method_label"] == earn_method_label("kakera_click")
 
 
 def test_build_stats_by_method():

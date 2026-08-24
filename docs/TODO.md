@@ -22,10 +22,10 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
 11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
-13. ~~**EventLog + JSONL**~~ then **shared stats model** — storage landed; the GUI still rebuilds the full payload.
+13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — tables no longer parse the full log; shared filter state across tabs and a Qt list model can wait.
 14. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
 15. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
-16. Last: split `bridge.py`, achievements, GUI polish. Do not hoist `uniqueSources` / cache `filteredEntries` if the shared model is next — they die with it.
+16. Last: split `bridge.py`, achievements, GUI polish.
 
 ---
 
@@ -35,7 +35,7 @@ Highest first. What makes an overnight run correct and complete.
 
 1. **`$settings` / `$bonus` audit** — nothing server-driven is trusted until this lands (claim-via-emoji, perk 9 DP, `$bw`, any rule from parsed settings).
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
-3. **Sphere tracking + EventLog / shared stats** — totals are wrong and the GUI rebuilds 3 MB per event. Every later report and solver frequency sits on this.
+3. ~~**Sphere tracking + EventLog / shared stats**~~ — EventLog + daily cube + paged stats tables. Totals/charts no longer walk every event in QML.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
 5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played), perk 9 static filter, perk 8 power not saved for refill.
 6. **Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`. Overnight sessions mis-attribute `$tu` and can collide with a minigame.
@@ -66,7 +66,8 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 **Wave 2 — two foundations (do not skip)**
 
 - `$settings` / `$bonus` audit. Unblocks perk 9 DP, `$bw`, claim-via-emoji, and any rule driven by the server. Do not change claim / kakera / roll behaviour until this is done.
-- ~~One `EventLog` + JSONL (`data/events.jsonl`; one-time import of the old JSON arrays, which stay on disk).~~ Then the shared stats / filter model. Unblocks daily report, session row, achievements. Kills the O(n²) `uniqueSources` and the four copy-pasted views.
+- ~~One `EventLog` + JSONL (`data/events.jsonl`; one-time import of the old JSON arrays, which stay on disk).~~
+- ~~Daily cube + paged Statistics (`stats_index`; `App.statsQuery`).~~ Cards/charts sum daily cells; tables load 80 rows at a time. Shared filter state across Kakera/Spheres/Keys/Soulmates and a `QAbstractListModel` can wait.
 
 **Wave 3 — close the daily loop on one account**
 
@@ -129,11 +130,11 @@ Do not change per-server claim / kakera / roll rules until the settings audit (s
 
 Do the shared model first; the copy-paste and most of the slowness go away with it.
 
-- **Stats payload is rebuilt from scratch on every event** — `kakeraJson` / `spheresJson` / `keysJson` enrich every row, `build_stats` over the whole log, then `json.dumps` into QML. Measured ~64 ms / 3 MB at 8k events, and it runs on each notify while the tab is open. Split totals/series (incremental) from the row list (`QAbstractListModel`).
-- **Four stats views are the same file** — `filteredEntries`, `uniqueAccounts`, `uniqueServers`, `serverKey`, `filteredTotals` copied across Kakera / Spheres / Keys / Soulmates. One shared filter model (Python if the payload moves there). **Share filter state** too — “account: X” on Kakera should still be X on Spheres.
-- **`uniqueSources()` is O(n²)** — `SpheresView.sourceBreakdown` / `KeysView` call it inside the inner loop (and it walks all entries each time). Hoist if the shared model is not next; otherwise it dies with the shared model.
-- **`filteredEntries()` is a function in bindings** — every re-eval re-filters; `sourceBreakdown` / series / totals each call it again. Cache as a property if views stay in QML.
-- **Wave 2 EventLog (storage):** one `data/events.jsonl` for kakera / spheres / keys / soulmates. Existing `data/*_log.json` arrays are imported once and left on disk. Shared stats / filter model still open.
+- ~~**Stats payload is rebuilt from scratch on every event**~~ — `stats_index` keeps a daily cube; QML gets summary fields plus 80 `recent` rows (`App.statsQuery`). A `QAbstractListModel` can still replace JSON paging later.
+- **Four stats views still copy filter chrome** — account/server combos are per-tab. Share filter state so “account: X” on Kakera stays X on Spheres.
+- ~~**`uniqueSources()` is O(n²)**~~ — breakdowns come from the cube.
+- ~~**`filteredEntries()` walked the full log in QML**~~ — tables bind to `payload.recent`.
+- **Wave 2 EventLog (storage):** one `data/events.jsonl` for kakera / spheres / keys / soulmates. Existing `data/*_log.json` arrays are imported once and left on disk.
 - ~~**Timezones** — log `date_key` is UTC; QML “today” / week / month use local `Date`.~~ `mudae/clock.py` + `gui/clock.js`: UTC for `date_key` / stats “today”; live feed local.
 - **Reaction power max is hardcoded `155`** — `DEFAULT_MAX_REACTION_POWER` / `AccountState.power_max_percent`. The real cap is on `$bonus`; wait for that audit. Efficiency math is wrong when it is stale.
 - ~~**Empty states**~~ — disconnected vs nothing recorded vs filters (`gui/emptyStates.js`).

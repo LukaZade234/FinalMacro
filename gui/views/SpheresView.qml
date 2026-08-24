@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
-import "../clock.js" as Clock
 import "../emptyStates.js" as Empty
 import "../components"
 
@@ -16,23 +15,65 @@ Item {
         color: Theme.bgDark
     }
 
-    property var payload: ({ entries: [], totals: {}, daily_series: [], monthly_series: [] })
+    property var payload: ({
+        recent: [],
+        totals: {},
+        daily_series: [],
+        monthly_series: [],
+        by_source: [],
+        event_count: 0,
+        has_more: false,
+        filter_options: { accounts: [], servers: [], methods: [] }
+    })
     property string accountFilter: "all"
     property string serverFilter: "all"
     property string sourceFilter: "all"
     property int trendRangeDays: 30
+    property int pageSize: 80
 
-    function reload() {
+    function queryPayload(offset, limit) {
         try {
-            payload = JSON.parse(App.spheresJson)
+            return JSON.parse(App.statsQuery(
+                "sphere",
+                accountFilter,
+                serverFilter,
+                sourceFilter,
+                "all",
+                offset,
+                limit
+            ))
         } catch (e) {
-            payload = { entries: [], totals: {}, daily_series: [], monthly_series: [] }
+            return {
+                recent: [],
+                totals: {},
+                daily_series: [],
+                monthly_series: [],
+                by_source: [],
+                event_count: 0,
+                has_more: false,
+                filter_options: { accounts: [], servers: [], methods: [] }
+            }
         }
+    }
+
+    function reload(resetPage) {
+        var limit = pageSize
+        if (!resetPage)
+            limit = Math.max(pageSize, (payload.recent || []).length || pageSize)
+        payload = queryPayload(0, limit)
         refreshServerFilter()
     }
 
-    function entries() {
-        return payload.entries || []
+    function loadMore() {
+        if (!payload.has_more)
+            return
+        var extra = queryPayload((payload.recent || []).length, pageSize)
+        extra.recent = (payload.recent || []).concat(extra.recent || [])
+        payload = extra
+    }
+
+    function recentEntries() {
+        return payload.recent || []
     }
 
     function totals() {
@@ -44,145 +85,32 @@ Item {
         return n.toLocaleString(Qt.locale(), "f", 0)
     }
 
-    function serverKey(entry) {
-        return entry.guild_name || String(entry.guild_id || "unknown")
-    }
-
-    function filteredEntries() {
-        return entries().filter(function(entry) {
-            if (accountFilter !== "all" && entry.account_id !== accountFilter)
-                return false
-            if (serverFilter !== "all" && serverKey(entry) !== serverFilter)
-                return false
-            if (sourceFilter !== "all" && entry.source !== sourceFilter)
-                return false
-            return true
-        })
-    }
-
-    function uniqueSources() {
-        var seen = {}
-        var out = []
-        for (var i = 0; i < entries().length; i++) {
-            var id = entries()[i].source || ""
-            if (!id || seen[id])
-                continue
-            seen[id] = true
-            out.push({
-                id: id,
-                label: entries()[i].source_label || id
-            })
-        }
-        return out
-    }
-
     function sourceBreakdown() {
-        var list = filteredEntries()
-        var totals = {}
-        for (var i = 0; i < list.length; i++) {
-            var key = list[i].source || "unknown"
-            totals[key] = (totals[key] || 0) + Number(list[i].amount || 0)
-        }
-        var out = []
-        var keys = Object.keys(totals)
-        for (var j = 0; j < keys.length; j++) {
-            var sourceId = keys[j]
-            var label = sourceId
-            for (var k = 0; k < uniqueSources().length; k++) {
-                if (uniqueSources()[k].id === sourceId) {
-                    label = uniqueSources()[k].label
-                    break
-                }
-            }
-            out.push({ id: sourceId, label: label, amount: totals[sourceId] })
-        }
-        out.sort(function(a, b) { return b.amount - a.amount })
-        return out
+        return payload.by_source || []
     }
 
     function filteredDailySeries() {
-        var list = filteredEntries()
-        var daily = {}
-        for (var i = 0; i < list.length; i++) {
-            var key = list[i].date_key || ""
-            if (!key)
-                continue
-            daily[key] = (daily[key] || 0) + Number(list[i].amount || 0)
-        }
-        var out = []
-        var keys = Object.keys(daily).sort()
-        for (var j = 0; j < keys.length; j++)
-            out.push({ date: keys[j], amount: daily[keys[j]] })
-        return out
+        return payload.daily_series || []
     }
 
     function filteredMonthlySeries() {
-        var list = filteredEntries()
-        var monthly = {}
-        for (var i = 0; i < list.length; i++) {
-            var dk = list[i].date_key || ""
-            if (dk.length < 7)
-                continue
-            var mk = dk.slice(0, 7)
-            monthly[mk] = (monthly[mk] || 0) + Number(list[i].amount || 0)
-        }
-        var out = []
-        var keys = Object.keys(monthly).sort()
-        for (var j = 0; j < keys.length; j++) {
-            var parts = keys[j].split("-")
-            var label = keys[j]
-            if (parts.length === 2)
-                label = Qt.formatDate(new Date(Number(parts[0]), Number(parts[1]) - 1, 1), "MMM yyyy")
-            out.push({ month: keys[j], label: label, amount: monthly[keys[j]] })
-        }
-        return out
-    }
-
-    function filteredTotals() {
-        var list = filteredEntries()
-        var out = { all_time: 0, today: 0, week: 0, month: 0, year: 0 }
-        var periods = Clock.periodKeys()
-        for (var i = 0; i < list.length; i++) {
-            var amount = Number(list[i].amount || 0)
-            out.all_time += amount
-            Clock.addDateKey(out, list[i].date_key, amount, periods)
-        }
-        return out
+        return payload.monthly_series || []
     }
 
     function displayTotals() {
-        if (accountFilter === "all" && serverFilter === "all")
-            return totals()
-        return filteredTotals()
+        return totals()
     }
 
     function uniqueAccounts() {
-        var seen = {}
-        var out = []
-        for (var i = 0; i < entries().length; i++) {
-            var id = entries()[i].account_id || ""
-            if (!id || seen[id])
-                continue
-            seen[id] = true
-            out.push({
-                id: id,
-                label: entries()[i].account_name + (entries()[i].account_inferred ? " (inferred)" : "")
-            })
-        }
-        return out
+        return (payload.filter_options && payload.filter_options.accounts) || []
     }
 
     function uniqueServers() {
-        var seen = {}
-        var out = []
-        for (var i = 0; i < entries().length; i++) {
-            var key = serverKey(entries()[i])
-            if (seen[key])
-                continue
-            seen[key] = true
-            out.push({ id: key, label: key })
-        }
-        return out
+        return (payload.filter_options && payload.filter_options.servers) || []
+    }
+
+    function uniqueSources() {
+        return (payload.filter_options && payload.filter_options.methods) || []
     }
 
     function refreshServerFilter() {
@@ -194,6 +122,39 @@ Item {
                 return
         }
         serverFilter = "all"
+    }
+
+    function accountComboIndex() {
+        if (accountFilter === "all")
+            return 0
+        var list = uniqueAccounts()
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === accountFilter)
+                return i + 1
+        }
+        return 0
+    }
+
+    function serverComboIndex() {
+        if (serverFilter === "all")
+            return 0
+        var list = uniqueServers()
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === serverFilter)
+                return i + 1
+        }
+        return 0
+    }
+
+    function sourceComboIndex() {
+        if (sourceFilter === "all")
+            return 0
+        var list = uniqueSources()
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === sourceFilter)
+                return i + 1
+        }
+        return 0
     }
 
     Component.onCompleted: reload()
@@ -259,24 +220,30 @@ Item {
                 ThemedComboBox {
                     width: 200
                     model: ["All accounts"].concat(uniqueAccounts().map(function(a) { return a.label }))
+                    currentIndex: accountComboIndex()
                     onActivated: function(index) {
                         accountFilter = index <= 0 ? "all" : uniqueAccounts()[index - 1].id
+                        reload(true)
                     }
                 }
 
                 ThemedComboBox {
                     width: 220
                     model: ["All servers"].concat(uniqueServers().map(function(s) { return s.label }))
+                    currentIndex: serverComboIndex()
                     onActivated: function(index) {
                         serverFilter = index <= 0 ? "all" : uniqueServers()[index - 1].id
+                        reload(true)
                     }
                 }
 
                 ThemedComboBox {
                     width: 180
                     model: ["All sources"].concat(uniqueSources().map(function(m) { return m.label }))
+                    currentIndex: sourceComboIndex()
                     onActivated: function(index) {
                         sourceFilter = index <= 0 ? "all" : uniqueSources()[index - 1].id
+                        reload(true)
                     }
                 }
 
@@ -291,8 +258,8 @@ Item {
 
                 Label {
                     width: Math.max(160, sphereFilterFlow.width)
-                    text: filteredEntries().length + " events · "
-                          + formatSpheres(filteredTotals().all_time) + " sp filtered"
+                    text: (payload.event_count || 0) + " events · "
+                          + formatSpheres(displayTotals().all_time) + " sp"
                     color: Theme.fgSecondary
                     font.pixelSize: 12
                 }
@@ -351,7 +318,7 @@ Item {
 
                 Label {
                     visible: sourceBreakdown().length === 0
-                    text: Empty.statsBreakdownEmpty(App.connected, entries().length > 0)
+                    text: Empty.statsBreakdownEmpty(App.connected, (payload.event_count || 0) > 0)
                     color: Theme.fgMuted
                     font.pixelSize: 12
                 }
@@ -369,7 +336,7 @@ Item {
                 dailySeries: filteredDailySeries()
                 monthlySeries: filteredMonthlySeries()
                 rangeDays: trendRangeDays
-                emptyText: Empty.chartRangeEmpty(App.connected, entries().length > 0, "sphere earnings")
+                emptyText: Empty.chartRangeEmpty(App.connected, (payload.event_count || 0) > 0, "sphere earnings")
             }
         }
 
@@ -418,7 +385,7 @@ Item {
                     ListView {
                         id: sphereList
                         width: parent.width
-                        model: filteredEntries()
+                        model: recentEntries()
                         spacing: 2
 
                         delegate: Rectangle {
@@ -499,11 +466,19 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: sphereList.count === 0
-                            text: Empty.statsLogEmpty(App.connected, entries().length > 0, "spheres")
+                            text: Empty.statsLogEmpty(App.connected, (payload.event_count || 0) > 0, "spheres")
                             color: Theme.fgMuted
                             font.pixelSize: 12
                         }
                     }
+                }
+
+                ThemedButton {
+                    visible: payload.has_more === true
+                    text: "Load more"
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: 8
+                    onClicked: loadMore()
                 }
             }
         }

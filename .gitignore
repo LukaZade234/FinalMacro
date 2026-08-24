@@ -1,6 +1,7 @@
 data/settings.json
 data/channel_cache.json
 data/*_log.json
+data/events.jsonl
 data/*.bak
 data/settings_commands_capture.json
 data/session_logs/*

@@ -104,6 +104,7 @@ changes.
 | `parsers/pipeline.py` | Classify + parse a snapshot |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
+| `stats_index.py` | In-memory daily cube + paged `recent` rows for Statistics (never dumps the full log to QML) |
 | `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` | Record helpers on top of `event_log` |
 | `minigame_log.py` / `chaos_capture.py` | Separate files: `data/minigame_log.json`, `data/chaos_log.json` |
 | `settings_catalog.py` / `settings_commands.py` / `settings_preset.py` | GUI settings templates |
@@ -160,10 +161,11 @@ Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
 
 Also in that file: tray / update prefs, `ui_layout`, `ui_palette`. Session
 logs go under `data/session_logs/`. Kakera / key / sphere / soulmate events
-are `data/events.jsonl`. On first launch after that file is missing, the
-old `data/*_log.json` arrays are imported and then left untouched.
-Minigame boards stay in `data/minigame_log.json`; chaos capture stays in
-`data/chaos_log.json`.
+are `data/events.jsonl`. Statistics cards/charts use an in-memory daily cube
+(`mudae/stats_index.py`); QML only receives a page of `recent` rows.
+On first launch after that file is missing, the old `data/*_log.json` arrays
+are imported and then left untouched. Minigame boards stay in
+`data/minigame_log.json`; chaos capture stays in `data/chaos_log.json`.
 
 ---
 

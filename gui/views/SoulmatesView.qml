@@ -15,24 +15,64 @@ Item {
         color: Theme.bgDark
     }
 
-    property var entries: []
+    property var payload: ({
+        recent: [],
+        event_count: 0,
+        has_more: false,
+        by_account: [],
+        by_server: [],
+        by_server_accounts: {},
+        filter_options: { accounts: [], servers: [] }
+    })
     property string accountFilter: "all"
     property string serverFilter: "all"
     property string chartMode: "account"          // "account" | "server"
     property string chartServerFocus: ""          // drill-down: accounts within this server
+    property int pageSize: 80
 
-    function reload() {
+    function queryPayload(offset, limit) {
         try {
-            entries = JSON.parse(App.soulmatesJson)
+            return JSON.parse(App.statsQuery(
+                "soulmate",
+                accountFilter,
+                serverFilter,
+                "all",
+                "all",
+                offset,
+                limit
+            ))
         } catch (e) {
-            entries = []
+            return {
+                recent: [],
+                event_count: 0,
+                has_more: false,
+                by_account: [],
+                by_server: [],
+                by_server_accounts: {},
+                filter_options: { accounts: [], servers: [] }
+            }
         }
+    }
+
+    function reload(resetPage) {
+        var limit = pageSize
+        if (!resetPage)
+            limit = Math.max(pageSize, (payload.recent || []).length || pageSize)
+        payload = queryPayload(0, limit)
         refreshServerFilter()
         refreshChartServerFocus()
     }
 
-    function serverKey(entry) {
-        return entry.guild_name || String(entry.guild_id || "unknown")
+    function loadMore() {
+        if (!payload.has_more)
+            return
+        var extra = queryPayload((payload.recent || []).length, pageSize)
+        extra.recent = (payload.recent || []).concat(extra.recent || [])
+        payload = extra
+    }
+
+    function recentEntries() {
+        return payload.recent || []
     }
 
     function toChartData(counts, labels) {
@@ -54,51 +94,30 @@ Item {
         return { total: total, items: items }
     }
 
-    function aggregateByAccount(sourceEntries) {
+    function seriesToChartData(items) {
         var counts = {}
         var labels = {}
-        for (var i = 0; i < sourceEntries.length; i++) {
-            var e = sourceEntries[i]
-            var id = e.account_id || "unknown"
-            counts[id] = (counts[id] || 0) + 1
-            labels[id] = e.account_name || "Unknown"
+        var list = items || []
+        for (var i = 0; i < list.length; i++) {
+            counts[list[i].id] = list[i].count
+            labels[list[i].id] = list[i].label || list[i].id
         }
         return toChartData(counts, labels)
-    }
-
-    function aggregateByServer(sourceEntries) {
-        var counts = {}
-        var labels = {}
-        for (var i = 0; i < sourceEntries.length; i++) {
-            var e = sourceEntries[i]
-            var key = serverKey(e)
-            counts[key] = (counts[key] || 0) + 1
-            labels[key] = key
-        }
-        return toChartData(counts, labels)
-    }
-
-    function aggregateAccountsInServer(sourceEntries, serverId) {
-        var filtered = []
-        for (var i = 0; i < sourceEntries.length; i++) {
-            if (serverKey(sourceEntries[i]) === serverId)
-                filtered.push(sourceEntries[i])
-        }
-        return aggregateByAccount(filtered)
     }
 
     function accountChartData() {
-        return aggregateByAccount(entries)
+        return seriesToChartData(payload.by_account)
     }
 
     function serverChartData() {
-        return aggregateByServer(entries)
+        return seriesToChartData(payload.by_server)
     }
 
     function serverDrillChartData() {
         if (!chartServerFocus)
             return ({ total: 0, items: [] })
-        return aggregateAccountsInServer(entries, chartServerFocus)
+        var nested = (payload.by_server_accounts || {})[chartServerFocus] || []
+        return seriesToChartData(nested)
     }
 
     function activeChartData() {
@@ -109,12 +128,20 @@ Item {
         return accountChartData()
     }
 
+    function chartTotal() {
+        var items = payload.by_account || []
+        var total = 0
+        for (var i = 0; i < items.length; i++)
+            total += Number(items[i].count || 0)
+        return total
+    }
+
     function chartTitle() {
         if (chartServerFocus)
             return "Accounts on " + chartServerFocus
         if (chartMode === "server")
-            return "Share by server (of " + entries.length + " total)"
-        return "Share by account (of " + entries.length + " total)"
+            return "Share by server (of " + chartTotal() + " total)"
+        return "Share by account (of " + chartTotal() + " total)"
     }
 
     function chartHint() {
@@ -125,44 +152,34 @@ Item {
         return "Each account's share of all logged soulmates."
     }
 
-    function filteredEntries() {
-        return entries.filter(function(entry) {
-            if (accountFilter !== "all" && entry.account_id !== accountFilter)
-                return false
-            var key = serverKey(entry)
-            if (serverFilter !== "all" && key !== serverFilter)
-                return false
-            return true
-        })
-    }
-
     function uniqueAccounts() {
-        var seen = {}
-        var out = []
-        for (var i = 0; i < entries.length; i++) {
-            var id = entries[i].account_id || ""
-            if (!id || seen[id])
-                continue
-            seen[id] = true
-            out.push({
-                id: id,
-                label: entries[i].account_name + (entries[i].account_inferred ? " (inferred)" : "")
-            })
-        }
-        return out
+        return (payload.filter_options && payload.filter_options.accounts) || []
     }
 
     function uniqueServers() {
-        var seen = {}
-        var out = []
-        for (var i = 0; i < entries.length; i++) {
-            var key = serverKey(entries[i])
-            if (seen[key])
-                continue
-            seen[key] = true
-            out.push({ id: key, label: key })
+        return (payload.filter_options && payload.filter_options.servers) || []
+    }
+
+    function accountComboIndex() {
+        if (accountFilter === "all")
+            return 0
+        var list = uniqueAccounts()
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === accountFilter)
+                return i + 1
         }
-        return out
+        return 0
+    }
+
+    function serverComboIndex() {
+        if (serverFilter === "all")
+            return 0
+        var list = uniqueServers()
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === serverFilter)
+                return i + 1
+        }
+        return 0
     }
 
     function refreshServerFilter() {
@@ -334,7 +351,7 @@ Item {
                     chartData: activeChartData()
                     selectable: chartMode === "server" && chartServerFocus === ""
                     selectedId: chartServerFocus
-                    emptyText: Empty.soulmateChartEmpty(App.connected, entries.length > 0)
+                    emptyText: Empty.soulmateChartEmpty(App.connected, chartTotal() > 0)
                     onSliceClicked: function(id, label) {
                         if (chartMode === "server" && chartServerFocus === "")
                             focusServer(id)
@@ -351,13 +368,10 @@ Item {
                 id: accountCombo
                 Layout.preferredWidth: 220
                 model: ["All accounts"].concat(uniqueAccounts().map(function(a) { return a.label }))
+                currentIndex: accountComboIndex()
                 onActivated: function(index) {
-                    if (index <= 0) {
-                        accountFilter = "all"
-                        return
-                    }
-                    var accounts = uniqueAccounts()
-                    accountFilter = accounts[index - 1].id
+                    accountFilter = index <= 0 ? "all" : uniqueAccounts()[index - 1].id
+                    reload(true)
                 }
             }
 
@@ -365,20 +379,17 @@ Item {
                 id: serverCombo
                 Layout.preferredWidth: 260
                 model: ["All servers"].concat(uniqueServers().map(function(s) { return s.label }))
+                currentIndex: serverComboIndex()
                 onActivated: function(index) {
-                    if (index <= 0) {
-                        serverFilter = "all"
-                        return
-                    }
-                    var servers = uniqueServers()
-                    serverFilter = servers[index - 1].id
+                    serverFilter = index <= 0 ? "all" : uniqueServers()[index - 1].id
+                    reload(true)
                 }
             }
 
             Item { Layout.fillWidth: true }
 
             Label {
-                text: filteredEntries().length + " shown · " + entries.length + " total"
+                text: recentEntries().length + " shown · " + (payload.event_count || 0) + " total"
                 color: Theme.fgSecondary
                 font.pixelSize: 12
             }
@@ -427,7 +438,7 @@ Item {
                     ListView {
                         id: soulmateList
                         width: parent.width
-                        model: filteredEntries()
+                        model: recentEntries()
                         spacing: 2
 
                         delegate: Rectangle {
@@ -494,11 +505,19 @@ Item {
                         Label {
                             anchors.centerIn: parent
                             visible: soulmateList.count === 0
-                            text: Empty.statsLogEmpty(App.connected, entries.length > 0, "soulmates")
+                            text: Empty.statsLogEmpty(App.connected, (payload.event_count || 0) > 0, "soulmates")
                             color: Theme.fgMuted
                             font.pixelSize: 12
                         }
                     }
+                }
+
+                ThemedButton {
+                    visible: payload.has_more === true
+                    text: "Load more"
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: 8
+                    onClicked: loadMore()
                 }
             }
         }
