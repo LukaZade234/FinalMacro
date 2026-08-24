@@ -58,8 +58,7 @@ def test_should_record_roll_bku_idle_owned_character():
 def test_record_and_stats(tmp_path, monkeypatch):
     import mudae.kakera_log as kakera_log
 
-    monkeypatch.setattr(kakera_log, "_LOG_PATH", tmp_path / "kakera_log.json")
-    kakera_log._events = []
+    kakera_log._events.clear()
     set_recording_account("acc1", "Main")
 
     now = dt.datetime(2026, 7, 3, 14, 30, tzinfo=dt.timezone.utc)

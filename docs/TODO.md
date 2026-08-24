@@ -22,7 +22,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
 11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
-13. **EventLog + JSONL** then **shared stats model** — medium, but one design kills five GUI bugs.
+13. ~~**EventLog + JSONL**~~ then **shared stats model** — storage landed; the GUI still rebuilds the full payload.
 14. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
 15. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
 16. Last: split `bridge.py`, achievements, GUI polish. Do not hoist `uniqueSources` / cache `filteredEntries` if the shared model is next — they die with it.
@@ -66,7 +66,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 **Wave 2 — two foundations (do not skip)**
 
 - `$settings` / `$bonus` audit. Unblocks perk 9 DP, `$bw`, claim-via-emoji, and any rule driven by the server. Do not change claim / kakera / roll behaviour until this is done.
-- One `EventLog` + append-only JSONL, then the shared stats / filter model. Unblocks daily report, session row, achievements. Kills the O(n²) `uniqueSources` and the four copy-pasted views.
+- ~~One `EventLog` + JSONL (`data/events.jsonl`; one-time import of the old JSON arrays, which stay on disk).~~ Then the shared stats / filter model. Unblocks daily report, session row, achievements. Kills the O(n²) `uniqueSources` and the four copy-pasted views.
 
 **Wave 3 — close the daily loop on one account**
 
@@ -133,7 +133,7 @@ Do the shared model first; the copy-paste and most of the slowness go away with 
 - **Four stats views are the same file** — `filteredEntries`, `uniqueAccounts`, `uniqueServers`, `serverKey`, `filteredTotals` copied across Kakera / Spheres / Keys / Soulmates. One shared filter model (Python if the payload moves there). **Share filter state** too — “account: X” on Kakera should still be X on Spheres.
 - **`uniqueSources()` is O(n²)** — `SpheresView.sourceBreakdown` / `KeysView` call it inside the inner loop (and it walks all entries each time). Hoist if the shared model is not next; otherwise it dies with the shared model.
 - **`filteredEntries()` is a function in bindings** — every re-eval re-filters; `sourceBreakdown` / series / totals each call it again. Cache as a property if views stay in QML.
-- **Four log modules are one class** — `kakera_log` / `sphere_log` / `key_log` share load/save/account helpers; `soulmate_log` still writes the whole file synchronously. One `EventLog` + four small record functions. While there: **append-only JSONL** instead of rewriting the pretty JSON list on every flush (`DebouncedJsonLog` still `json.dumps` the full list).
+- **Wave 2 EventLog (storage):** one `data/events.jsonl` for kakera / spheres / keys / soulmates. Existing `data/*_log.json` arrays are imported once and left on disk. Shared stats / filter model still open.
 - ~~**Timezones** — log `date_key` is UTC; QML “today” / week / month use local `Date`.~~ `mudae/clock.py` + `gui/clock.js`: UTC for `date_key` / stats “today”; live feed local.
 - **Reaction power max is hardcoded `155`** — `DEFAULT_MAX_REACTION_POWER` / `AccountState.power_max_percent`. The real cap is on `$bonus`; wait for that audit. Efficiency math is wrong when it is stale.
 - ~~**Empty states**~~ — disconnected vs nothing recorded vs filters (`gui/emptyStates.js`).

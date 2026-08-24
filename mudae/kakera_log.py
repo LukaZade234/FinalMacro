@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from pathlib import Path
 from typing import Any
 
 from mudae.account_context import defaults_from_store, resolve_log_account
 from mudae.clock import utc_date_key
-from mudae.log_store import DebouncedJsonLog
+from mudae import event_log
 from macro.state import MacroPhase
 from mudae.types import MessageKind, MudaeMessageSnapshot
 
@@ -17,10 +16,6 @@ _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "kakera_log.json"
 _events: list[dict[str, Any]] = []
 _recording_account_id: str = ""
 _recording_account_name: str = ""
-
-# Kakera clicks arrive in bursts during mass rolling; batch the file rewrites
-# instead of rewriting the (ever-growing) log on every single event.
-_writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
 
 EARN_METHOD_LABELS: dict[str, str] = {
     "kakera_click": "Kakera click",
@@ -37,25 +32,23 @@ def earn_method_label(method: str | None) -> str:
     return EARN_METHOD_LABELS.get(key, key.replace("_", " ").title())
 
 
-def _load_disk_log() -> None:
+def _bind_events() -> None:
     global _events
-    if not _LOG_PATH.is_file():
-        return
-    try:
-        raw = json.loads(_LOG_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return
-    if isinstance(raw, list):
-        _events = [entry for entry in raw if isinstance(entry, dict)]
+    _events = event_log.events("kakera")
+
+
+def _load_disk_log() -> None:
+    event_log.ensure_loaded()
+    _bind_events()
 
 
 def _save_disk_log() -> None:
-    _writer.mark_dirty()
+    event_log.mark_dirty()
 
 
 def flush_disk_log() -> None:
     """Force pending events to disk (called on disconnect/exit)."""
-    _writer.flush()
+    event_log.flush()
 
 
 def set_recording_account(account_id: str, account_name: str) -> None:
@@ -208,8 +201,7 @@ def record_kakera_earning(
         "time": snapshot.created_at,
         "message_id": snapshot.message_id,
     }
-    _events.append(entry)
-    _save_disk_log()
+    event_log.append("kakera", entry)
     return entry
 
 
@@ -361,6 +353,11 @@ def client_payload(accounts_store: Any) -> dict[str, Any]:
 
 def get_kakera_events() -> list[dict[str, Any]]:
     return [dict(entry) for entry in _events]
+
+
+def reset_for_tests(path: Path | None = None) -> None:
+    event_log.reset_for_tests(path)
+    _bind_events()
 
 
 _load_disk_log()

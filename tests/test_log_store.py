@@ -55,14 +55,14 @@ def test_cancel_pending_drops_scheduled_write(tmp_path):
     assert not path.exists()
 
 
-def test_kakera_log_flush_writes_pending_events(tmp_path, monkeypatch):
+def test_kakera_log_flush_writes_pending_events(tmp_path):
     import mudae.kakera_log as kakera_log
+    from mudae import event_log
 
-    monkeypatch.setattr(kakera_log, "_LOG_PATH", tmp_path / "kakera_log.json")
-    monkeypatch.setattr(kakera_log, "_events", [{"amount": 7}])
-
-    kakera_log._save_disk_log()
+    event_log.append("kakera", {"amount": 7})
+    kakera_log._bind_events()
     kakera_log.flush_disk_log()
 
-    logged = json.loads((tmp_path / "kakera_log.json").read_text())
-    assert logged == [{"amount": 7}]
+    lines = (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
+    assert json.loads(lines[0])["amount"] == 7
+    assert json.loads(lines[0])["kind"] == "kakera"

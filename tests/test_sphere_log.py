@@ -35,8 +35,7 @@ def test_should_record_sphere_click():
 def test_record_sphere_sources(tmp_path, monkeypatch):
     import mudae.sphere_log as sphere_log
 
-    monkeypatch.setattr(sphere_log, "_LOG_PATH", tmp_path / "sphere_log.json")
-    sphere_log._events = []
+    sphere_log._events.clear()
     set_recording_account("acc1", "Main")
 
     now = dt.datetime(2026, 7, 3, 14, 30, tzinfo=dt.timezone.utc)

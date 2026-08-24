@@ -55,20 +55,18 @@ def test_record_and_rollover_perk9_clicks(monkeypatch):
 
 
 def test_sync_perk9_clicks_from_log(monkeypatch):
-    import mudae.sphere_log as sphere_log
-
     state = AccountState()
     state.perk9_clicks_today = 1
+    monkeypatch.setattr("mudae.clock.utc_date_key", lambda: "2026-08-24")
+    monkeypatch.setattr("macro.state.utc_date_key", lambda: "2026-08-24")
     monkeypatch.setattr(
-        sphere_log,
-        "get_sphere_events",
+        "macro.perk9_daily.get_sphere_events",
         lambda: [
             {"date_key": "2026-08-24", "source": "sphere_click", "sphere_type": "spG"},
             {"date_key": "2026-08-24", "source": "sphere_click", "sphere_type": "spY"},
             {"date_key": "2026-08-24", "source": "sphere_click", "sphere_type": "spM"},
         ],
     )
-    monkeypatch.setattr("mudae.clock.utc_date_key", lambda: "2026-08-24")
 
     sync_perk9_clicks_from_log(state)
     assert state.perk9_clicks_today == 2

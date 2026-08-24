@@ -7,13 +7,26 @@ Those are irrelevant to what the tests assert, so we zero them globally.
 
 from __future__ import annotations
 
-import asyncio
+from pathlib import Path
 
 import pytest
 
 
 async def _instant_sleep(*_args, **_kwargs) -> None:
     return None
+
+
+@pytest.fixture(autouse=True)
+def isolate_event_log(tmp_path: Path) -> None:
+    """Keep Statistics logs out of the developer's data/ folder during tests."""
+    from mudae import event_log
+    from mudae import kakera_log, key_log, soulmate_log, sphere_log
+
+    event_log.reset_for_tests(tmp_path / "events.jsonl")
+    kakera_log._bind_events()
+    sphere_log._bind_events()
+    key_log._bind_events()
+    soulmate_log._bind_events()
 
 
 @pytest.fixture(autouse=True)

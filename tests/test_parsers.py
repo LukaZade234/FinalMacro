@@ -1416,59 +1416,49 @@ def test_parse_2b_rolls_left_warning_in_footer():
 
 
 def test_parse_mildretta_new_soulmate():
-    import json
-    import tempfile
-    from pathlib import Path
-
     from mudae.parsers.roll import parse_roll
     import mudae.soulmate_log as soulmate_log
 
-    with tempfile.TemporaryDirectory() as tmp:
-        log_path = Path(tmp) / "soulmate_log.json"
-        soulmate_log._LOG_PATH = log_path
-        soulmate_log._events = []
-        soulmate_log.set_recording_account("roller1", "Main Roller")
+    soulmate_log.set_recording_account("roller1", "Main Roller")
+    snapshot = MudaeMessageSnapshot(
+        message_id=65,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=42,
+        guild_name="Test Guild",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[MILDRETTA_SOULMATE_EMBED],
+        buttons=[
+            {
+                "label": "",
+                "emoji": "kakeraY",
+                "custom_id": "1506037113039093943k1473101129184186552k0",
+                "kind": "kakera",
+                "disabled": False,
+            }
+        ],
+        created_at="12:07:00",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["new_soulmate"] is True
+    assert result.fields["rolls_left"] == 2
+    assert result.fields["claimed"] is True
+    assert result.fields["owner"] == "lukazade234"
+    assert result.fields["series"] == "Gachiakuta"
+    assert "new soulmate" in result.summary
+    assert "2 rolls left" in result.summary
 
-        snapshot = MudaeMessageSnapshot(
-            message_id=65,
-            channel_id=99,
-            channel_name="mudae",
-            guild_id=42,
-            guild_name="Test Guild",
-            author_id=MUDAE_ALT_ID,
-            author_name="Mudae",
-            is_mudae=True,
-            content="",
-            embeds=[MILDRETTA_SOULMATE_EMBED],
-            buttons=[
-                {
-                    "label": "",
-                    "emoji": "kakeraY",
-                    "custom_id": "1506037113039093943k1473101129184186552k0",
-                    "kind": "kakera",
-                    "disabled": False,
-                }
-            ],
-            created_at="12:07:00",
-        )
-        result = parse_roll(snapshot)
-        assert result.fields["new_soulmate"] is True
-        assert result.fields["rolls_left"] == 2
-        assert result.fields["claimed"] is True
-        assert result.fields["owner"] == "lukazade234"
-        assert result.fields["series"] == "Gachiakuta"
-        assert "new soulmate" in result.summary
-        assert "2 rolls left" in result.summary
-
-        assert log_path.is_file()
-        logged = json.loads(log_path.read_text())
-        assert len(logged) == 1
-        assert logged[0]["character_name"] == "Mildretta"
-        assert logged[0]["guild_name"] == "Test Guild"
-        assert logged[0]["series"] == "Gachiakuta"
-        assert logged[0]["account_id"] == "roller1"
-        assert logged[0]["account_name"] == "Main Roller"
-        soulmate_log.clear_recording_account()
+    assert len(soulmate_log._events) == 1
+    logged = soulmate_log._events[0]
+    assert logged["character_name"] == "Mildretta"
+    assert logged["guild_name"] == "Test Guild"
+    assert logged["series"] == "Gachiakuta"
+    assert logged["account_id"] == "roller1"
+    assert logged["account_name"] == "Main Roller"
+    soulmate_log.clear_recording_account()
 
 
 NACCHAN_ROLL_EMBED = {

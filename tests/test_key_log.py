@@ -40,14 +40,11 @@ def _snapshot(**overrides) -> MudaeMessageSnapshot:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_key_log(tmp_path, monkeypatch):
+def _isolated_key_log():
     import mudae.key_log as key_log
 
-    key_log._writer.cancel_pending()
-    monkeypatch.setattr(key_log, "_LOG_PATH", tmp_path / "key_log.json")
     key_log.reset_for_tests()
     yield
-    key_log._writer.cancel_pending()
     key_log.reset_for_tests()
 
 

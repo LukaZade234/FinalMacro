@@ -79,3 +79,69 @@ class DebouncedJsonLog:
             # Target may be gone (e.g. temp dir from a finished test run);
             # the next mark_dirty will retry with the current path.
             pass
+
+
+class DebouncedJsonlLog:
+    """Batches rewrites of one JSONL event file."""
+
+    def __init__(
+        self,
+        get_path: Callable[[], Path],
+        get_events: Callable[[], list[dict[str, Any]]],
+        *,
+        delay_sec: float = _DEFAULT_FLUSH_DELAY_SEC,
+    ) -> None:
+        self._get_path = get_path
+        self._get_events = get_events
+        self._delay = delay_sec
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        self._pending_path: Path | None = None
+        atexit.register(self.flush)
+
+    def mark_dirty(self, *, rewrite: bool = False) -> None:
+        del rewrite  # always rewrite the compact JSONL file
+        with self._lock:
+            self._pending_path = self._get_path()
+            if self._timer is None:
+                self._timer = threading.Timer(self._delay, self.flush)
+                self._timer.daemon = True
+                self._timer.start()
+
+    def cancel_pending(self) -> None:
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            self._pending_path = None
+
+    def reset_sync(self) -> None:
+        self.cancel_pending()
+
+    def set_synced_count(self, count: int) -> None:
+        del count
+
+    def flush(self) -> None:
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+            path = self._pending_path
+            self._pending_path = None
+            if path is None:
+                return
+            events = list(self._get_events())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _write_jsonl(path, events)
+        except OSError:
+            pass
+
+
+def _write_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as handle:
+        for entry in events:
+            handle.write(json.dumps(entry, separators=(",", ":"), default=str))
+            handle.write("\n")
+    tmp.replace(path)

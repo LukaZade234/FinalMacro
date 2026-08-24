@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +10,7 @@ from mudae.account_context import (
     defaults_from_store,
     resolve_log_account,
 )
+from mudae import event_log
 from mudae.types import MudaeMessageSnapshot
 
 _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "soulmate_log.json"
@@ -19,26 +19,22 @@ _recording_account_id: str = ""
 _recording_account_name: str = ""
 
 
-def _load_disk_log() -> None:
+def _bind_events() -> None:
     global _events
-    if not _LOG_PATH.is_file():
-        return
-    try:
-        raw = json.loads(_LOG_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return
-    if isinstance(raw, list):
-        _events = [entry for entry in raw if isinstance(entry, dict)]
-    _backfill_account_name_from_owner()
+    _events = event_log.events("soulmate")
+
+
+def _load_disk_log() -> None:
+    event_log.ensure_loaded()
+    _bind_events()
+    if _backfill_account_name_from_owner():
+        event_log.mark_dirty(rewrite=True)
+        event_log.flush()
 
 
 def _save_disk_log() -> None:
-    # Soulmate events are rare (no bursts), so a synchronous write is fine;
-    # tmp+replace keeps the file intact if the app dies mid-write.
-    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _LOG_PATH.with_name(_LOG_PATH.name + ".tmp")
-    tmp.write_text(json.dumps(_events, indent=2), encoding="utf-8")
-    tmp.replace(_LOG_PATH)
+    event_log.mark_dirty(rewrite=True)
+    event_log.flush()
 
 
 def set_recording_account(account_id: str, account_name: str) -> None:
@@ -193,14 +189,13 @@ def record_new_soulmate(
         "time": snapshot.created_at,
         "message_id": snapshot.message_id,
     }
-    _events.append(entry)
-    _save_disk_log()
+    event_log.append("soulmate", entry)
+    event_log.flush()
     return entry
 
 
 def dedupe_stored_events() -> int:
     """Remove duplicate rows; keep the first entry per message and per server+character."""
-    global _events
     seen_messages: set[int] = set()
     seen_identities: set[tuple[str, str]] = set()
     kept: list[dict[str, Any]] = []
@@ -227,7 +222,8 @@ def dedupe_stored_events() -> int:
         if identity[1]:
             seen_identities.add(identity)
         kept.append(entry)
-    _events = kept
+    event_log.replace("soulmate", kept)
+    _bind_events()
     if removed:
         _save_disk_log()
     return removed
@@ -261,6 +257,11 @@ def soulmates_by_guild() -> dict[str, list[dict[str, Any]]]:
         key = entry.get("guild_name") or str(entry.get("guild_id") or "unknown")
         grouped.setdefault(key, []).append(dict(entry))
     return grouped
+
+
+def reset_for_tests(path: Path | None = None) -> None:
+    event_log.reset_for_tests(path)
+    _bind_events()
 
 
 _load_disk_log()

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from gui.accounts import AccountProfile
 from mudae.account_context import main_account_defaults
+from mudae import event_log
 from mudae.soulmate_log import (
     clear_recording_account,
     enrich_entry,
@@ -14,6 +15,13 @@ from mudae.soulmate_log import (
     set_recording_account,
 )
 from mudae.types import MudaeMessageSnapshot
+
+
+def _set_soulmate_events(rows: list[dict]) -> None:
+    import mudae.soulmate_log as soulmate_log
+
+    event_log.replace("soulmate", rows)
+    soulmate_log._bind_events()
 
 
 @dataclass
@@ -26,7 +34,7 @@ def test_events_for_client_uses_active_account_for_legacy_rows(tmp_path, monkeyp
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = [{"character_name": "Legacy", "time": "01:00:00"}]
+    _set_soulmate_events([{"character_name": "Legacy", "time": "01:00:00"}])
     store = _FakeStore(
         accounts=[
             AccountProfile(id="default", name="Default", type="Main"),
@@ -76,7 +84,6 @@ def test_record_new_soulmate_uses_recording_account(tmp_path, monkeypatch):
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = []
     set_recording_account("acc42", "Roller")
 
     snapshot = MudaeMessageSnapshot(
@@ -103,10 +110,10 @@ def test_events_for_client_newest_first(tmp_path, monkeypatch):
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = [
+    _set_soulmate_events([
         {"character_name": "First", "time": "01:00:00"},
         {"character_name": "Second", "time": "02:00:00", "account_id": "main1"},
-    ]
+    ])
     store = _FakeStore(accounts=[AccountProfile(id="main1", name="Primary", type="Main")])
     rows = events_for_client(store)
     assert rows[0]["character_name"] == "Second"
@@ -119,13 +126,13 @@ def test_legacy_soulmate_gets_account_from_owner(tmp_path, monkeypatch):
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = [
+    _set_soulmate_events([
         {
             "character_name": "Senzawa",
             "owner": "lukazade234",
             "time": "23:29:21",
         }
-    ]
+    ])
     store = _FakeStore(
         accounts=[
             AccountProfile(id="dup", name="Default", type="Main"),
@@ -146,19 +153,15 @@ def test_legacy_soulmate_gets_account_from_owner(tmp_path, monkeypatch):
 def test_backfill_account_name_from_owner_skips_named_rows():
     import mudae.soulmate_log as soulmate_log
 
-    previous = soulmate_log._events
-    soulmate_log._events = [
+    _set_soulmate_events([
         {"owner": "lukazade234", "account_name": "kleinam0n"},
         {"owner": "lukazade234"},
         {"owner": "lukazade234", "account_name": "Default"},
-    ]
-    try:
-        assert soulmate_log._backfill_account_name_from_owner() is True
-        assert soulmate_log._events[0]["account_name"] == "kleinam0n"
-        assert soulmate_log._events[1]["account_name"] == "lukazade234"
-        assert soulmate_log._events[2]["account_name"] == "lukazade234"
-    finally:
-        soulmate_log._events = previous
+    ])
+    assert soulmate_log._backfill_account_name_from_owner() is True
+    assert soulmate_log._events[0]["account_name"] == "kleinam0n"
+    assert soulmate_log._events[1]["account_name"] == "lukazade234"
+    assert soulmate_log._events[2]["account_name"] == "lukazade234"
 
 
 def _sample_snapshot(**overrides) -> MudaeMessageSnapshot:
@@ -184,7 +187,6 @@ def test_record_new_soulmate_dedupes_same_message(tmp_path, monkeypatch):
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = []
     snapshot = _sample_snapshot(message_id=777)
     fields = {"character_name": "Alice", "series": "Test"}
 
@@ -200,7 +202,6 @@ def test_record_new_soulmate_dedupes_same_character_per_guild(tmp_path, monkeypa
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = []
     fields = {"character_name": "Alice", "series": "Test"}
 
     first = record_new_soulmate(_sample_snapshot(message_id=1), fields)
@@ -215,7 +216,6 @@ def test_record_new_soulmate_allows_same_character_on_other_guilds(tmp_path, mon
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = []
     fields = {"character_name": "Alice", "series": "Test"}
 
     record_new_soulmate(_sample_snapshot(message_id=1, guild_id=10), fields)
@@ -228,7 +228,7 @@ def test_dedupe_stored_events(tmp_path, monkeypatch):
     import mudae.soulmate_log as soulmate_log
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = [
+    _set_soulmate_events([
         {
             "guild_id": 1,
             "character_name": "Alice",
@@ -247,7 +247,7 @@ def test_dedupe_stored_events(tmp_path, monkeypatch):
             "message_id": 101,
             "time": "02:00:00",
         },
-    ]
+    ])
     removed = soulmate_log.dedupe_stored_events()
     assert removed == 1
     assert len(soulmate_log._events) == 2
@@ -258,7 +258,6 @@ def test_parse_roll_skips_soulmate_log_on_embed_edit(tmp_path, monkeypatch):
     from mudae.parsers.roll import parse_roll
 
     monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
-    soulmate_log._events = []
 
     description = (
         "**Series** · 100 <:kakera:123> (**100**)\n"

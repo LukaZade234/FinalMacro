@@ -103,7 +103,9 @@ changes.
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `ohu8`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
-| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` / `minigame_log.py` / `chaos_capture.py` | Persistent stats; chaos is raw follow-up windows (`data/chaos_log.json`) until outcomes are documented |
+| `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
+| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` | Record helpers on top of `event_log` |
+| `minigame_log.py` / `chaos_capture.py` | Separate files: `data/minigame_log.json`, `data/chaos_log.json` |
 | `settings_catalog.py` / `settings_commands.py` / `settings_preset.py` | GUI settings templates |
 | `command_ack.py` / `command_context.py` / `claim_context.py` | Match replies to the command we just sent |
 
@@ -157,8 +159,11 @@ All of this is one file: `data/settings.json` (never commit it).
 Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
 
 Also in that file: tray / update prefs, `ui_layout`, `ui_palette`. Session
-logs go under `data/session_logs/`. Kakera / key / sphere / soulmate logs
-are `data/*_log.json` (kakera, key, sphere, soulmate, minigame).
+logs go under `data/session_logs/`. Kakera / key / sphere / soulmate events
+are `data/events.jsonl`. On first launch after that file is missing, the
+old `data/*_log.json` arrays are imported and then left untouched.
+Minigame boards stay in `data/minigame_log.json`; chaos capture stays in
+`data/chaos_log.json`.
 
 ---
 
