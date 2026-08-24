@@ -11,6 +11,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
 from gui.bridge import AppBridge
+from gui.fonts import load_bundled_fonts
 from gui.single_instance import SingleInstanceServer, raise_window, try_notify_running_instance
 from gui.tray import TrayController
 
@@ -19,6 +20,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("FinalMacro")
     app.setDesktopFileName("finalmacro")
+    load_bundled_fonts()
 
     if try_notify_running_instance():
         return

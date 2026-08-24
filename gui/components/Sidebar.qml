@@ -78,7 +78,7 @@ Rectangle {
                 implicitHeight: 36
                 text: "Exit"
                 background: Rectangle {
-                    radius: 8
+                    radius: Theme.radiusMd
                     color: parent.down ? Qt.darker(Theme.error, 1.1) : Theme.error
                 }
                 contentItem: Text {

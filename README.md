@@ -57,6 +57,15 @@ Settings are saved to `data/settings.json` (gitignored). That single file holds 
 
 Share the repo or a zip **without** your `data/` folder (tokens and logs stay local). Friends run `./install.sh`, then `./install-desktop.sh`, and set up their own account, channel, and preset.
 
+## Docs
+
+| File | What it is |
+|------|------------|
+| [`docs/MUDAE_LOGIC.md`](docs/MUDAE_LOGIC.md) | How Mudae works, and how the macro uses each mechanic |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | File map, runtime flow, stores, Phase D |
+| [`docs/TODO.md`](docs/TODO.md) | Open work |
+| [`docs/archive/`](docs/archive/) | Reference mocks and superseded docs ([README](docs/archive/README.md)) |
+
 ## Project layout
 
 | Path | Purpose |
@@ -66,6 +75,7 @@ Share the repo or a zip **without** your `data/` folder (tokens and logs stay lo
 | `gui/` | PySide6 / QML interface |
 | `macro/` | Roll cycle, kakera, minigames |
 | `mudae/` | Discord reader, parsers, logs |
+| `docs/` | Game logic, architecture, TODO, [archive](docs/archive/) |
 | `data/` | Local settings and logs (not in git) |
 
 ## Disclaimer

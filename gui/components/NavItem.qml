@@ -14,7 +14,7 @@ Button {
     leftPadding: 12
 
     background: Rectangle {
-        radius: 8
+        radius: Theme.radiusMd
         color: nav.navActive ? Theme.bgLight : (nav.hovered ? Theme.bgHover : "transparent")
     }
 

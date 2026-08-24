@@ -421,7 +421,10 @@ Item {
                         delegate: ThemedCheckBox {
                             text: modelData
                             checked: mudaeRoot.enabledGroups[modelData]
-                            onCheckedChanged: {
+                            // `toggled` rather than `onCheckedChanged`, which
+                            // would also fire for the write-back below and turn
+                            // the binding into a loop.
+                            onToggled: {
                                 var copy = Object.assign({}, mudaeRoot.enabledGroups)
                                 copy[modelData] = checked
                                 mudaeRoot.enabledGroups = copy

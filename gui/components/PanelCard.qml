@@ -7,8 +7,8 @@ Item {
     id: root
     default property alias content: contentLayout.data
     property string title: ""
-    property int contentMargins: 15
-    property int titleSize: 16
+    property int contentMargins: Theme.cardPadding
+    property int titleSize: Theme.sizeXLarge
     property bool fillContentVertically: false
 
     implicitHeight: innerLayout.implicitHeight + contentMargins * 2
@@ -18,8 +18,20 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: 10
+        radius: Theme.radiusLg
         color: Theme.bgMedium
+        border.color: Theme.border
+        border.width: 1
+    }
+
+    // The Boxed design rules its panels with a double border; the inner rule is
+    // drawn separately since Rectangle only has a single stroke.
+    Rectangle {
+        visible: Theme.doubleBorder
+        anchors.fill: parent
+        anchors.margins: 2
+        radius: Theme.radiusLg
+        color: "transparent"
         border.color: Theme.border
         border.width: 1
     }

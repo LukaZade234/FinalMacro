@@ -28,7 +28,7 @@ Switch {
             anchors.verticalCenter: parent.verticalCenter
             width: 12
             height: 12
-            radius: 6
+            radius: Theme.radiusSm
             color: control.checked ? Theme.bgDark : Theme.fgSecondary
 
             Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }

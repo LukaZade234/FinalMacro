@@ -18,7 +18,7 @@ ItemDelegate {
     }
 
     background: Rectangle {
-        radius: 6
+        radius: Theme.radiusSm
         color: control.highlighted ? Theme.bgLight
              : control.hovered ? Theme.bgMedium
              : "transparent"

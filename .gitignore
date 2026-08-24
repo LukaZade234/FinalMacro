@@ -12,8 +12,8 @@ data/.stversions/
 
 
 
-# Live Mudae command capture / parsing audit (local machine only)
-docs/MUDAE_*.md
+# Live Mudae command capture (local machine only — contains server-specific text)
+docs/archive/MUDAE_SETTINGS_COMMANDS.md
 
 .venv/
 __pycache__/

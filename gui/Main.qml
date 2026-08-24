@@ -1,10 +1,16 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
-import gui 1.0
-import "components"
-import "views"
 
+import gui 1.0
+import "shells"
+
+/*
+    Window frame.
+
+    The visible layout lives in gui/shells/<Design>Shell.qml, chosen by
+    ShellSwitcher. This file only owns the window itself and keeps Theme pointed
+    at the persisted appearance settings.
+*/
 ApplicationWindow {
     id: win
     width: 1200
@@ -13,9 +19,30 @@ ApplicationWindow {
     minimumHeight: 680
     visible: true
     title: "FinalMacro"
-    color: Theme.bgDark
+    color: Theme.bg
 
-    property int currentPage: 0
+    property alias currentPage: switcher.currentPage
+
+    // Theme is a singleton with no access to the App context property, so the
+    // window drives it from the persisted settings.
+    Binding {
+        target: Theme
+        property: "layoutId"
+        value: App.uiLayout
+    }
+    Binding {
+        target: Theme
+        property: "paletteId"
+        value: App.uiPalette
+    }
+
+    // Views that do not set font.family fall back to the application font, so
+    // pushing the design's family there keeps every page consistent.
+    Connections {
+        target: Theme
+        function onLayoutIdChanged() { App.applyUiFont(Theme.fontFamily) }
+    }
+    Component.onCompleted: App.applyUiFont(Theme.fontFamily)
 
     onClosing: function(close) {
         if (App.minimizeToTray) {
@@ -24,127 +51,8 @@ ApplicationWindow {
         }
     }
 
-    readonly property var pages: [
-        { label: "Run", title: "Run" },
-        { label: "Accounts", title: "Accounts" },
-        { label: "Servers", title: "Servers" },
-        { label: "Presets", title: "Presets" },
-        { label: "Statistics", title: "Statistics" },
-        { label: "Debug", title: "Debug" },
-        { label: "Utilities", title: "Utilities" },
-        { label: "Settings", title: "Settings" }
-    ]
-
-    function pageTitleAt(index) {
-        if (index < 0 || index >= pages.length)
-            return ""
-        return pages[index].title
-    }
-
-    Connections {
-        target: App
-        function onConnectedChanged(connected) {
-            topBar.statusOnline = connected
-        }
-        function onNotificationStandbyChanged() {
-            topBar.notificationStandby = App.notificationStandby
-        }
-        function onStatusChanged(text) {
-            topBar.statusText = text
-        }
-    }
-
-    RowLayout {
+    ShellSwitcher {
+        id: switcher
         anchors.fill: parent
-        spacing: 0
-
-        Sidebar {
-            id: sidebar
-            Layout.preferredWidth: 188
-            Layout.maximumWidth: 188
-            Layout.fillHeight: true
-            currentIndex: win.currentPage
-            navModel: win.pages
-            onNavigated: function(index) {
-                win.currentPage = index
-            }
-        }
-
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 12
-            clip: true
-
-            TopBar {
-                id: topBar
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                Layout.topMargin: 16
-                pageTitle: win.pageTitleAt(win.currentPage)
-                statusText: App.statusText
-                statusOnline: App.connected
-                notificationStandby: App.notificationStandby
-            }
-
-            Loader {
-                id: pageLoader
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                Layout.bottomMargin: 16
-                clip: true
-
-                property int pageIndex: win.currentPage
-
-                sourceComponent: {
-                    switch (pageIndex) {
-                    case 1: return accountsPage
-                    case 2: return serversPage
-                    case 3: return presetsPage
-                    case 4: return statisticsPage
-                    case 5: return debugPage
-                    case 6: return utilitiesPage
-                    case 7: return settingsPage
-                    default: return runPage
-                    }
-                }
-
-                Component {
-                    id: runPage
-                    RunView { anchors.fill: parent }
-                }
-                Component {
-                    id: accountsPage
-                    AccountsView { anchors.fill: parent }
-                }
-                Component {
-                    id: serversPage
-                    ServersView { anchors.fill: parent }
-                }
-                Component {
-                    id: presetsPage
-                    PresetsView { anchors.fill: parent }
-                }
-                Component {
-                    id: statisticsPage
-                    StatisticsView { anchors.fill: parent }
-                }
-                Component {
-                    id: debugPage
-                    ParseLabView { anchors.fill: parent }
-                }
-                Component {
-                    id: utilitiesPage
-                    UtilitiesView { anchors.fill: parent }
-                }
-                Component {
-                    id: settingsPage
-                    SettingsView { anchors.fill: parent }
-                }
-            }
-        }
     }
 }

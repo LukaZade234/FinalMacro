@@ -6,7 +6,7 @@ import gui 1.0
 // a wrapping themed label (replaces the per-site contentItem boilerplate).
 CheckBox {
     id: control
-    property int textSize: 12
+    property int textSize: Theme.sizeBody
 
     spacing: 6
 
@@ -15,7 +15,7 @@ CheckBox {
         implicitHeight: 16
         x: control.leftPadding
         y: control.topPadding + (control.availableHeight - height) / 2
-        radius: 4
+        radius: Theme.radiusXs
         color: control.checked ? Theme.accentPrimary : Theme.inputBg
         border.color: control.checked ? Theme.accentPrimary : Theme.bgHover
         border.width: 1

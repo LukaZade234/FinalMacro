@@ -1,0 +1,1477 @@
+<!DOCTYPE html>
+<!--
+  FinalMacro — Run page gallery v3 (archived design mock)
+
+  Archived 24 Aug 2026 — moved from repo root to docs/archive/.
+  Static HTML mock of Classic / Haul / Console / Boxed Run layouts and palettes.
+  The shipped app is gui/shells/* + gui/palettes.js + gui/skins.js + Theme.qml.
+
+  Open in a browser: file:///.../docs/archive/finalmacro-gallery-v3.html
+  Or from repo root: xdg-open docs/archive/finalmacro-gallery-v3.html
+
+  When adding a new shell or redesigning Run: compare against this mock, then
+  implement in QML. Offscreen grabs: scripts/ui_preview.py (see ARCHITECTURE.md).
+  See docs/ARCHITECTURE.md § Appearance and docs/archive/README.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinalMacro — Run page gallery v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+/* ================= PALETTES ================= */
+[data-p="kakera"]{--bg:#0d0d13;--surface:#15151e;--raise:#1c1c28;--line:#272736;--fg:#e8e8f4;--dim:#7b7b92;--mute:#565669;--accent:#e8479e;--accent2:#8b6cf0;--good:#3ed6b8;--warn:#f2a83c;--bad:#ff5c6c}
+[data-p="ember"]{--bg:#100e0c;--surface:#171412;--raise:#211c18;--line:#2a2521;--fg:#efe6d8;--dim:#9d8f7d;--mute:#6b6055;--accent:#e8a33d;--accent2:#c9743a;--good:#8fc46a;--warn:#e0b155;--bad:#e5624f}
+[data-p="phosphor"]{--bg:#050a06;--surface:#0a1109;--raise:#0f1a0e;--line:#1c2e1a;--fg:#c8f5c0;--dim:#6ea868;--mute:#43683f;--accent:#3ef07a;--accent2:#8ae86a;--good:#3ef07a;--warn:#e3d24a;--bad:#ff6b5e}
+[data-p="ice"]{--bg:#0c1016;--surface:#131923;--raise:#1a2230;--line:#26303f;--fg:#e2e9f2;--dim:#8697ab;--mute:#5b6879;--accent:#4ec3e0;--accent2:#7d9ff0;--good:#5bd6a4;--warn:#e3b567;--bad:#f0768b}
+[data-p="bone"]{--bg:#e9ebee;--surface:#f8f9fa;--raise:#dfe3e8;--line:#ccd2d9;--fg:#161b21;--dim:#57616c;--mute:#87919c;--accent:#c2185b;--accent2:#5b3fc4;--good:#0d8a68;--warn:#9a6510;--bad:#c1352f}
+[data-p="mono"]{--bg:#0a0a0a;--surface:#121212;--raise:#1b1b1b;--line:#2b2b2b;--fg:#f2f2f2;--dim:#8d8d8d;--mute:#5e5e5e;--accent:#ffffff;--accent2:#b4b4b4;--good:#e0e0e0;--warn:#a5a5a5;--bad:#ff4d4d}
+
+body{background:#08080a;color:#8b8b98;font-family:'Space Grotesk',system-ui,sans-serif;padding:20px 16px 80px;-webkit-font-smoothing:antialiased}
+.head{max-width:1200px;margin:0 auto 16px}
+.head h1{font-size:15px;font-weight:600;color:#e6e6f0}
+.head p{font-size:12.5px;margin-top:5px;line-height:1.55;max-width:64ch}
+.ctlrow{max-width:1200px;margin:0 auto 14px;display:flex;flex-direction:column;gap:14px}
+.grp{display:flex;flex-direction:column;gap:7px}
+.grp .lb{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#585866}
+.grp .opts{display:flex;gap:6px;flex-wrap:wrap}
+.grp button{font:inherit;font-size:11.5px;font-weight:600;background:#141419;color:#8b8b98;border:1px solid #26262f;border-radius:999px;padding:7px 13px;cursor:pointer;transition:.16s;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.grp button:hover{color:#d5d5e2;border-color:#3a3a47}
+.grp button[aria-pressed="true"]{background:#eaeaf2;color:#0b0b0e;border-color:#eaeaf2}
+.grp button:focus-visible{outline:2px solid #7f6cf0;outline-offset:2px}
+.sw{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.22);flex:none}
+.note{max-width:1200px;margin:0 auto 14px;font-size:12px;line-height:1.6;border-left:2px solid #2c2c36;padding-left:12px}
+.note b{color:#d5d5e2;font-weight:600}
+.viewport{max-width:1200px;margin:0 auto;overflow:hidden}
+.stage{width:1200px;transform-origin:top left}
+.dir{display:none}.dir.on{display:block}
+.win{width:1200px;height:770px;border-radius:12px;overflow:hidden;display:flex;background:var(--bg);color:var(--fg);box-shadow:0 30px 70px -20px rgba(0,0,0,.85)}
+.gem{width:11px;height:11px;flex:none;clip-path:polygon(50% 0,100% 35%,80% 100%,20% 100%,0 35%)}
+
+/* ============ SHARED: selectors / vitals / controls ============ */
+.selbar{display:flex;gap:8px;align-items:stretch;flex:none}
+.sel{display:flex;align-items:center;gap:11px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 13px;cursor:pointer;font:inherit;text-align:left;transition:.15s;min-width:0}
+.sel:hover{border-color:var(--mute)}
+.sel .ic{width:26px;height:26px;border-radius:8px;background:var(--raise);flex:none;display:grid;place-items:center;color:var(--dim)}
+.sel .tt{min-width:0;flex:1}
+.sel .k{display:block;font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--mute);font-weight:600}
+.sel .v{display:block;font-size:12.5px;font-weight:600;color:var(--fg);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sel .car{color:var(--mute);font-size:10px;flex:none}
+.sel.preset{border-color:color-mix(in srgb,var(--accent) 38%,transparent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
+.sel.preset .ic{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+.quick{display:flex;align-items:center;gap:5px;padding-left:4px}
+.quick .q{font-size:11px;font-weight:600;color:var(--dim);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 12px;cursor:pointer;white-space:nowrap;transition:.15s}
+.quick .q:hover{color:var(--fg);border-color:var(--mute)}
+.quick .q.on{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.rules{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.rule{font-size:10.5px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);color:var(--mute);background:var(--raise)}
+.rule.on{border-color:color-mix(in srgb,var(--good) 45%,transparent);color:var(--good);background:color-mix(in srgb,var(--good) 10%,transparent)}
+.rule.off{opacity:.45}
+.cbtn.hourly{background:var(--good);border-color:var(--good);color:var(--bg);font-weight:700}
+.perkrow{display:flex;flex-direction:column;gap:7px}
+.perkrow .pk{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--dim)}
+.perkrow .pk b{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--fg)}
+.perkrow .pk b.ac{color:var(--accent)}
+.perkrow .bar{height:4px;border-radius:2px;background:var(--raise);overflow:hidden}
+.perkrow .bar i{display:block;height:100%;background:var(--accent)}
+.haul3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-top:10px}
+.haul3 div{font-size:11px;color:var(--mute)}
+.haul3 div b{display:block;font-size:15px;font-weight:700;color:var(--fg);margin-top:1px}
+.haul3 div b.gd{color:var(--good)}.haul3 div b.ac{color:var(--accent)}
+
+.vitals{display:flex;gap:8px;flex:none}
+.vt{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 13px;min-width:0}
+.vt .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);font-weight:600}
+.vt .n{font-size:18px;font-weight:700;letter-spacing:-.02em;margin-top:3px;white-space:nowrap}
+.vt .n i{font-style:normal;font-size:12px;color:var(--mute);font-weight:500}
+.vt .n.gd{color:var(--good)}.vt .n.wn{color:var(--warn)}.vt .n.ac{color:var(--accent)}
+.vt .trk{height:3px;border-radius:2px;background:var(--raise);margin-top:8px;overflow:hidden}
+.vt .trk i{display:block;height:100%;background:var(--accent)}
+.vt .trk i.gd{background:var(--good)}.vt .trk i.wn{background:var(--warn)}
+.vt.phase{flex:1.4;border-color:color-mix(in srgb,var(--accent) 40%,transparent);background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
+.vt.phase .n{color:var(--accent);display:flex;align-items:center;gap:8px}
+.vt.phase .n .pd{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pz 1.5s infinite}
+@keyframes pz{50%{opacity:.25}}
+.vt .sub{font-size:10.5px;color:var(--mute);margin-top:5px}
+
+.ctlbar{display:flex;gap:8px;align-items:center;flex:none;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
+.cbtn{font:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:var(--raise);color:var(--fg);border-radius:9px;padding:11px 16px;cursor:pointer;transition:.15s;white-space:nowrap}
+.cbtn:hover{border-color:var(--mute)}
+.cbtn.stop{background:var(--bad);border-color:var(--bad);color:var(--bg);font-weight:700;padding:11px 24px}
+.cbtn.go{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:700}
+.cbtn.ghost{background:transparent;color:var(--dim)}
+.cdiv{width:1px;height:24px;background:var(--line);margin:0 3px}
+.cgrouplbl{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--mute);font-weight:600;padding:0 4px 0 6px}
+
+/* ============ SHARED: side column beside the feed ============ */
+.feedrow{flex:1;display:flex;gap:10px;min-height:0}
+.feedrow .fmain{flex:1;min-width:0;display:flex}
+.sidecol{width:286px;flex:none;display:flex;flex-direction:column;gap:10px;min-height:0}
+.sc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+.sc .h{font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:10px}
+.sc.claimcard{border-color:color-mix(in srgb,var(--good) 34%,transparent);background:linear-gradient(160deg,color-mix(in srgb,var(--good) 11%,transparent),var(--surface))}
+.sc .cname{font-size:17px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.sc .cser{font-size:11.5px;color:var(--dim);margin-top:3px}
+.sc .cmeta{display:flex;align-items:baseline;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.sc .cmeta b{font-size:15px;font-weight:700;color:var(--good)}
+.sc .cmeta span{font-size:11px;color:var(--mute)}
+.sc .cmeta .tm{margin-left:auto;font-family:'IBM Plex Mono',monospace}
+.sc .tr{display:flex;align-items:center;gap:10px;font-size:12px;padding:5px 0;color:var(--dim)}
+.sc .tr b{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--fg)}
+.sc .tr b.gd{color:var(--good)}.sc .tr b.ac{color:var(--accent)}
+.sc .tr .bd{width:5px;height:5px;border-radius:50%;background:var(--line);flex:none}
+.sc .tr.now .bd{background:var(--accent)}
+.sc .kanum{font-size:24px;font-weight:700;letter-spacing:-.03em}
+.sc .kanum small{font-size:12px;color:var(--mute);font-weight:500}
+.sc .kagems{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.sc .kagems span{display:flex;align-items:center;gap:5px;background:var(--raise);border-radius:7px;padding:4px 8px;font-size:10.5px;font-weight:600}
+.sc .tally{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px;padding-top:11px;border-top:1px solid var(--line)}
+.sc .tally div{font-size:11px;color:var(--mute)}
+.sc .tally div b{display:block;font-size:15px;font-weight:700;color:var(--fg);margin-top:1px}
+.sc .tally div b.gd{color:var(--good)}.sc .tally div b.bd{color:var(--bad)}
+
+/* ============================ A · REACTOR ============================ */
+.d-a .side{width:186px;flex:none;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:16px 11px 12px}
+.d-a .mark{display:flex;align-items:center;gap:9px;padding:0 6px 18px}
+.d-a .mark .gem{width:15px;height:15px;background:var(--accent)}
+.d-a .mark span{font-size:14.5px;font-weight:700;letter-spacing:-.02em}
+.d-a .mark span i{font-style:normal;color:var(--dim);font-weight:500}
+.d-a .navlbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);padding:0 8px 7px}
+.d-a .nav{display:flex;flex-direction:column;gap:1px;margin-bottom:14px}
+.d-a .nav a{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:7px;font-size:12.5px;color:var(--dim);text-decoration:none;position:relative}
+.d-a .nav a .ic{width:15px;height:15px;flex:none;opacity:.55}
+.d-a .nav a:hover{background:var(--raise);color:var(--fg)}
+.d-a .nav a.sel{background:var(--raise);color:var(--fg);font-weight:600}
+.d-a .nav a.sel .ic{opacity:1;color:var(--accent)}
+.d-a .nav a.sel::before{content:"";position:absolute;left:-11px;top:7px;bottom:7px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.d-a .sidefoot{margin-top:auto;padding:10px 8px 0;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.d-a .av{width:24px;height:24px;border-radius:7px;flex:none;background:linear-gradient(140deg,var(--accent),var(--accent2))}
+.d-a .sidefoot b{font-size:11.5px;font-weight:600;display:block;line-height:1.3}
+.d-a .sidefoot small{font-size:10px;color:var(--good);font-family:'IBM Plex Mono',monospace}
+.d-a .main{flex:1;display:flex;flex-direction:column;padding:16px 20px 18px;gap:10px;min-width:0}
+.d-a .selbar .sel{flex:1}.d-a .selbar .sel:nth-child(2){flex:1.3}
+.d-a .feed{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.d-a .fh{display:flex;align-items:center;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.d-a .fh .ti{font-size:12.5px;font-weight:600;margin-right:6px}
+.d-a .fchip{font-size:10.5px;font-weight:600;padding:4px 10px;border-radius:999px;color:var(--mute);border:1px solid transparent;cursor:pointer}
+.d-a .fchip.on{background:var(--raise);color:var(--fg);border-color:var(--line)}
+.d-a .fb{flex:1;overflow:hidden;padding:7px 0;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.95}
+.d-a .ln{display:flex;gap:11px;padding:1px 14px 1px 0;border-left:2px solid transparent}
+.d-a .ln .ts{color:var(--mute);flex:none;padding-left:12px;opacity:.7}
+.d-a .ln .tx{color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.d-a .ln .tx b{color:var(--fg);font-weight:500}
+.d-a .ln.claim{border-left-color:var(--good);background:color-mix(in srgb,var(--good) 7%,transparent)}
+.d-a .ln.claim .tx{color:var(--good)}
+.d-a .ln.kak{border-left-color:var(--accent)}
+.d-a .ln.kak .tx{color:var(--accent)}
+.d-a .ln.err{border-left-color:var(--bad)}
+.d-a .ln.err .tx{color:var(--bad)}
+.d-a .ln.skip .tx{color:var(--mute)}
+
+/* ============================ B · CONSOLE ============================ */
+.d-b .win{flex-direction:column;font-family:'IBM Plex Mono',monospace}
+.d-b .tabs{display:flex;align-items:center;gap:2px;background:var(--surface);border-bottom:1px solid var(--line);padding:0 12px;height:34px;flex:none}
+.d-b .tabs .brand{font-size:12px;font-weight:600;color:var(--accent);padding-right:14px;display:flex;align-items:center;gap:7px}
+.d-b .tabs .brand .gem{background:var(--accent)}
+.d-b .tabs a{font-size:11.5px;color:var(--mute);text-decoration:none;padding:4px 10px;border-radius:4px}
+.d-b .tabs a.sel{color:var(--bg);background:var(--accent);font-weight:600}
+.d-b .tabs .rt{margin-left:auto;font-size:11px;color:var(--good)}
+.d-b .targetline{flex:none;display:flex;align-items:center;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.d-b .sel{border-radius:3px;padding:7px 11px;gap:9px}
+.d-b .sel .ic{display:none}
+.d-b .sel .k{font-size:9px;letter-spacing:.13em}.d-b .sel .v{font-size:12px}
+.d-b .quick .q{border-radius:3px;font-size:11px;padding:6px 11px;font-family:inherit}
+.d-b .statline{display:flex;align-items:stretch;background:color-mix(in srgb,var(--bg) 70%,#000);border-bottom:1px solid var(--line);height:34px;flex:none;font-size:11.5px}
+.d-b .cell{display:flex;align-items:center;gap:8px;padding:0 15px;position:relative}
+.d-b .cell+.cell::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:1px;background:var(--line)}
+.d-b .cell .k{color:var(--mute)}
+.d-b .cell .v{color:var(--fg);font-weight:600}
+.d-b .cell .v.amb{color:var(--accent)}.d-b .cell .v.grn{color:var(--good)}.d-b .cell .v.vio{color:var(--accent2)}
+.d-b .meter{display:flex;gap:2px}
+.d-b .meter i{width:4px;height:11px;background:var(--line)}
+.d-b .meter i.on{background:var(--accent)}
+.d-b .statline .runstate{margin-left:auto;display:flex;align-items:center;gap:9px;padding:0 16px;background:var(--accent);color:var(--bg);font-weight:600}
+.d-b .statline .runstate .sq{width:8px;height:8px;background:var(--bg);animation:bblink 1s steps(2) infinite}
+@keyframes bblink{50%{opacity:0}}
+.d-b .mid{flex:1;display:flex;min-height:0}
+.d-b .console{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.d-b .filters{display:flex;align-items:center;gap:14px;padding:8px 15px;border-bottom:1px solid var(--line);font-size:10.5px;color:var(--mute)}
+.d-b .filters span.on{color:var(--accent);border-bottom:1px solid var(--accent);padding-bottom:2px}
+.d-b .filters .hint{margin-left:auto;opacity:.6}
+.d-b .feed{flex:1;overflow:hidden;padding:8px 0;font-size:12.5px;line-height:1.98}
+.d-b .l{display:flex;padding:0 15px}
+.d-b .l .t{color:var(--mute);width:74px;flex:none;opacity:.75}
+.d-b .l .g{width:20px;flex:none;font-weight:600}
+.d-b .l .m{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-b .l .m b{color:var(--fg);font-weight:600}
+.d-b .l.claim{background:color-mix(in srgb,var(--good) 9%,transparent)}
+.d-b .l.claim .g,.d-b .l.claim .m,.d-b .l.claim .m b{color:var(--good)}
+.d-b .l.kak .g,.d-b .l.kak .m b{color:var(--accent2)}
+.d-b .l.err .g,.d-b .l.err .m{color:var(--bad)}
+.d-b .l.skip .m,.d-b .l.skip .g{color:var(--mute)}
+.d-b .l.cmd .g,.d-b .l.cmd .m b{color:var(--accent)}
+.d-b .rail{width:266px;flex:none;border-left:1px solid var(--line);padding:11px 13px;display:flex;flex-direction:column;gap:11px;overflow:hidden}
+.d-b .rail .blk .h{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin-bottom:7px}
+.d-b .rail .rr{display:flex;font-size:12px;color:var(--dim);padding:3px 0}
+.d-b .rail .rr b{margin-left:auto;color:var(--fg);font-weight:600}
+.d-b .rail .rr b.gd{color:var(--good)}.d-b .rail .rr b.ac{color:var(--accent)}
+.d-b .rail .claimbox{border:1px solid color-mix(in srgb,var(--good) 40%,transparent);background:color-mix(in srgb,var(--good) 8%,transparent);padding:10px 11px}
+.d-b .rail .claimbox .n{font-size:14px;font-weight:600;color:var(--good)}
+.d-b .rail .claimbox .s{font-size:11px;color:var(--dim);margin-top:2px}
+.d-b .rail .claimbox .m{font-size:11px;color:var(--mute);margin-top:7px}
+.d-b .rail .gems{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.d-b .rail .gems span{display:flex;align-items:center;gap:5px;background:var(--raise);padding:3px 7px;font-size:10.5px;font-weight:600}
+.d-b .rail .divr{height:1px;background:var(--line)}
+.d-b .cmdbar{flex:none;border-top:1px solid var(--line);background:var(--surface);padding:10px 14px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.d-b .cap{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:var(--raise);padding:9px 13px;font-size:12px;color:var(--dim);cursor:pointer;font-family:inherit}
+.d-b .cap:hover{border-color:var(--mute);color:var(--fg)}
+.d-b .cap kbd{font-size:9.5px;color:var(--mute);background:var(--bg);border-radius:3px;padding:2px 5px;border:1px solid var(--line)}
+.d-b .cap.go{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
+.d-b .cap.kill{background:var(--bad);border-color:var(--bad);color:var(--bg);font-weight:700}
+.d-b .cap.go kbd,.d-b .cap.kill kbd{background:color-mix(in srgb,var(--bg) 25%,transparent);color:var(--bg);border-color:transparent}
+
+/* ============================ C · HAUL ============================ */
+.d-c .rail{width:56px;flex:none;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:13px 0;gap:5px}
+.d-c .rail .lg{width:28px;height:28px;border-radius:9px;margin-bottom:12px;background:linear-gradient(140deg,var(--accent),var(--accent2));display:grid;place-items:center}
+.d-c .rail .lg .gem{background:var(--bg);width:12px;height:12px}
+.d-c .rail b{width:36px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--mute);cursor:pointer}
+.d-c .rail b.sel{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--fg);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 38%,transparent)}
+.d-c .rail .sp{margin-top:auto}
+.d-c .main{flex:1;padding:16px 20px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.d-c .selbar .sel{flex:1;border-radius:12px}.d-c .selbar .sel:nth-child(2){flex:1.3}
+.d-c .ctlbar{border-radius:14px}
+.d-c .feedcard{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.d-c .ch{display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line)}
+.d-c .ch b{font-size:13px;font-weight:600}
+.d-c .ch .f{margin-left:auto;display:flex;gap:4px}
+.d-c .ch .f i{font-style:normal;font-size:10.5px;color:var(--mute);padding:4px 10px;border-radius:999px;cursor:pointer}
+.d-c .ch .f i.on{background:var(--raise);color:var(--fg)}
+.d-c .fb{flex:1;overflow:hidden;padding:6px 0}
+.d-c .e{display:flex;align-items:center;gap:11px;padding:6px 15px;font-size:12.5px}
+.d-c .e .dt{width:7px;height:7px;flex:none;background:var(--raise);transform:rotate(45deg)}
+.d-c .e .tx{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-c .e .tx b{color:var(--fg);font-weight:600}
+.d-c .e .tm{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--mute);flex:none}
+.d-c .e.claim{background:color-mix(in srgb,var(--good) 8%,transparent)}
+.d-c .e.claim .dt{background:var(--good)}.d-c .e.claim .tx b{color:var(--good)}
+.d-c .e.kak .dt{background:var(--accent)}.d-c .e.kak .tx b{color:var(--accent)}
+.d-c .e.err .dt{background:var(--bad)}.d-c .e.err .tx{color:var(--bad)}
+.d-c .sc{border-radius:14px}
+.d-c .haulcard{background:linear-gradient(125deg,color-mix(in srgb,var(--accent2) 20%,var(--surface)),var(--surface) 65%)}
+.d-c .haulcard .kanum{font-family:'Bricolage Grotesque','Space Grotesk',sans-serif;font-size:30px;font-weight:800;background:linear-gradient(100deg,var(--fg),var(--accent) 70%);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* ============================ D · QUIET ============================ */
+.d-d .win{flex-direction:column;padding:28px 40px 0}
+.d-d .nav{display:flex;align-items:baseline;gap:20px;font-size:12.5px;color:var(--mute);flex:none}
+.d-d .nav .lg{font-size:12.5px;font-weight:600;color:var(--fg);margin-right:6px}
+.d-d .nav a{color:var(--mute);text-decoration:none}
+.d-d .nav a.sel{color:var(--fg);font-weight:600}
+.d-d .nav .rt{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--good)}
+.d-d .targets{display:flex;align-items:flex-end;gap:34px;padding:22px 0 18px;flex:none}
+.d-d .tg{cursor:pointer}
+.d-d .tg span{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.d-d .tg b{display:block;font-size:16px;font-weight:500;margin-top:6px;border-bottom:1px solid var(--line);padding-bottom:5px;color:var(--fg)}
+.d-d .tg b::after{content:" ▾";color:var(--mute);font-size:11px}
+.d-d .tg.p b{color:var(--accent);border-bottom-color:color-mix(in srgb,var(--accent) 50%,transparent)}
+.d-d .qk{margin-left:auto;display:flex;gap:18px;align-items:baseline;font-size:12.5px}
+.d-d .qk span{color:var(--mute);cursor:pointer}
+.d-d .qk span.on{color:var(--fg);font-weight:600;border-bottom:1px solid var(--accent);padding-bottom:3px}
+.d-d .nums{display:flex;align-items:flex-end;gap:38px;padding:0 0 18px;border-bottom:1px solid var(--line);flex:none}
+.d-d .nums .n{font-family:'IBM Plex Mono',monospace;font-size:54px;font-weight:500;line-height:.85;letter-spacing:-.05em}
+.d-d .nums .n em{font-style:normal;font-size:18px;color:var(--mute)}
+.d-d .nums .nl{font-size:11.5px;color:var(--mute);margin-top:8px}
+.d-d .nums .f{display:flex;gap:34px;padding-bottom:4px}
+.d-d .nums .f div span{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.d-d .nums .f div b{display:block;font-size:16px;font-weight:500;margin-top:6px}
+.d-d .nums .f div b.ac{color:var(--accent)}
+.d-d .nums .st{margin-left:auto;align-self:flex-end;font-size:12.5px;color:var(--dim);display:flex;align-items:center;gap:9px;padding-bottom:4px}
+.d-d .nums .st i{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:pz 2.2s infinite}
+.d-d .acts{display:flex;align-items:center;gap:9px;padding:14px 0;flex:none;border-bottom:1px solid var(--line)}
+.d-d .acts button{font:inherit;font-size:12.5px;font-weight:500;background:none;border:1px solid var(--line);color:var(--dim);border-radius:7px;padding:10px 16px;cursor:pointer}
+.d-d .acts button:hover{color:var(--fg);border-color:var(--mute)}
+.d-d .acts button.stop{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent);font-weight:600}
+.d-d .acts button.go{color:var(--bg);background:var(--good);border-color:var(--good);font-weight:600}
+.d-d .acts .lbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);padding:0 4px 0 12px}
+.d-d .feedrow{padding-top:16px;gap:44px}
+.d-d .feed{flex:1;overflow:hidden;font-size:12.5px;line-height:2.15;min-width:0}
+.d-d .feed .r{display:flex;gap:20px;color:var(--dim)}
+.d-d .feed .r .t{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute);width:56px;flex:none}
+.d-d .feed .r .m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-d .feed .r .m b{color:var(--fg);font-weight:500}
+.d-d .feed .r.q{color:var(--mute)}
+.d-d .feed .r.hit .m b{color:var(--accent)}
+.d-d .feed .r.err .m{color:var(--bad)}
+.d-d .sidecol{width:240px;gap:24px}
+.d-d .sc{background:none;border:none;padding:0;border-top:1px solid var(--line);padding-top:12px;border-radius:0}
+.d-d .sc:first-child{border-top:none;padding-top:0}
+.d-d .sc .h{font-family:'IBM Plex Mono',monospace}
+.d-d .sc.claimcard{background:none}
+.d-d .sc .cname{font-size:15px}
+.d-d .sc .cmeta{border-top:none;padding-top:6px;margin-top:6px}
+.d-d .sc .tally{border-top:none;padding-top:4px}
+
+/* ============================ E · PANES ============================ */
+.d-e .win{flex-direction:column;font-family:'IBM Plex Mono',monospace;padding:0 8px 0}
+.d-e .wbar{flex:none;display:flex;align-items:center;height:30px;font-size:11.5px;margin:0 -8px;background:var(--surface);border-bottom:1px solid var(--line);padding:0 10px}
+.d-e .wbar .br{color:var(--accent);font-weight:600;padding-right:14px;display:flex;align-items:center;gap:7px}
+.d-e .wbar .br .gem{background:var(--accent)}
+.d-e .wbar a{color:var(--mute);text-decoration:none;padding:4px 10px}
+.d-e .wbar a:hover{color:var(--dim)}
+.d-e .wbar a.sel{background:var(--accent);color:var(--bg);font-weight:600}
+.d-e .wbar a i{font-style:normal;opacity:.55;padding-right:5px}
+.d-e .wbar .rr{margin-left:auto;color:var(--good)}
+.d-e .top{display:flex;gap:8px;flex:1;min-height:0;padding-top:12px}
+.d-e .pane{border:1px solid var(--line);border-radius:3px;position:relative;display:flex;flex-direction:column;min-height:0;min-width:0}
+.d-e .pane>.ti{position:absolute;top:-7px;left:11px;background:var(--bg);padding:0 7px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+.d-e .pane.act{border-color:var(--accent)}
+.d-e .pane.act>.ti{color:var(--accent)}
+.d-e .pane .body{flex:1;overflow:hidden;padding:13px 12px 9px}
+.d-e .lf{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.d-e .rt{width:288px;flex:none;display:flex;flex-direction:column;gap:8px}
+.d-e .rt .pane{flex:none}
+.d-e .rt .pane.grow{flex:1}
+.d-e .sel{border-radius:2px;padding:7px 10px;gap:8px;font-family:inherit}
+.d-e .sel .ic{display:none}
+.d-e .sel .k{font-size:8.5px}.d-e .sel .v{font-size:11.5px}
+.d-e .selbar{flex-direction:column;gap:6px}
+.d-e .quick{padding-left:0;gap:5px}
+.d-e .quick .q{border-radius:2px;font-family:inherit;font-size:10.5px;padding:6px 10px;flex:1;text-align:center}
+.d-e .kv{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0;color:var(--dim)}
+.d-e .kv b{color:var(--fg);font-weight:600}
+.d-e .kv b.ac{color:var(--accent)}.d-e .kv b.gd{color:var(--good)}.d-e .kv b.wn{color:var(--warn)}
+.d-e .kv .bars{display:flex;gap:2px}
+.d-e .kv .bars i{width:5px;height:10px;background:var(--line)}
+.d-e .kv .bars i.on{background:var(--accent)}
+.d-e .divr{height:1px;background:var(--line);margin:8px 0}
+.d-e .lastclaim{border:1px solid color-mix(in srgb,var(--good) 40%,transparent);background:color-mix(in srgb,var(--good) 8%,transparent);padding:9px 10px;margin-bottom:9px}
+.d-e .lastclaim .n{font-size:13px;font-weight:600;color:var(--good)}
+.d-e .lastclaim .s{font-size:11px;color:var(--dim);margin-top:2px}
+.d-e .btnr{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.d-e .btnr button{font:inherit;font-size:12px;background:var(--raise);color:var(--dim);border:1px solid var(--line);border-radius:2px;padding:10px 8px;cursor:pointer}
+.d-e .btnr button:hover{color:var(--fg);border-color:var(--mute)}
+.d-e .btnr button.kill{background:var(--bad);color:var(--bg);border-color:var(--bad);font-weight:700}
+.d-e .btnr button.go{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+.d-e .lg{font-size:12.5px;line-height:1.95}
+.d-e .lg .r{display:flex}
+.d-e .lg .t{width:74px;flex:none;color:var(--mute)}
+.d-e .lg .g{width:20px;flex:none}
+.d-e .lg .m{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-e .lg .m b{color:var(--fg);font-weight:600}
+.d-e .lg .r.hit{background:color-mix(in srgb,var(--good) 8%,transparent)}
+.d-e .lg .r.hit .g,.d-e .lg .r.hit .m b{color:var(--good)}
+.d-e .lg .r.kk .g,.d-e .lg .r.kk .m b{color:var(--accent)}
+.d-e .lg .r.er .g,.d-e .lg .r.er .m{color:var(--bad)}
+.d-e .lg .r.sk .m,.d-e .lg .r.sk .g{color:var(--mute)}
+.d-e .lg .r.cm .g,.d-e .lg .r.cm .m b{color:var(--accent2)}
+.d-e .statusbar{flex:none;display:flex;align-items:center;height:26px;margin:8px -8px 0;font-size:11.5px;background:var(--accent);color:var(--bg)}
+.d-e .statusbar .seg{padding:0 12px;font-weight:600}
+.d-e .statusbar .mid{flex:1;padding:0 12px;background:var(--surface);color:var(--dim);height:100%;display:flex;align-items:center;gap:16px}
+.d-e .statusbar .mid em{font-style:normal;color:var(--fg)}
+
+/* ============================ F · METERS ============================ */
+.d-f .win{flex-direction:column;font-family:'IBM Plex Mono',monospace}
+.d-f .bar1{display:flex;align-items:center;height:24px;flex:none;background:var(--accent);color:var(--bg);font-size:11.5px;font-weight:600}
+.d-f .bar1 .n{padding:0 13px}
+.d-f .bar1 .tabs{display:flex;height:100%;background:var(--surface);flex:1}
+.d-f .bar1 .tabs a{display:flex;align-items:center;padding:0 12px;color:var(--mute);text-decoration:none;font-weight:400}
+.d-f .bar1 .tabs a.sel{color:var(--fg);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.d-f .bar1 .tabs .rr{margin-left:auto;display:flex;align-items:center;padding:0 12px;color:var(--good)}
+.d-f .targetline{flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.d-f .sel{border-radius:2px;padding:7px 11px;font-family:inherit}
+.d-f .sel .ic{display:none}
+.d-f .sel .k{font-size:8.5px}.d-f .sel .v{font-size:11.5px}
+.d-f .quick .q{border-radius:2px;font-family:inherit;font-size:11px}
+.d-f .meters{flex:none;padding:12px 16px 11px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 26px;border-bottom:1px solid var(--line)}
+.d-f .mtr{display:flex;align-items:center;gap:8px;font-size:12px}
+.d-f .mtr .k{width:58px;flex:none;color:var(--mute)}
+.d-f .mtr .br{flex:1;display:flex;align-items:center;color:var(--mute)}
+.d-f .mtr .br .track{flex:1;display:flex;gap:1.5px;padding:0 4px}
+.d-f .mtr .br .track i{flex:1;height:11px;background:var(--raise)}
+.d-f .mtr .br .track i.on{background:var(--accent)}
+.d-f .mtr .br .track i.alt{background:var(--accent2)}
+.d-f .mtr .br .track i.gd{background:var(--good)}
+.d-f .mtr .br .track i.wn{background:var(--warn)}
+.d-f .mtr .v{width:78px;flex:none;text-align:right;color:var(--fg);font-weight:600}
+.d-f .mtr .v small{color:var(--mute);font-weight:400}
+.d-f .mid{flex:1;display:flex;min-height:0}
+.d-f .tbl{flex:1;display:flex;flex-direction:column;min-width:0}
+.d-f .th{flex:none;display:flex;background:var(--accent);color:var(--bg);font-size:11px;font-weight:600;letter-spacing:.08em;padding:3px 16px}
+.d-f .th span:nth-child(1){width:78px}.d-f .th span:nth-child(2){width:70px}
+.d-f .th span:nth-child(3){width:74px;text-align:right;padding-right:18px}.d-f .th span:nth-child(4){flex:1}
+.d-f .rows{flex:1;overflow:hidden;font-size:12.5px;line-height:1.92;padding:5px 0}
+.d-f .rw{display:flex;padding:0 16px;color:var(--dim)}
+.d-f .rw span:nth-child(1){width:78px;flex:none;color:var(--mute)}
+.d-f .rw span:nth-child(2){width:70px;flex:none}
+.d-f .rw span:nth-child(3){width:74px;flex:none;text-align:right;padding-right:18px;color:var(--fg)}
+.d-f .rw span:nth-child(4){flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-f .rw.sel{background:var(--raise)}
+.d-f .rw.hit{background:color-mix(in srgb,var(--good) 11%,transparent)}
+.d-f .rw.hit span:nth-child(2),.d-f .rw.hit span:nth-child(4){color:var(--good)}
+.d-f .rw.kk span:nth-child(2){color:var(--accent)}
+.d-f .rw.er span{color:var(--bad)}
+.d-f .rw.sk span{color:var(--mute)}
+.d-f .rail{width:262px;flex:none;border-left:1px solid var(--line);padding:11px 13px;display:flex;flex-direction:column;gap:11px;overflow:hidden}
+.d-f .rail .h{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin-bottom:7px}
+.d-f .rail .rr{display:flex;font-size:12px;color:var(--dim);padding:3px 0}
+.d-f .rail .rr b{margin-left:auto;color:var(--fg);font-weight:600}
+.d-f .rail .rr b.gd{color:var(--good)}.d-f .rail .rr b.ac{color:var(--accent)}
+.d-f .rail .cb{border:1px solid color-mix(in srgb,var(--good) 40%,transparent);background:color-mix(in srgb,var(--good) 8%,transparent);padding:9px 10px}
+.d-f .rail .cb .n{font-size:13px;font-weight:600;color:var(--good)}
+.d-f .rail .cb .s{font-size:11px;color:var(--dim);margin-top:2px}
+.d-f .rail .gems{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.d-f .rail .gems span{display:flex;align-items:center;gap:5px;background:var(--raise);padding:3px 7px;font-size:10.5px;font-weight:600}
+.d-f .rail .divr{height:1px;background:var(--line)}
+.d-f .fkeys{flex:none;display:flex;height:26px;font-size:11.5px;background:var(--surface)}
+.d-f .fk{display:flex;align-items:center;cursor:pointer}
+.d-f .fk u{text-decoration:none;color:var(--dim);padding:0 4px 0 9px}
+.d-f .fk b{background:var(--accent);color:var(--bg);padding:0 11px;height:100%;display:flex;align-items:center;font-weight:600}
+.d-f .fk.kill b{background:var(--bad)}
+.d-f .fkeys .fill{flex:1;background:var(--accent);opacity:.28}
+
+/* ============================ G · BOXED ============================ */
+.d-g .win{flex-direction:column;font-family:'IBM Plex Mono',monospace;background:color-mix(in srgb,var(--accent2) 10%,var(--bg))}
+.d-g .tbar{flex:none;height:24px;background:var(--accent);color:var(--bg);display:flex;align-items:center;padding:0 12px;font-size:11.5px;font-weight:600}
+.d-g .tbar .x{margin-left:auto}
+.d-g .mbar{flex:none;height:24px;background:var(--surface);display:flex;align-items:center;font-size:11.5px;border-bottom:1px solid var(--line)}
+.d-g .mbar a{padding:0 12px;height:100%;display:flex;align-items:center;color:var(--dim);text-decoration:none}
+.d-g .mbar a u{color:var(--accent);text-decoration:none}
+.d-g .mbar a.sel{background:var(--accent);color:var(--bg);font-weight:600}
+.d-g .mbar a.sel u{color:var(--bg)}
+.d-g .mbar .rr{margin-left:auto;padding:0 12px;color:var(--good)}
+.d-g .desk{flex:1;display:flex;flex-direction:column;gap:11px;padding:13px;min-height:0}
+.d-g .box{border:3px double var(--line);background:var(--surface);position:relative;display:flex;flex-direction:column;min-height:0;min-width:0}
+.d-g .box>.cap{position:absolute;top:-9px;left:14px;background:var(--surface);padding:0 8px;font-size:11px;font-weight:600;color:var(--dim)}
+.d-g .box.hot{border-color:var(--accent)}
+.d-g .box.hot>.cap{color:var(--accent)}
+.d-g .box .in{padding:14px 14px 12px;flex:1;overflow:hidden;min-height:0}
+.d-g .combo{display:flex;align-items:center;gap:10px;background:var(--raise);border:1px solid var(--line);padding:8px 11px;cursor:pointer;font:inherit;flex:1;min-width:0;text-align:left}
+.d-g .combo .k{font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--mute);flex:none}
+.d-g .combo .v{font-size:12px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-g .combo .ar{margin-left:auto;color:var(--accent);flex:none}
+.d-g .comborow{display:flex;gap:9px}
+.d-g .presets{display:flex;gap:7px;margin-top:9px}
+.d-g .presets button{font:inherit;font-size:11.5px;background:var(--raise);border:1px solid var(--line);color:var(--dim);padding:7px 13px;cursor:pointer}
+.d-g .presets button.on{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700}
+.d-g .pad{display:flex;gap:7px;flex-wrap:wrap}
+.d-g .pad button{font:inherit;font-size:12px;background:var(--raise);color:var(--dim);border:1px solid var(--line);border-bottom-width:2px;padding:10px 15px;cursor:pointer}
+.d-g .pad button:hover{color:var(--fg);border-color:var(--mute)}
+.d-g .pad button.go{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700}
+.d-g .pad button.hourly{background:var(--good);color:var(--bg);border-color:var(--good);font-weight:700}
+.d-g .pad button.kill{background:var(--bad);color:var(--bg);border-color:var(--bad);font-weight:700}
+.d-g .lowrow{flex:1;display:flex;gap:11px;min-height:0}
+.d-g .lowrow .box.feedbox{flex:1;min-width:0}
+.d-g .lowrow .sidebox{width:290px;flex:none;display:flex;flex-direction:column;gap:11px}
+.d-g .stat{display:flex;justify-content:space-between;font-size:12px;padding:2px 0;color:var(--dim)}
+.d-g .stat b{color:var(--fg);font-weight:600}
+.d-g .stat b.ac{color:var(--accent)}.d-g .stat b.gd{color:var(--good)}
+.d-g .stat .blk{letter-spacing:-1px;color:var(--accent)}
+.d-g .stat .blk s{text-decoration:none;color:var(--line)}
+.d-g .gems{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.d-g .gems span{display:flex;align-items:center;gap:5px;background:var(--raise);padding:3px 7px;font-size:10.5px;font-weight:600}
+.d-g .lines{font-size:12.5px;line-height:1.95}
+.d-g .lines .r{display:flex;gap:11px;padding:0 2px}
+.d-g .lines .r .t{color:var(--mute);flex:none}
+.d-g .lines .r .m{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-g .lines .r .m b{color:var(--fg);font-weight:600}
+.d-g .lines .r.hit{background:var(--accent)}
+.d-g .lines .r.hit .t,.d-g .lines .r.hit .m,.d-g .lines .r.hit .m b{color:var(--bg)}
+.d-g .lines .r.kk .m b{color:var(--accent)}
+.d-g .lines .r.er .m{color:var(--bad)}
+.d-g .lines .r.sk .m{color:var(--mute)}
+.d-g .sbar{flex:none;height:24px;background:var(--accent);color:var(--bg);display:flex;align-items:center;gap:20px;padding:0 14px;font-size:11.5px;font-weight:600}
+.d-g .sbar span u{text-decoration:none;opacity:.7}
+
+/* ============================ H · DOCK ============================ */
+.d-h .win{flex-direction:column}
+.d-h .chrome{flex:none;height:44px;display:flex;align-items:center;gap:14px;padding:0 16px;background:color-mix(in srgb,var(--surface) 80%,var(--bg));border-bottom:1px solid var(--line);position:relative}
+.d-h .lights{display:flex;gap:7px}
+.d-h .lights i{width:11px;height:11px;border-radius:50%;background:var(--line)}
+.d-h .lights i:first-child{background:var(--bad)}
+.d-h .lights i:nth-child(2){background:var(--warn)}
+.d-h .lights i:nth-child(3){background:var(--good)}
+.d-h .chrome .ttl{position:absolute;left:50%;transform:translateX(-50%);font-size:12.5px;font-weight:600}
+.d-h .seg{margin-left:auto;display:flex;background:var(--raise);border-radius:8px;padding:2px}
+.d-h .seg button{font:inherit;font-size:11.5px;font-weight:600;border:none;background:none;color:var(--dim);padding:5px 13px;border-radius:6px;cursor:pointer}
+.d-h .seg button.on{background:var(--surface);color:var(--fg)}
+.d-h .body{flex:1;display:flex;min-height:0}
+.d-h .sb{width:196px;flex:none;background:color-mix(in srgb,var(--surface) 70%,var(--bg));border-right:1px solid var(--line);padding:13px 9px;display:flex;flex-direction:column;gap:2px}
+.d-h .sb .gp{font-size:10.5px;font-weight:600;color:var(--mute);padding:11px 10px 5px}
+.d-h .sb a{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;font-size:13px;color:var(--fg);text-decoration:none}
+.d-h .sb a .sq{width:20px;height:20px;border-radius:6px;background:var(--raise);flex:none;display:grid;place-items:center;color:var(--dim)}
+.d-h .sb a.sel{background:var(--accent);color:var(--bg);font-weight:600}
+.d-h .sb a.sel .sq{background:color-mix(in srgb,var(--bg) 25%,transparent);color:var(--bg)}
+.d-h .sb .cnt{margin-left:auto;font-size:11px;color:var(--mute)}
+.d-h .content{flex:1;overflow:hidden;padding:16px 22px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.d-h .selbar .sel{flex:1;border-radius:12px}.d-h .selbar .sel:nth-child(2){flex:1.3}
+.d-h .recent{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.d-h .recent .rh{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.d-h .recent .rh b{font-size:13px;font-weight:600}
+.d-h .recent .rh .sg{margin-left:auto;display:flex;background:var(--raise);border-radius:7px;padding:2px}
+.d-h .recent .rh .sg i{font-style:normal;font-size:10.5px;font-weight:600;color:var(--mute);padding:4px 10px;border-radius:5px;cursor:pointer}
+.d-h .recent .rh .sg i.on{background:var(--surface);color:var(--fg)}
+.d-h .recent .rb{flex:1;overflow:hidden;padding:6px 0}
+.d-h .recent .rr{display:flex;align-items:center;gap:12px;padding:6px 16px;font-size:12.5px;color:var(--dim)}
+.d-h .recent .rr b{color:var(--fg);font-weight:600}
+.d-h .recent .rr .m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-h .recent .rr .tm{margin-left:auto;font-size:11px;color:var(--mute);flex:none}
+.d-h .recent .rr.gd b{color:var(--good)}
+.d-h .recent .rr.ac b{color:var(--accent)}
+.d-h .recent .rr.er{color:var(--bad)}
+.d-h .dock{flex:none;display:flex;align-items:center;gap:6px;padding:8px;border-radius:14px;background:var(--surface);border:1px solid var(--line)}
+.d-h .dock button{font:inherit;font-size:12.5px;font-weight:600;border:none;background:var(--raise);color:var(--dim);padding:11px 16px;border-radius:9px;cursor:pointer}
+.d-h .dock button:hover{color:var(--fg)}
+.d-h .dock button.kill{background:var(--bad);color:var(--bg);font-weight:700;padding:11px 22px}
+.d-h .dock button.hourly{background:var(--good);color:var(--bg);font-weight:700}
+.d-h .dock .div{width:1px;height:22px;background:var(--line);margin:0 4px}
+.d-h .dock .lb{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);font-weight:600;padding:0 2px 0 6px}
+
+/* ============================ I · BENTO ============================ */
+.d-i .win{flex-direction:column;padding:0}
+.d-i .topbar{flex:none;display:flex;align-items:center;gap:11px;padding:12px 18px 0}
+.d-i .topbar .av{width:30px;height:30px;border-radius:10px;background:linear-gradient(140deg,var(--accent),var(--accent2))}
+.d-i .topbar h2{font-size:17px;font-weight:700;letter-spacing:-.025em}
+.d-i .topbar h2 span{display:block;font-size:11px;font-weight:400;color:var(--good);margin-top:1px}
+.d-i .topbar .seg{margin-left:auto;display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:3px}
+.d-i .topbar .seg span{font-size:11px;font-weight:600;color:var(--mute);padding:5px 11px;border-radius:6px;cursor:pointer}
+.d-i .topbar .seg span.on{background:var(--raise);color:var(--fg)}
+.d-i .tabsrow{flex:none;display:flex;gap:2px;padding:11px 18px 0;border-bottom:1px solid var(--line);margin-bottom:12px}
+.d-i .tabsrow a{font-size:12.5px;font-weight:600;color:var(--mute);text-decoration:none;padding:9px 14px;border-radius:8px 8px 0 0;position:relative}
+.d-i .tabsrow a:hover{color:var(--dim)}
+.d-i .tabsrow a.sel{color:var(--fg);background:var(--surface)}
+.d-i .tabsrow a.sel::after{content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:2px;background:var(--accent)}
+.d-i .inner{flex:1;display:flex;flex-direction:column;padding:0 18px 16px;gap:10px;min-height:0}
+.d-i .selbar .sel{flex:1;border-radius:14px}.d-i .selbar .sel:nth-child(2){flex:1.3}
+.d-i .bento{flex:1;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:auto 1fr auto;gap:10px;min-height:0}
+.d-i .t{background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:12px 15px;position:relative;min-height:0;overflow:hidden}
+.d-i .t:hover{border-color:var(--mute)}
+.d-i .t .k{font-size:9.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--mute)}
+.d-i .t .grip{position:absolute;top:12px;right:12px;display:grid;grid-template-columns:repeat(2,3px);gap:3px;opacity:.3}
+.d-i .t .grip i{width:3px;height:3px;border-radius:50%;background:var(--dim)}
+.d-i .t .v{font-size:22px;font-weight:700;letter-spacing:-.03em;margin-top:5px}
+.d-i .t .v small{font-size:12px;color:var(--mute);font-weight:500}
+.d-i .t .sub{font-size:10.5px;color:var(--dim);margin-top:4px}
+.d-i .t.acc{background:linear-gradient(150deg,color-mix(in srgb,var(--accent) 16%,var(--surface)),var(--surface));border-color:color-mix(in srgb,var(--accent) 32%,transparent)}
+.d-i .t.acc .v{color:var(--accent)}
+.d-i .t.feedtile{grid-column:span 2;grid-row:2;display:flex;flex-direction:column;padding:0}
+.d-i .t.kaktile{grid-column:3;grid-row:2;display:flex;flex-direction:column}
+.d-i .t.timetile{grid-column:4;grid-row:2;display:flex;flex-direction:column}
+.d-i .t.ctltile{grid-column:1/-1;grid-row:3;display:flex;align-items:center;gap:8px;padding:9px 11px}
+.d-i .ticks{display:flex;gap:2.5px;height:14px;margin-top:8px}
+.d-i .ticks i{flex:1;border-radius:2px;background:var(--raise)}
+.d-i .ticks i.on{background:var(--accent)}
+.d-i .ticks i.alt{background:var(--accent2)}
+.d-i .fhd{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line)}
+.d-i .fhd b{font-size:12.5px;font-weight:600}
+.d-i .fhd .fl{margin-left:auto;display:flex;gap:3px}
+.d-i .fhd .fl i{font-style:normal;font-size:10px;color:var(--mute);padding:4px 9px;border-radius:999px;cursor:pointer}
+.d-i .fhd .fl i.on{background:var(--raise);color:var(--fg)}
+.d-i .feed{flex:1;overflow:hidden;padding:5px 0;font-size:12px;line-height:1.95}
+.d-i .feed .r{display:flex;align-items:center;gap:9px;color:var(--dim);padding:0 14px}
+.d-i .feed .r i{width:6px;height:6px;border-radius:2px;background:var(--raise);flex:none;transform:rotate(45deg)}
+.d-i .feed .r b{color:var(--fg);font-weight:600}
+.d-i .feed .r .m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-i .feed .r .tm{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--mute);flex:none}
+.d-i .feed .r.gd i{background:var(--good)}.d-i .feed .r.gd b{color:var(--good)}
+.d-i .feed .r.ac i{background:var(--accent)}.d-i .feed .r.ac b{color:var(--accent)}
+.d-i .feed .r.er i{background:var(--bad)}.d-i .feed .r.er{color:var(--bad)}
+.d-i .spark{flex:1;min-height:0;margin-top:7px}
+.d-i .spark svg{width:100%;height:100%;display:block}
+.d-i .gems{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.d-i .gems span{display:flex;align-items:center;gap:5px;background:var(--raise);border-radius:7px;padding:4px 8px;font-size:10.5px;font-weight:600}
+.d-i .tl{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--dim);padding:5px 0}
+.d-i .tl b{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--fg)}
+.d-i .tl b.gd{color:var(--good)}.d-i .tl b.ac{color:var(--accent)}
+.d-i .lastc{margin-top:8px;padding-top:9px;border-top:1px solid var(--line)}
+.d-i .lastc .k{font-size:9px}
+.d-i .lastc .nm{font-size:13.5px;font-weight:700;color:var(--good);margin-top:4px}
+.d-i .lastc .sr{font-size:10.5px;color:var(--mute);margin-top:2px}
+.d-i .ctltile button{font:inherit;font-size:12.5px;font-weight:600;background:var(--raise);color:var(--dim);border:1px solid var(--line);border-radius:9px;padding:10px 15px;cursor:pointer}
+.d-i .ctltile button:hover{color:var(--fg);border-color:var(--mute)}
+.d-i .ctltile button.kill{background:var(--bad);color:var(--bg);border-color:var(--bad);font-weight:700;padding:10px 22px}
+.d-i .ctltile button.go{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:700}
+.d-i .ctltile button.hourly{background:var(--good);color:var(--bg);border-color:var(--good);font-weight:700}
+.d-i .ctltile .lb{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);font-weight:600;padding:0 3px 0 8px}
+.d-i .ctltile .dv{width:1px;height:20px;background:var(--line);margin:0 3px}
+
+/* ============================ J · REMOTE ============================ */
+.d-j .win{background:linear-gradient(150deg,color-mix(in srgb,var(--accent2) 16%,var(--bg)),var(--bg) 60%);align-items:center;justify-content:center;gap:52px;padding:0 56px}
+.d-j .blurb{width:286px;flex:none}
+.d-j .blurb .k{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}
+.d-j .blurb h3{font-size:24px;font-weight:700;letter-spacing:-.03em;margin:10px 0 12px;line-height:1.2}
+.d-j .blurb p{font-size:12.5px;line-height:1.65;color:var(--dim)}
+.d-j .blurb ul{margin-top:15px;list-style:none;display:flex;flex-direction:column;gap:9px}
+.d-j .blurb li{font-size:12.5px;color:var(--dim);display:flex;gap:10px;align-items:flex-start}
+.d-j .blurb li .gem{background:var(--accent);margin-top:4px}
+.d-j .phone{width:378px;height:720px;flex:none;border-radius:42px;background:var(--bg);border:1px solid var(--line);box-shadow:0 30px 70px -18px rgba(0,0,0,.8);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.d-j .notch{position:absolute;top:0;left:50%;transform:translateX(-50%);width:118px;height:26px;background:var(--surface);border-radius:0 0 15px 15px;z-index:3}
+.d-j .ph-top{padding:36px 18px 0;flex:none}
+.d-j .ph-top .row{display:flex;align-items:center;gap:9px}
+.d-j .ph-top h2{font-size:19px;font-weight:700;letter-spacing:-.025em}
+.d-j .ph-top .st{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--good);background:color-mix(in srgb,var(--good) 11%,transparent);border-radius:999px;padding:5px 11px}
+.d-j .ph-top .st i{width:6px;height:6px;border-radius:50%;background:var(--good);animation:pz 1.9s infinite}
+.d-j .tcard{margin:12px 18px 0;background:var(--surface);border:1px solid var(--line);border-radius:15px;overflow:hidden;flex:none}
+.d-j .tcard .tr{display:flex;align-items:center;gap:11px;padding:10px 13px;border-bottom:1px solid var(--line);cursor:pointer}
+.d-j .tcard .tr:last-child{border-bottom:none}
+.d-j .tcard .tr .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);font-weight:600;width:56px;flex:none}
+.d-j .tcard .tr .v{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-j .tcard .tr .ar{margin-left:auto;color:var(--mute);font-size:11px}
+.d-j .tcard .tr.p .v{color:var(--accent)}
+.d-j .qk{display:flex;gap:6px;padding:10px 18px 0;flex:none}
+.d-j .qk span{flex:1;text-align:center;font-size:11px;font-weight:600;color:var(--dim);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-j .qk span.on{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.d-j .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:12px 18px 0;flex:none}
+.d-j .kpis div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:9px 6px;text-align:center}
+.d-j .kpis div span{display:block;font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mute);font-weight:600}
+.d-j .kpis div b{display:block;font-size:15px;font-weight:700;margin-top:3px}
+.d-j .kpis div b.gd{color:var(--good)}.d-j .kpis div b.ac{color:var(--accent)}
+.d-j .acts{padding:12px 18px 0;display:grid;grid-template-columns:1fr 1fr;gap:7px;flex:none}
+.d-j .acts button{font:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--dim);border-radius:12px;padding:12px 4px;cursor:pointer}
+.d-j .acts button.kill{background:var(--bad);color:var(--bg);border-color:var(--bad);font-size:13px;font-weight:700;padding:13px}
+.d-j .acts button.hourly{background:var(--good);color:var(--bg);border-color:var(--good);font-weight:700}
+.d-j .ph-feed{flex:1;overflow:hidden;padding:14px 18px 0;min-height:0}
+.d-j .ph-feed .h{display:flex;align-items:center;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:7px}
+.d-j .ph-feed .h em{margin-left:auto;font-style:normal;color:var(--accent)}
+.d-j .ph-feed .r{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--dim);padding:5px 0}
+.d-j .ph-feed .r i{width:6px;height:6px;border-radius:50%;background:var(--raise);flex:none}
+.d-j .ph-feed .r b{color:var(--fg);font-weight:600}
+.d-j .ph-feed .r .m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.d-j .ph-feed .r .tm{margin-left:auto;font-size:10px;color:var(--mute);flex:none}
+.d-j .ph-feed .r.gd i{background:var(--good)}.d-j .ph-feed .r.gd b{color:var(--good)}
+.d-j .ph-feed .r.ac i{background:var(--accent)}.d-j .ph-feed .r.ac b{color:var(--accent)}
+.d-j .ph-feed .r.er i{background:var(--bad)}.d-j .ph-feed .r.er{color:var(--bad)}
+.d-j .tabbar{flex:none;display:flex;border-top:1px solid var(--line);background:var(--surface);padding:9px 0 20px}
+.d-j .tabbar a{flex:1;text-align:center;font-size:10px;font-weight:600;color:var(--mute);text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:5px}
+.d-j .tabbar a .d{width:18px;height:18px;border-radius:6px;background:var(--raise)}
+.d-j .tabbar a.sel{color:var(--accent)}
+.d-j .tabbar a.sel .d{background:var(--accent)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>FinalMacro — Run page v3</h1>
+  <p>Same ten layouts, now closer to the real Run page: one connection toggle, hourly + Roll $us, perk 8/9, and a session haul (last claim, claims, kak / spheres / keys). Duplicate preset pills and unused meters are gone.</p>
+</div>
+
+<div class="ctlrow">
+  <div class="grp"><div class="lb">Layout</div>
+    <div class="opts" id="layouts">
+      <button data-t="a" aria-pressed="true">A · Reactor</button><button data-t="b" aria-pressed="false">B · Console</button>
+      <button data-t="c" aria-pressed="false">C · Haul</button><button data-t="d" aria-pressed="false">D · Quiet</button>
+      <button data-t="e" aria-pressed="false">E · Panes</button><button data-t="f" aria-pressed="false">F · Meters</button>
+      <button data-t="g" aria-pressed="false">G · Boxed</button><button data-t="h" aria-pressed="false">H · Dock</button>
+      <button data-t="i" aria-pressed="false">I · Bento</button><button data-t="j" aria-pressed="false">J · Remote</button>
+    </div>
+  </div>
+  <div class="grp"><div class="lb">Palette</div>
+    <div class="opts" id="palettes">
+      <button data-c="kakera" aria-pressed="true"><i class="sw" style="background:#e8479e"></i>Kakera</button>
+      <button data-c="ember" aria-pressed="false"><i class="sw" style="background:#e8a33d"></i>Ember</button>
+      <button data-c="phosphor" aria-pressed="false"><i class="sw" style="background:#3ef07a"></i>Phosphor</button>
+      <button data-c="ice" aria-pressed="false"><i class="sw" style="background:#4ec3e0"></i>Ice</button>
+      <button data-c="bone" aria-pressed="false"><i class="sw" style="background:#c2185b"></i>Bone · light</button>
+      <button data-c="mono" aria-pressed="false"><i class="sw" style="background:#f2f2f2"></i>Mono</button>
+    </div>
+  </div>
+</div>
+
+<div class="note" id="note"></div>
+
+<div class="viewport">
+<div class="stage" id="stage" data-p="kakera">
+
+<!-- ================= A · REACTOR ================= -->
+<section class="dir on d-a" data-d="a">
+<div class="win">
+  <aside class="side">
+    <div class="mark"><div class="gem"></div><span>Final<i>Macro</i></span></div>
+    <div class="navlbl">Session</div>
+    <nav class="nav">
+      <a href="#" class="sel"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 3.5v9l8-4.5-8-4.5z" stroke-linejoin="round"/></svg>Run</a>
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg>Accounts</a>
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg>Servers</a>
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg>Presets</a>
+    </nav>
+    <div class="navlbl">Review</div>
+    <nav class="nav">
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12.5V8M7 12.5V4M11 12.5v-3"/></svg>Statistics</a>
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/></svg>Debug</a>
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h8v2H4zM4 8h8v2H4zM4 12h5v2H4z"/></svg>Utilities</a>
+      <a href="#"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6.5 2.5h3l.4 2 1.8 1 1.9-.7 1.5 2.6-1.5 1.3v2l1.5 1.3-1.5 2.6-1.9-.7-1.8 1-.4 2h-3"/></svg>Settings</a>
+    </nav>
+    <div class="sidefoot"><div class="av"></div><div><b>lukazade</b><small>connected 2h14m</small></div></div>
+  </aside>
+  <main class="main">
+    <div class="selbar">
+      <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg></span><span class="tt"><span class="k">Account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+      <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg></span><span class="tt"><span class="k">Channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span></span><span class="car">▾</span></button>
+      <button class="sel preset"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></span><span class="tt"><span class="k">Preset</span><span class="v">Main — claim SR+</span></span><span class="car">▾</span></button>
+      <div class="rules"><span class="rule on">Claim</span><span class="rule on">Kakera</span><span class="rule off">Spheres</span></div>
+    </div>
+    <div class="ctlbar">
+      <button class="cbtn stop">Stop</button><button class="cbtn ghost">Disconnect</button>
+      <span class="cdiv"></span><button class="cbtn hourly">Start hourly</button><button class="cbtn">Roll $us</button>
+      <span class="cdiv"></span><span class="cgrouplbl">Checks</span>
+      <button class="cbtn">$tu</button><button class="cbtn">$us</button>
+      <span class="cdiv"></span><span class="cgrouplbl">Minigames</span>
+      <button class="cbtn">$oh</button><button class="cbtn">$oc</button><button class="cbtn">$oq</button><button class="cbtn go">Play all</button>
+    </div>
+    <div class="vitals">
+      <div class="vt phase"><div class="k">Phase</div><div class="n"><span class="pd"></span>Rolling</div><div class="sub">roll 7 of 10 · next 2.4s</div></div>
+      <div class="vt"><div class="k">Rolls left</div><div class="n ac">14<i> / 20</i></div><div class="trk"><i style="width:70%"></i></div></div>
+      <div class="vt"><div class="k">Refill</div><div class="n">47<i>m</i></div><div class="trk"><i style="width:22%;background:var(--accent2)"></i></div></div>
+      <div class="vt"><div class="k">Claim</div><div class="n gd">Ready</div><div class="trk"><i class="gd" style="width:100%"></i></div></div>
+      <div class="vt"><div class="k">Power</div><div class="n wn">68<i>% · 4 left</i></div><div class="trk"><i class="wn" style="width:68%"></i></div></div>
+      <div class="vt"><div class="k">Perk 8</div><div class="n ac">12<i> / 40</i></div><div class="trk"><i style="width:30%"></i></div></div>
+    </div>
+
+    <div class="feedrow">
+      <div class="feed">
+        <div class="fh"><span class="ti">Live feed</span>
+          <span class="fchip on">All 214</span><span class="fchip">Claims 6</span><span class="fchip">Kakera 41</span><span class="fchip">Errors 2</span></div>
+        <div class="fb">
+          <div class="ln"><span class="ts">22:14:02</span><span class="tx">sent <b>$wa</b> ×10 · interval 1.8s</span></div>
+          <div class="ln skip"><span class="ts">22:14:07</span><span class="tx">Makima · 1,411 ka · under threshold</span></div>
+          <div class="ln kak"><span class="ts">22:14:11</span><span class="tx">reacted <b>purple kakera</b> +312 ka</span></div>
+          <div class="ln skip"><span class="ts">22:14:14</span><span class="tx">Ryuk · 640 ka · under threshold</span></div>
+          <div class="ln claim"><span class="ts">22:14:19</span><span class="tx">claimed <b>Yor Forger</b> · 2,180 ka</span></div>
+          <div class="ln kak"><span class="ts">22:14:24</span><span class="tx">reacted <b>rainbow kakera</b> +540 ka</span></div>
+          <div class="ln err"><span class="ts">22:14:31</span><span class="tx">reaction failed · message deleted</span></div>
+          <div class="ln"><span class="ts">22:14:38</span><span class="tx">Levi Ackerman · 1,905 ka</span></div>
+          <div class="ln skip"><span class="ts">22:14:44</span><span class="tx">Nezuko · 1,120 ka · under threshold</span></div>
+          <div class="ln kak"><span class="ts">22:14:51</span><span class="tx">reacted <b>cyan kakera</b> +198 ka</span></div>
+          <div class="ln"><span class="ts">22:15:02</span><span class="tx">$tu → <b>14 rolls</b>, reset in 47m</span></div>
+          <div class="ln skip"><span class="ts">22:15:03</span><span class="tx">sleeping until next roll window</span></div>
+        </div>
+      </div>
+      <div class="sidecol">
+        <div class="sc claimcard">
+          <div class="h">Last claim</div>
+          <div class="cname">Yor Forger</div><div class="cser">Spy × Family</div>
+          <div class="cmeta"><b>2,180 ka</b><span class="tm">22:14:19</span></div>
+        </div>
+        <div class="sc">
+          <div class="h">Perks today</div>
+          <div class="perkrow">
+            <div class="pk">Perk 8<b class="ac">12 / 40</b></div>
+            <div class="bar"><i style="width:30%"></i></div>
+            <div class="pk">Perk 9<b>7 spheres</b></div>
+          </div>
+        </div>
+        <div class="sc" style="flex:1">
+          <div class="h">This session</div>
+          <div class="kanum">18,420 <small>ka</small></div>
+          <div class="haul3">
+            <div>Claims<b class="gd">6</b></div>
+            <div>Spheres<b>24</b></div>
+            <div>Keys<b>3</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</section>
+
+<!-- ================= B · CONSOLE ================= -->
+<section class="dir d-b" data-d="b">
+<div class="win">
+  <div class="tabs"><span class="brand"><span class="gem"></span>finalmacro</span>
+    <a href="#" class="sel">run</a><a href="#">accounts</a><a href="#">servers</a><a href="#">presets</a><a href="#">stats</a><a href="#">debug</a><a href="#">utilities</a><a href="#">settings</a>
+    <span class="rt">connected 2h14m</span></div>
+  <div class="targetline">
+    <button class="sel" style="flex:1"><span class="tt"><span class="k">account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+    <button class="sel" style="flex:1.4"><span class="tt"><span class="k">channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span></span><span class="car">▾</span></button>
+    <button class="sel preset" style="flex:1.2"><span class="tt"><span class="k">preset</span><span class="v">main — claim SR+</span></span><span class="car">▾</span></button>
+  </div>
+  <div class="statline">
+    <div class="cell"><span class="k">rolls</span><span class="v amb">14/20</span><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span></div>
+    <div class="cell"><span class="k">reset</span><span class="v">47m</span></div>
+    <div class="cell"><span class="k">claim</span><span class="v grn">ready</span></div>
+    <div class="cell"><span class="k">power</span><span class="v amb">68% · 4 left</span></div>
+    <div class="cell"><span class="k">dk</span><span class="v">3</span></div>
+    <div class="cell"><span class="k">us</span><span class="v vio">+3 · 2 stacked</span></div>
+    <div class="runstate"><span class="sq"></span>ROLLING 7/10</div>
+  </div>
+  <div class="mid">
+    <div class="console">
+      <div class="filters"><span class="on">all 214</span><span>claim 6</span><span>kakera 41</span><span>skip 158</span><span>error 2</span><span class="hint">ctrl+c copies</span></div>
+      <div class="feed">
+        <div class="l cmd"><span class="t">22:14:02</span><span class="g">$</span><span class="m">sent <b>$wa</b> ×10 · interval 1.8s ±0.4</span></div>
+        <div class="l skip"><span class="t">22:14:07</span><span class="g">·</span><span class="m">Makima — Chainsaw Man · 1,411 ka · below 2,000</span></div>
+        <div class="l kak"><span class="t">22:14:11</span><span class="g">◆</span><span class="m">reacted <b>purple</b> · +312 ka · power 74% → 68%</span></div>
+        <div class="l skip"><span class="t">22:14:14</span><span class="g">·</span><span class="m">Ryuk — Death Note · 640 ka · below 2,000</span></div>
+        <div class="l claim"><span class="t">22:14:19</span><span class="g">★</span><span class="m">claimed <b>Yor Forger</b> — Spy × Family · 2,180 ka</span></div>
+        <div class="l claim"><span class="t">22:14:19</span><span class="g">★</span><span class="m">claim consumed · next available <b>01:26</b></span></div>
+        <div class="l kak"><span class="t">22:14:24</span><span class="g">◆</span><span class="m">reacted <b>rainbow</b> · +540 ka</span></div>
+        <div class="l err"><span class="t">22:14:31</span><span class="g">!</span><span class="m">reaction failed · message deleted before click</span></div>
+        <div class="l"><span class="t">22:14:38</span><span class="g">·</span><span class="m">Levi Ackerman — Attack on Titan · 1,905 ka</span></div>
+        <div class="l skip"><span class="t">22:14:44</span><span class="g">·</span><span class="m">Nezuko — Demon Slayer · 1,120 ka · below 2,000</span></div>
+        <div class="l kak"><span class="t">22:14:51</span><span class="g">◆</span><span class="m">reacted <b>cyan</b> · +198 ka</span></div>
+        <div class="l cmd"><span class="t">22:15:02</span><span class="g">$</span><span class="m">sent <b>$tu</b> · 14 rolls · reset 47m</span></div>
+        <div class="l"><span class="t">22:15:03</span><span class="g">·</span><span class="m">sleeping until next roll window</span></div>
+        <div class="l skip"><span class="t">22:15:09</span><span class="g">·</span><span class="m">next roll window in 44m 51s</span></div>
+      </div>
+    </div>
+    <div class="rail">
+      <div class="blk claimbox">
+        <div class="n">Yor Forger</div><div class="s">Spy × Family · 2,180 ka</div>
+        <div class="m">claimed 22:14:19 · next in 3h 12m</div>
+      </div>
+      <div class="blk">
+        <div class="h">perks</div>
+        <div class="rr">perk 8<b class="ac">12/40</b></div>
+        <div class="rr">perk 9 today<b>7</b></div>
+        <div class="rr">rolls reset<b>47m</b></div>
+        <div class="rr">next claim<b>3h 12m</b></div>
+      </div>
+      <div class="divr"></div>
+      <div class="blk">
+        <div class="h">session</div>
+        <div class="rr">kakera<b class="ac">18,420</b></div>
+        <div class="rr">spheres<b>24</b></div>
+        <div class="rr">keys<b>3</b></div>
+        <div class="rr">claims<b class="gd">6</b></div>
+      </div>
+    </div>
+  </div>
+  <div class="cmdbar">
+    <button class="cap kill">Stop</button><button class="cap">Disconnect</button>
+    <button class="cap go">Start hourly</button><button class="cap">Roll $us</button>
+    <button class="cap">$tu</button><button class="cap">$us</button>
+    <button class="cap">$oh</button><button class="cap">$oc</button>
+    <button class="cap">$oq</button><button class="cap go">Play all</button>
+  </div>
+</div>
+</section>
+
+<!-- ================= C · HAUL ================= -->
+<section class="dir d-c" data-d="c">
+<div class="win">
+  <aside class="rail">
+    <div class="lg"><div class="gem"></div></div>
+    <b class="sel"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 3.5v9l8-4.5-8-4.5z" stroke-linejoin="round"/></svg></b>
+    <b><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg></b>
+    <b><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg></b>
+    <b><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></b>
+    <b><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12.5V8M7 12.5V4M11 12.5v-3"/></svg></b>
+    <b><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h8v2H4zM4 8h8v2H4zM4 12h5v2H4z"/></svg></b>
+    <b class="sp"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 2.5h3l.4 2 1.8 1 1.9-.7 1.5 2.6-1.5 1.3v2l1.5 1.3-1.5 2.6-1.9-.7-1.8 1-.4 2h-3"/></svg></b>
+  </aside>
+  <main class="main">
+    <div class="selbar">
+      <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg></span><span class="tt"><span class="k">Account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+      <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg></span><span class="tt"><span class="k">Channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span></span><span class="car">▾</span></button>
+      <button class="sel preset"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></span><span class="tt"><span class="k">Preset</span><span class="v">Main — claim SR+</span></span><span class="car">▾</span></button>
+    </div>
+    <div class="ctlbar">
+      <button class="cbtn stop">Stop</button><button class="cbtn ghost">Disconnect</button>
+      <span class="cdiv"></span><button class="cbtn hourly">Start hourly</button><button class="cbtn">Roll $us</button>
+      <span class="cdiv"></span><span class="cgrouplbl">Checks</span>
+      <button class="cbtn">$tu</button><button class="cbtn">$us</button>
+      <span class="cdiv"></span><span class="cgrouplbl">Minigames</span>
+      <button class="cbtn">$oh</button><button class="cbtn">$oc</button><button class="cbtn">$oq</button><button class="cbtn go">Play all</button>
+    </div>
+    <div class="vitals">
+      <div class="vt phase"><div class="k">Phase</div><div class="n"><span class="pd"></span>Rolling</div><div class="sub">7 of 10 · next 2.4s</div></div>
+      <div class="vt"><div class="k">Rolls</div><div class="n ac">14<i>/20</i></div><div class="trk"><i style="width:70%"></i></div></div>
+      <div class="vt"><div class="k">Refill</div><div class="n">47<i>m</i></div><div class="trk"><i style="width:22%;background:var(--accent2)"></i></div></div>
+      <div class="vt"><div class="k">Claim</div><div class="n gd">Ready</div><div class="trk"><i class="gd" style="width:100%"></i></div></div>
+      <div class="vt"><div class="k">Power</div><div class="n wn">68<i>% · 4</i></div><div class="trk"><i class="wn" style="width:68%"></i></div></div>
+    </div>
+    <div class="feedrow">
+      <div class="feedcard">
+        <div class="ch"><b>Live feed</b><div class="f"><i class="on">All 214</i><i>Claims 6</i><i>Kakera 41</i><i>Errors 2</i></div></div>
+        <div class="fb">
+          <div class="e"><span class="dt"></span><span class="tx">Sent <b>$wa</b> ×10 · interval 1.8s</span><span class="tm">22:14:02</span></div>
+          <div class="e"><span class="dt"></span><span class="tx">Rolled <b>Makima</b> · 1,411 ka · under threshold</span><span class="tm">22:14:07</span></div>
+          <div class="e kak"><span class="dt"></span><span class="tx">Reacted <b>purple kakera</b> · +312 ka</span><span class="tm">22:14:11</span></div>
+          <div class="e"><span class="dt"></span><span class="tx">Rolled <b>Ryuk</b> · 640 ka · under threshold</span><span class="tm">22:14:14</span></div>
+          <div class="e claim"><span class="dt"></span><span class="tx">Claimed <b>Yor Forger</b> · 2,180 ka</span><span class="tm">22:14:19</span></div>
+          <div class="e kak"><span class="dt"></span><span class="tx">Reacted <b>rainbow kakera</b> · +540 ka</span><span class="tm">22:14:24</span></div>
+          <div class="e err"><span class="dt"></span><span class="tx">Reaction failed — message deleted</span><span class="tm">22:14:31</span></div>
+          <div class="e"><span class="dt"></span><span class="tx">Rolled <b>Levi Ackerman</b> · 1,905 ka</span><span class="tm">22:14:38</span></div>
+          <div class="e kak"><span class="dt"></span><span class="tx">Reacted <b>cyan kakera</b> · +198 ka</span><span class="tm">22:14:51</span></div>
+          <div class="e"><span class="dt"></span><span class="tx">Checked <b>$tu</b> · 14 rolls, reset 47m</span><span class="tm">22:15:02</span></div>
+        </div>
+      </div>
+      <div class="sidecol">
+        <div class="sc haulcard">
+          <div class="h">This session</div>
+          <div class="kanum">18,420</div>
+          <div class="haul3">
+            <div>Claims<b class="gd">6</b></div>
+            <div>Spheres<b>24</b></div>
+            <div>Keys<b>3</b></div>
+          </div>
+        </div>
+        <div class="sc claimcard">
+          <div class="h">Last claim</div>
+          <div class="cname">Yor Forger</div><div class="cser">Spy × Family</div>
+          <div class="cmeta"><b>2,180 ka</b><span class="tm">22:14:19</span></div>
+        </div>
+        <div class="sc" style="flex:1">
+          <div class="h">Perks today</div>
+          <div class="perkrow">
+            <div class="pk">Perk 8<b class="ac">12 / 40</b></div>
+            <div class="bar"><i style="width:30%"></i></div>
+            <div class="pk">Perk 9<b>7 spheres</b></div>
+          </div>
+          <div class="tr" style="margin-top:10px"><span class="bd"></span>Rolls reset<b class="ac">47m</b></div>
+          <div class="tr"><span class="bd"></span>Next claim<b>3h 12m</b></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</section>
+
+<!-- ================= D · QUIET ================= -->
+<section class="dir d-d" data-d="d">
+<div class="win">
+  <div class="nav"><span class="lg">FinalMacro</span>
+    <a href="#" class="sel">Run</a><a href="#">Accounts</a><a href="#">Servers</a><a href="#">Presets</a><a href="#">Statistics</a><a href="#">Debug</a><a href="#">Utilities</a><a href="#">Settings</a>
+    <span class="rt">connected 2h 14m</span></div>
+  <div class="targets">
+    <div class="tg"><span>Account</span><b>lukazade</b></div>
+    <div class="tg"><span>Channel</span><b>Kakera Kingdom · #mudae-rolls</b></div>
+    <div class="tg p"><span>Preset</span><b>Main — claim SR+</b></div>
+  </div>
+  <div class="nums">
+    <div><div class="n">14<em> / 20</em></div><div class="nl">rolls remaining · refills in 47m</div></div>
+    <div class="f">
+      <div><span>Claim</span><b class="ac">Ready</b></div>
+      <div><span>Power</span><b>68% · 4 left</b></div>
+      <div><span>Perk 8</span><b>12 / 40</b></div>
+    </div>
+    <div class="st"><i></i>Rolling — 7 of 10, next 2.4s</div>
+  </div>
+  <div class="acts">
+    <button class="stop">Stop</button><button>Disconnect</button>
+    <button class="go">Start hourly</button><button>Roll $us</button>
+    <span class="lbl">Checks</span><button>$tu</button><button>$us</button>
+    <span class="lbl">Minigames</span><button>$oh</button><button>$oc</button><button>$oq</button><button>Play all</button>
+  </div>
+  <div class="feedrow">
+    <div class="feed">
+      <div class="r"><span class="t">22:14:02</span><span class="m">Sent <b>$wa</b> ×10 — interval 1.8s ±0.4</span></div>
+      <div class="r q"><span class="t">22:14:07</span><span class="m">Makima — 1,411 ka, under threshold</span></div>
+      <div class="r hit"><span class="t">22:14:11</span><span class="m">Reacted <b>purple kakera</b> — +312 ka</span></div>
+      <div class="r q"><span class="t">22:14:14</span><span class="m">Ryuk — 640 ka, under threshold</span></div>
+      <div class="r"><span class="t">22:14:19</span><span class="m">Claimed <b>Yor Forger</b> — 2,180 ka</span></div>
+      <div class="r hit"><span class="t">22:14:24</span><span class="m">Reacted <b>rainbow kakera</b> — +540 ka</span></div>
+      <div class="r err"><span class="t">22:14:31</span><span class="m">Reaction failed — message deleted</span></div>
+      <div class="r"><span class="t">22:14:38</span><span class="m">Levi Ackerman — 1,905 ka</span></div>
+      <div class="r q"><span class="t">22:14:44</span><span class="m">Nezuko — 1,120 ka, under threshold</span></div>
+      <div class="r hit"><span class="t">22:14:51</span><span class="m">Reacted <b>cyan kakera</b> — +198 ka</span></div>
+      <div class="r"><span class="t">22:15:02</span><span class="m">Checked <b>$tu</b> — 14 rolls, reset in 47m</span></div>
+      <div class="r q"><span class="t">22:15:03</span><span class="m">Sleeping until next roll window</span></div>
+    </div>
+    <div class="sidecol">
+      <div class="sc claimcard">
+        <div class="h">Last claim</div>
+        <div class="cname">Yor Forger</div><div class="cser">Spy × Family</div>
+        <div class="cmeta"><b>2,180 ka</b><span class="tm">22:14:19</span></div>
+      </div>
+      <div class="sc">
+        <div class="h">Perks today</div>
+        <div class="perkrow">
+          <div class="pk">Perk 8<b class="ac">12 / 40</b></div>
+          <div class="bar"><i style="width:30%"></i></div>
+          <div class="pk">Perk 9<b>7 spheres</b></div>
+        </div>
+      </div>
+      <div class="sc">
+        <div class="h">This session</div>
+        <div class="kanum">18,420 <small>ka</small></div>
+        <div class="haul3">
+          <div>Claims<b>6</b></div>
+          <div>Spheres<b>24</b></div>
+          <div>Keys<b>3</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= E · PANES ================= -->
+<section class="dir d-e" data-d="e">
+<div class="win">
+  <div class="wbar">
+    <span class="br"><span class="gem"></span>finalmacro</span>
+    <a href="#" class="sel"><i>0</i>run</a><a href="#"><i>1</i>accounts</a><a href="#"><i>2</i>servers</a>
+    <a href="#"><i>3</i>presets</a><a href="#"><i>4</i>stats</a><a href="#"><i>5</i>debug</a><a href="#"><i>6</i>utilities</a><a href="#"><i>7</i>settings</a>
+    <span class="rr">connected 2h 14m</span>
+  </div>
+  <div class="top">
+    <div class="lf">
+      <div class="pane act" style="flex:1"><span class="ti">0.0: live feed</span>
+        <div class="body lg">
+          <div class="r cm"><span class="t">22:14:02</span><span class="g">$</span><span class="m">sent <b>$wa</b> ×10 · interval 1.8s ±0.4</span></div>
+          <div class="r sk"><span class="t">22:14:07</span><span class="g">·</span><span class="m">Makima — Chainsaw Man · 1,411 ka · below 2,000</span></div>
+          <div class="r kk"><span class="t">22:14:11</span><span class="g">◆</span><span class="m">reacted <b>purple</b> · +312 ka · power 74% → 68%</span></div>
+          <div class="r sk"><span class="t">22:14:14</span><span class="g">·</span><span class="m">Ryuk — Death Note · 640 ka · below 2,000</span></div>
+          <div class="r hit"><span class="t">22:14:19</span><span class="g">★</span><span class="m">claimed <b>Yor Forger</b> — Spy × Family · 2,180 ka</span></div>
+          <div class="r hit"><span class="t">22:14:19</span><span class="g">★</span><span class="m">claim consumed · next available <b>01:26</b></span></div>
+          <div class="r kk"><span class="t">22:14:24</span><span class="g">◆</span><span class="m">reacted <b>rainbow</b> · +540 ka</span></div>
+          <div class="r er"><span class="t">22:14:31</span><span class="g">!</span><span class="m">reaction failed · message deleted before click</span></div>
+          <div class="r"><span class="t">22:14:38</span><span class="g">·</span><span class="m">Levi Ackerman — Attack on Titan · 1,905 ka</span></div>
+          <div class="r sk"><span class="t">22:14:44</span><span class="g">·</span><span class="m">Nezuko — Demon Slayer · 1,120 ka · below 2,000</span></div>
+          <div class="r kk"><span class="t">22:14:51</span><span class="g">◆</span><span class="m">reacted <b>cyan</b> · +198 ka</span></div>
+          <div class="r cm"><span class="t">22:15:02</span><span class="g">$</span><span class="m">sent <b>$tu</b> · 14 rolls · reset 47m</span></div>
+          <div class="r"><span class="t">22:15:03</span><span class="g">·</span><span class="m">sleeping until next roll window</span></div>
+        </div>
+      </div>
+      <div class="pane" style="flex:none"><span class="ti">0.1: controls</span>
+        <div class="body">
+          <div class="btnr" style="grid-template-columns:repeat(4,1fr)">
+            <button class="kill">Stop</button><button>Disconnect</button><button class="go">Start hourly</button><button>Roll $us</button>
+            <button>$tu</button><button>$us</button><button>$oh</button><button class="go">Play all</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="rt">
+      <div class="pane"><span class="ti">0.2: target</span>
+        <div class="body">
+          <div class="selbar">
+            <button class="sel"><span class="tt"><span class="k">account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+            <button class="sel"><span class="tt"><span class="k">channel</span><span class="v">#mudae-rolls</span></span><span class="car">▾</span></button>
+            <button class="sel preset"><span class="tt"><span class="k">preset</span><span class="v">main — claim SR+</span></span><span class="car">▾</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="pane grow"><span class="ti">0.3: session</span>
+        <div class="body">
+          <div class="lastclaim"><div class="n">★ Yor Forger</div><div class="s">Spy × Family · 2,180 ka · 22:14:19</div></div>
+          <div class="kv"><span>rolls</span><span class="bars"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span><b class="ac">14/20</b></div>
+          <div class="kv"><span>rolls reset</span><b>47m</b></div>
+          <div class="kv"><span>claim</span><b class="gd">ready</b></div>
+          <div class="kv"><span>next claim</span><b>3h 12m</b></div>
+          <div class="kv"><span>power</span><b class="wn">68% · 4</b></div>
+          <div class="kv"><span>perk 8</span><b class="ac">12/40</b></div>
+          <div class="kv"><span>perk 9 today</span><b>7</b></div>
+          <div class="divr"></div>
+          <div class="kv"><span>session ka</span><b class="ac">18,420</b></div>
+          <div class="kv"><span>spheres / keys</span><b>24 / 3</b></div>
+          <div class="kv"><span>claims</span><b class="gd">6</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="statusbar"><span class="seg">ROLLING 7/10</span>
+    <span class="mid"><span>rolls <em>14/20</em></span><span>reset <em>47m</em></span><span>claim <em>ready</em></span><span>power <em>68%</em></span><span>ka <em>18,420</em></span><span>preset <em>main:SR+</em></span></span>
+    <span class="seg">22:15:09</span></div>
+</div>
+</section>
+
+<!-- ================= F · METERS ================= -->
+<section class="dir d-f" data-d="f">
+<div class="win">
+  <div class="bar1"><span class="n">finalmacro 2.4</span>
+    <div class="tabs"><a href="#" class="sel">run</a><a href="#">accounts</a><a href="#">servers</a><a href="#">presets</a><a href="#">stats</a><a href="#">debug</a><a href="#">utilities</a><a href="#">settings</a>
+      <span class="rr">connected 2h 14m</span></div></div>
+  <div class="targetline">
+    <button class="sel" style="flex:1"><span class="tt"><span class="k">account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+    <button class="sel" style="flex:1.4"><span class="tt"><span class="k">channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span></span><span class="car">▾</span></button>
+    <button class="sel preset" style="flex:1.2"><span class="tt"><span class="k">preset</span><span class="v">main — claim SR+</span></span><span class="car">▾</span></button>
+  </div>
+  <div class="meters">
+    <div class="mtr"><span class="k">rolls</span><span class="br">[<span class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="alt"></i><i class="alt"></i><i class="alt"></i><i></i><i></i><i></i><i></i><i></i><i></i></span>]</span><span class="v">14/20</span></div>
+    <div class="mtr"><span class="k">power</span><span class="br">[<span class="track"><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i class="wn"></i><i></i><i></i><i></i><i></i><i></i><i></i></span>]</span><span class="v">68% <small>4</small></span></div>
+    <div class="mtr"><span class="k">claim</span><span class="br">[<span class="track"><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i><i class="gd"></i></span>]</span><span class="v">ready</span></div>
+    <div class="mtr"><span class="k">reset</span><span class="br">[<span class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>]</span><span class="v">47m</span></div>
+    <div class="mtr"><span class="k">dk stock</span><span class="br">[<span class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>]</span><span class="v">3 <small>/20</small></span></div>
+    <div class="mtr"><span class="k">perk 8</span><span class="br">[<span class="track"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>]</span><span class="v">12 <small>/40</small></span></div>
+  </div>
+  <div class="mid">
+    <div class="tbl">
+      <div class="th"><span>TIME</span><span>EVENT</span><span>KAKERA</span><span>DETAIL</span></div>
+      <div class="rows">
+        <div class="rw"><span>22:14:02</span><span>command</span><span>—</span><span>$wa ×10 · interval 1.8s ±0.4</span></div>
+        <div class="rw sk"><span>22:14:07</span><span>skip</span><span>1,411</span><span>Makima — Chainsaw Man · below 2,000</span></div>
+        <div class="rw kk"><span>22:14:11</span><span>react</span><span>+312</span><span>purple kakera · power 74% → 68%</span></div>
+        <div class="rw sk"><span>22:14:14</span><span>skip</span><span>640</span><span>Ryuk — Death Note · below 2,000</span></div>
+        <div class="rw hit"><span>22:14:19</span><span>claim</span><span>2,180</span><span>Yor Forger — Spy × Family</span></div>
+        <div class="rw kk"><span>22:14:24</span><span>react</span><span>+540</span><span>rainbow kakera</span></div>
+        <div class="rw er"><span>22:14:31</span><span>error</span><span>—</span><span>reaction failed · message deleted</span></div>
+        <div class="rw sel"><span>22:14:38</span><span>roll</span><span>1,905</span><span>Levi Ackerman — Attack on Titan</span></div>
+        <div class="rw sk"><span>22:14:44</span><span>skip</span><span>1,120</span><span>Nezuko — Demon Slayer · below 2,000</span></div>
+        <div class="rw kk"><span>22:14:51</span><span>react</span><span>+198</span><span>cyan kakera</span></div>
+        <div class="rw"><span>22:15:02</span><span>command</span><span>—</span><span>$tu · 14 rolls · reset 47m</span></div>
+        <div class="rw"><span>22:15:03</span><span>idle</span><span>—</span><span>sleeping until next roll window</span></div>
+        <div class="rw sk"><span>22:15:09</span><span>idle</span><span>—</span><span>next roll window in 44m 51s</span></div>
+      </div>
+    </div>
+    <div class="rail">
+      <div class="cb"><div class="n">★ Yor Forger</div><div class="s">Spy × Family · 2,180 ka · 22:14:19</div></div>
+      <div>
+        <div class="h">perks</div>
+        <div class="rr">perk 8<b class="ac">12/40</b></div>
+        <div class="rr">perk 9 today<b>7</b></div>
+        <div class="rr">rolls reset<b>47m</b></div>
+        <div class="rr">next claim<b>3h 12m</b></div>
+      </div>
+      <div class="divr"></div>
+      <div>
+        <div class="h">session</div>
+        <div class="rr">kakera<b class="ac">18,420</b></div>
+        <div class="rr">spheres<b>24</b></div>
+        <div class="rr">keys<b>3</b></div>
+        <div class="rr">claims<b class="gd">6</b></div>
+      </div>
+    </div>
+  </div>
+  <div class="fkeys">
+    <span class="fk"><u>F1</u><b>$tu</b></span><span class="fk"><u>F2</u><b>$us</b></span><span class="fk"><u>F3</u><b>Hourly</b></span>
+    <span class="fk"><u>F4</u><b>Roll $us</b></span><span class="fk"><u>F5</u><b>$oh</b></span><span class="fk"><u>F6</u><b>$oc</b></span>
+    <span class="fk"><u>F7</u><b>$oq</b></span><span class="fk"><u>F8</u><b>PlayAll</b></span><span class="fk kill"><u>F10</u><b>Stop</b></span><span class="fill"></span>
+  </div>
+</div>
+</section>
+
+<!-- ================= G · BOXED ================= -->
+<section class="dir d-g" data-d="g">
+<div class="win">
+  <div class="tbar"><span>FinalMacro — Run</span><span class="x">[ ─ ] [ □ ] [ × ]</span></div>
+  <div class="mbar">
+    <a href="#" class="sel"><u>R</u>un</a><a href="#"><u>A</u>ccounts</a><a href="#"><u>S</u>ervers</a>
+    <a href="#"><u>P</u>resets</a><a href="#">S<u>t</u>ats</a><a href="#"><u>D</u>ebug</a><a href="#"><u>U</u>tilities</a><a href="#">Se<u>t</u>tings</a>
+    <span class="rr">connected 2h 14m</span></div>
+  <div class="desk">
+    <div class="box" style="flex:none"><span class="cap">Target</span>
+      <div class="in">
+        <div class="comborow">
+          <button class="combo"><span class="k">Account</span><span class="v">lukazade</span><span class="ar">▼</span></button>
+          <button class="combo" style="flex:1.4"><span class="k">Channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span><span class="ar">▼</span></button>
+          <button class="combo" style="flex:1.2"><span class="k">Preset</span><span class="v">Main — claim SR+</span><span class="ar">▼</span></button>
+        </div>
+        <div class="rules" style="margin-top:9px"><span class="rule on">Claim</span><span class="rule on">Kakera</span><span class="rule off">Spheres</span></div>
+      </div>
+    </div>
+    <div class="box" style="flex:none"><span class="cap">Controls</span>
+      <div class="in"><div class="pad">
+        <button class="kill">Stop</button><button>Disconnect</button>
+        <button class="hourly">Start hourly</button><button>Roll $us</button>
+        <button>$tu</button><button>$us</button><button>$oh</button><button>$oc</button><button>$oq</button><button class="go">Play all</button>
+      </div></div>
+    </div>
+    <div class="lowrow">
+      <div class="box feedbox hot"><span class="cap">Live feed</span>
+        <div class="in lines">
+          <div class="r"><span class="t">22:14:02</span><span class="m">Sent <b>$wa</b> ×10 · interval 1.8s</span></div>
+          <div class="r sk"><span class="t">22:14:07</span><span class="m">Makima — 1,411 ka · below threshold</span></div>
+          <div class="r kk"><span class="t">22:14:11</span><span class="m">Reacted <b>purple kakera</b> · +312 ka</span></div>
+          <div class="r sk"><span class="t">22:14:14</span><span class="m">Ryuk — 640 ka · below threshold</span></div>
+          <div class="r hit"><span class="t">22:14:19</span><span class="m">CLAIMED <b>Yor Forger</b> — 2,180 ka</span></div>
+          <div class="r kk"><span class="t">22:14:24</span><span class="m">Reacted <b>rainbow kakera</b> · +540 ka</span></div>
+          <div class="r er"><span class="t">22:14:31</span><span class="m">Reaction failed — message deleted</span></div>
+          <div class="r"><span class="t">22:14:38</span><span class="m">Levi Ackerman — 1,905 ka</span></div>
+          <div class="r sk"><span class="t">22:14:44</span><span class="m">Nezuko — 1,120 ka · below threshold</span></div>
+          <div class="r kk"><span class="t">22:14:51</span><span class="m">Reacted <b>cyan kakera</b> · +198 ka</span></div>
+          <div class="r"><span class="t">22:15:02</span><span class="m">Checked <b>$tu</b> — 14 rolls, reset 47m</span></div>
+          <div class="r sk"><span class="t">22:15:03</span><span class="m">Sleeping until next roll window</span></div>
+        </div>
+      </div>
+      <div class="sidebox">
+        <div class="box"><span class="cap">Resources</span>
+          <div class="in">
+            <div class="stat"><span>Rolls</span><span><span class="blk">███████████<s>█████████</s></span> <b class="ac">14/20</b></span></div>
+            <div class="stat"><span>Rolls reset</span><b>47m</b></div>
+            <div class="stat"><span>Claim</span><b class="gd">Ready now</b></div>
+            <div class="stat"><span>Next claim</span><b>3h 12m</b></div>
+            <div class="stat"><span>Power</span><b>68% — 4 left</b></div>
+            <div class="stat"><span>Perk 8</span><b class="ac">12 / 40</b></div>
+            <div class="stat"><span>Perk 9 today</span><b>7</b></div>
+          </div>
+        </div>
+        <div class="box" style="flex:1"><span class="cap">Session</span>
+          <div class="in">
+            <div class="stat"><span>Last claim</span><b class="gd">Yor Forger</b></div>
+            <div class="stat"><span>Kakera</span><b class="ac">18,420 ka</b></div>
+            <div class="stat"><span>Spheres / keys</span><b>24 / 3</b></div>
+            <div class="stat"><span>Claims</span><b class="gd">6</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="sbar"><span><u>F3</u> Preset</span><span><u>F5</u> Minigames</span><span><u>F9</u> Disconnect</span><span><u>F10</u> Stop</span><span style="margin-left:auto">ROLLING · 22:15:09</span></div>
+</div>
+</section>
+
+<!-- ================= H · DOCK ================= -->
+<section class="dir d-h" data-d="h">
+<div class="win">
+  <div class="chrome">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <span class="ttl">Run — lukazade</span>
+    <div class="seg"><button class="on">Live</button><button>History</button><button>Rules</button></div>
+  </div>
+  <div class="body">
+    <aside class="sb">
+      <div class="gp">Session</div>
+      <a href="#" class="sel"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 3.5v9l8-4.5-8-4.5z" stroke-linejoin="round"/></svg></span>Run</a>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg></span>Accounts<span class="cnt">2</span></a>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg></span>Servers<span class="cnt">4</span></a>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></span>Presets<span class="cnt">3</span></a>
+      <div class="gp">Review</div>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12.5V8M7 12.5V4M11 12.5v-3"/></svg></span>Statistics</a>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/></svg></span>Debug</a>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h8v2H4zM4 8h8v2H4zM4 12h5v2H4z"/></svg></span>Utilities</a>
+      <a href="#"><span class="sq"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6.5 2.5h3l.4 2 1.8 1 1.9-.7 1.5 2.6-1.5 1.3v2l1.5 1.3-1.5 2.6-1.9-.7-1.8 1-.4 2h-3"/></svg></span>Settings</a>
+    </aside>
+    <div class="content">
+      <div class="selbar">
+        <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg></span><span class="tt"><span class="k">Account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+        <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg></span><span class="tt"><span class="k">Channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span></span><span class="car">▾</span></button>
+        <button class="sel preset"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></span><span class="tt"><span class="k">Preset</span><span class="v">Main — claim SR+</span></span><span class="car">▾</span></button>
+      </div>
+      <div class="dock">
+        <button class="kill">Stop</button><button>Disconnect</button>
+        <div class="div"></div><button class="hourly">Start hourly</button><button>Roll $us</button>
+        <div class="div"></div><span class="lb">Checks</span><button>$tu</button><button>$us</button>
+        <div class="div"></div><span class="lb">Minigames</span><button>$oh</button><button>$oc</button><button>$oq</button><button>Play all</button>
+      </div>
+      <div class="vitals">
+        <div class="vt phase"><div class="k">Phase</div><div class="n"><span class="pd"></span>Rolling</div><div class="sub">7 of 10 · next 2.4s</div></div>
+        <div class="vt"><div class="k">Rolls left</div><div class="n ac">14<i> / 20</i></div><div class="trk"><i style="width:70%"></i></div></div>
+        <div class="vt"><div class="k">Refill</div><div class="n">47<i>m</i></div><div class="trk"><i style="width:22%;background:var(--accent2)"></i></div></div>
+        <div class="vt"><div class="k">Claim</div><div class="n gd">Ready</div><div class="trk"><i class="gd" style="width:100%"></i></div></div>
+        <div class="vt"><div class="k">Power</div><div class="n wn">68<i>% · 4</i></div><div class="trk"><i class="wn" style="width:68%"></i></div></div>
+      </div>
+      <div class="feedrow">
+        <div class="recent">
+          <div class="rh"><b>Live feed</b><div class="sg"><i class="on">All</i><i>Claims</i><i>Kakera</i><i>Errors</i></div></div>
+          <div class="rb">
+            <div class="rr"><span class="m">Sent <b>$wa</b> ×10 — interval 1.8s</span><span class="tm">22:14:02</span></div>
+            <div class="rr"><span class="m">Rolled <b>Makima</b> — 1,411 ka, under threshold</span><span class="tm">22:14:07</span></div>
+            <div class="rr ac"><span class="m">Reacted <b>purple kakera</b> — +312 ka</span><span class="tm">22:14:11</span></div>
+            <div class="rr"><span class="m">Rolled <b>Ryuk</b> — 640 ka, under threshold</span><span class="tm">22:14:14</span></div>
+            <div class="rr gd"><span class="m">Claimed <b>Yor Forger</b> — 2,180 ka</span><span class="tm">22:14:19</span></div>
+            <div class="rr ac"><span class="m">Reacted <b>rainbow kakera</b> — +540 ka</span><span class="tm">22:14:24</span></div>
+            <div class="rr er"><span class="m">Reaction failed — message deleted</span><span class="tm">22:14:31</span></div>
+            <div class="rr"><span class="m">Rolled <b>Levi Ackerman</b> — 1,905 ka</span><span class="tm">22:14:38</span></div>
+            <div class="rr ac"><span class="m">Reacted <b>cyan kakera</b> — +198 ka</span><span class="tm">22:14:51</span></div>
+            <div class="rr"><span class="m">Checked <b>$tu</b> — 14 rolls, reset in 47m</span><span class="tm">22:15:02</span></div>
+          </div>
+        </div>
+        <div class="sidecol">
+          <div class="sc claimcard">
+            <div class="h">Last claim</div>
+            <div class="cname">Yor Forger</div><div class="cser">Spy × Family</div>
+            <div class="cmeta"><b>2,180 ka</b><span class="tm">22:14:19</span></div>
+          </div>
+          <div class="sc">
+            <div class="h">Perks today</div>
+            <div class="perkrow">
+              <div class="pk">Perk 8<b class="ac">12 / 40</b></div>
+              <div class="bar"><i style="width:30%"></i></div>
+              <div class="pk">Perk 9<b>7 spheres</b></div>
+            </div>
+          </div>
+          <div class="sc" style="flex:1">
+            <div class="h">This session</div>
+            <div class="kanum">18,420 <small>ka</small></div>
+            <div class="haul3">
+              <div>Claims<b class="gd">6</b></div>
+              <div>Spheres<b>24</b></div>
+              <div>Keys<b>3</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= I · BENTO ================= -->
+<section class="dir d-i" data-d="i">
+<div class="win">
+  <div class="topbar">
+    <div class="av"></div>
+    <h2>FinalMacro<span>connected 2h 14m · rolling 7 of 10</span></h2>
+    <div class="seg"><span class="on">Live</span><span>Hour</span><span>Session</span></div>
+  </div>
+  <div class="tabsrow">
+    <a href="#" class="sel">Run</a><a href="#">Accounts</a><a href="#">Servers</a>
+    <a href="#">Presets</a><a href="#">Statistics</a><a href="#">Debug</a><a href="#">Utilities</a><a href="#">Settings</a>
+  </div>
+  <div class="inner">
+    <div class="selbar">
+      <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4"/></svg></span><span class="tt"><span class="k">Account</span><span class="v">lukazade</span></span><span class="car">▾</span></button>
+      <button class="sel"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="3" width="11" height="10" rx="2"/><path d="M2.5 6.5h11"/></svg></span><span class="tt"><span class="k">Channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span></span><span class="car">▾</span></button>
+      <button class="sel preset"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 4.5h10M3 8h10M3 11.5h6"/></svg></span><span class="tt"><span class="k">Preset</span><span class="v">Main — claim SR+</span></span><span class="car">▾</span></button>
+    </div>
+    <div class="bento">
+      <div class="t acc"><div class="grip"><i></i><i></i><i></i><i></i></div><div class="k">Rolls left</div><div class="v">14 <small>/ 20</small></div>
+        <div class="ticks"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="alt"></i><i class="alt"></i><i class="alt"></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="sub">refills in 47m</div></div>
+      <div class="t"><div class="grip"><i></i><i></i><i></i><i></i></div><div class="k">Claim</div><div class="v" style="color:var(--good)">Ready</div><div class="sub">next in 3h 12m</div></div>
+      <div class="t"><div class="grip"><i></i><i></i><i></i><i></i></div><div class="k">Reaction power</div><div class="v">68<small>%</small></div><div class="sub">4 reacts left · dk 3</div></div>
+      <div class="t"><div class="grip"><i></i><i></i><i></i><i></i></div><div class="k">Phase</div><div class="v" style="font-size:18px;color:var(--accent)">Rolling</div><div class="sub">7 of 10 · next 2.4s</div></div>
+
+      <div class="t feedtile"><div class="grip"><i></i><i></i><i></i><i></i></div>
+        <div class="fhd"><b>Live feed</b><div class="fl"><i class="on">All</i><i>Claims</i><i>Kakera</i><i>Errors</i></div></div>
+        <div class="feed">
+          <div class="r"><i></i><span class="m">Sent <b>$wa</b> ×10</span><span class="tm">14:02</span></div>
+          <div class="r"><i></i><span class="m">Rolled <b>Makima</b> — 1,411 ka</span><span class="tm">14:07</span></div>
+          <div class="r ac"><i></i><span class="m">Reacted <b>purple</b> — +312 ka</span><span class="tm">14:11</span></div>
+          <div class="r"><i></i><span class="m">Rolled <b>Ryuk</b> — 640 ka</span><span class="tm">14:14</span></div>
+          <div class="r gd"><i></i><span class="m">Claimed <b>Yor Forger</b> — 2,180 ka</span><span class="tm">14:19</span></div>
+          <div class="r ac"><i></i><span class="m">Reacted <b>rainbow</b> — +540 ka</span><span class="tm">14:24</span></div>
+          <div class="r er"><i></i><span class="m">Reaction failed — deleted</span><span class="tm">14:31</span></div>
+          <div class="r"><i></i><span class="m">Rolled <b>Levi Ackerman</b> — 1,905 ka</span><span class="tm">14:38</span></div>
+          <div class="r"><i></i><span class="m">Rolled <b>Nezuko</b> — 1,120 ka</span><span class="tm">14:44</span></div>
+          <div class="r ac"><i></i><span class="m">Reacted <b>cyan</b> — +198 ka</span><span class="tm">14:51</span></div>
+          <div class="r"><i></i><span class="m">Checked <b>$tu</b> — reset 47m</span><span class="tm">15:02</span></div>
+        </div>
+      </div>
+
+      <div class="t kaktile"><div class="grip"><i></i><i></i><i></i><i></i></div>
+        <div class="k">This session</div><div class="v">18,420 <small>ka</small></div>
+        <div class="spark">
+          <svg viewBox="0 0 300 100" preserveAspectRatio="none">
+            <defs><linearGradient id="sg3" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity=".38"/>
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0,96 L0,84 L25,80 L50,72 L75,74 L100,58 L125,52 L150,54 L175,38 L200,30 L225,33 L250,18 L275,12 L300,6 L300,96 Z" fill="url(#sg3)"/>
+            <polyline points="0,84 25,80 50,72 75,74 100,58 125,52 150,54 175,38 200,30 225,33 250,18 275,12 300,6" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+            <circle cx="300" cy="6" r="3.5" fill="var(--accent)"/>
+          </svg>
+        </div>
+        <div class="haul3">
+          <div>Claims<b class="gd">6</b></div>
+          <div>Spheres<b>24</b></div>
+          <div>Keys<b>3</b></div>
+        </div>
+      </div>
+
+      <div class="t timetile"><div class="grip"><i></i><i></i><i></i><i></i></div>
+        <div class="k">Timers</div>
+        <div style="margin-top:7px">
+          <div class="tl">Rolls reset<b>47m</b></div>
+          <div class="tl">Claim ready<b class="gd">now</b></div>
+          <div class="tl">Next claim<b>3h 12m</b></div>
+          <div class="tl">Perk 8<b class="ac">12 / 40</b></div>
+          <div class="tl">Perk 9 today<b>7</b></div>
+        </div>
+        <div class="lastc">
+          <div class="k">Last claim</div>
+          <div class="nm">Yor Forger</div>
+          <div class="sr">Spy × Family · 2,180 ka</div>
+        </div>
+      </div>
+
+      <div class="t ctltile">
+        <button class="kill">Stop</button><button>Disconnect</button>
+        <button class="hourly">Start hourly</button><button>Roll $us</button>
+        <span class="dv"></span><span class="lb">Checks</span><button>$tu</button><button>$us</button>
+        <span class="dv"></span><span class="lb">Minigames</span><button>$oh</button><button>$oc</button><button>$oq</button><button class="go">Play all</button>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ================= J · REMOTE ================= -->
+<section class="dir d-j" data-d="j">
+<div class="win">
+  <div class="blurb">
+    <div class="k">Headless / remote</div>
+    <h3>The same run page, sized for a thumb</h3>
+    <p>If the macro ends up on your home server, this is the surface you use day to day — a browser tab on your phone, no desktop session needed.</p>
+    <ul>
+      <li><span class="gem"></span>Target rows are tappable and open a picker sheet</li>
+      <li><span class="gem"></span>Hourly, Roll $us, and Stop sit on the first row — the three actions you actually hit</li>
+      <li><span class="gem"></span>Perk 8/9 and session haul replace the extra preset pills</li>
+    </ul>
+  </div>
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="ph-top"><div class="row"><h2>Run</h2><span class="st"><i></i>Rolling 7/10</span></div></div>
+    <div class="tcard">
+      <div class="tr"><span class="k">Account</span><span class="v">lukazade</span><span class="ar">›</span></div>
+      <div class="tr"><span class="k">Channel</span><span class="v">Kakera Kingdom · #mudae-rolls</span><span class="ar">›</span></div>
+      <div class="tr p"><span class="k">Preset</span><span class="v">Main — claim SR+</span><span class="ar">›</span></div>
+    </div>
+    <div class="acts">
+      <button class="kill">Stop</button>
+      <button>Disconnect</button>
+      <button class="hourly">Start hourly</button>
+      <button>Roll $us</button>
+    </div>
+    <div class="kpis">
+      <div><span>Rolls</span><b class="ac">14/20</b></div>
+      <div><span>Claim</span><b class="gd">Ready</b></div>
+      <div><span>Perk 8</span><b class="ac">12/40</b></div>
+      <div><span>Perk 9</span><b>7</b></div>
+    </div>
+    <div class="ph-feed">
+      <div class="h">Session · 6 claims<em>18,420 ka · 24 sp · 3 keys</em></div>
+      <div class="r ac"><i></i><span class="m">Reacted <b>cyan</b> +198</span><span class="tm">22:14</span></div>
+      <div class="r er"><i></i><span class="m">Reaction failed — deleted</span><span class="tm">22:14</span></div>
+      <div class="r ac"><i></i><span class="m">Reacted <b>rainbow</b> +540</span><span class="tm">22:14</span></div>
+      <div class="r gd"><i></i><span class="m">Claimed <b>Yor Forger</b></span><span class="tm">22:14</span></div>
+      <div class="r ac"><i></i><span class="m">Reacted <b>purple</b> +312</span><span class="tm">22:14</span></div>
+      <div class="r"><i></i><span class="m">Rolled <b>Makima</b> 1,411</span><span class="tm">22:14</span></div>
+      <div class="r"><i></i><span class="m">Sent <b>$wa</b> ×10</span><span class="tm">22:14</span></div>
+    </div>
+    <div class="tabbar">
+      <a href="#" class="sel"><span class="d"></span>Run</a><a href="#"><span class="d"></span>Stats</a>
+      <a href="#"><span class="d"></span>Utils</a><a href="#"><span class="d"></span>Settings</a>
+    </div>
+  </div>
+</div>
+</section>
+
+</div>
+</div>
+
+<script>
+const notes={
+ a:"<b>A · Reactor.</b> One connection toggle, Start hourly + Roll $us, perk 8 on the vitals strip, perk 9 + session haul (claims / spheres / keys) in the side. Duplicate preset pills removed.",
+ b:"<b>B · Console.</b> Command bar is the real action set — no F-key clutter. Rail is last claim, perk 8/9, session totals. Utilities added to the tab row.",
+ c:"<b>C · Haul.</b> Same control set as A. Side column is session haul, last claim, then perk 8/9. Icon rail includes Utilities.",
+ d:"<b>D · Quiet.</b> Extra preset text-pills gone. Perk 8 sits with claim/power; side column is last claim, perk 8/9, session haul.",
+ e:"<b>E · Panes.</b> Controls pane has hourly + Roll $us. Session pane dropped skip/error tallies and $us stack in favor of perk 8/9 and kak / spheres / keys.",
+ f:"<b>F · Meters.</b> The $us-stack bar is now perk 8 (12/40). Rail is perks + session haul. F-keys hint at hourly / Roll $us instead of preset switch.",
+ g:"<b>G · Boxed.</b> Extra preset row replaced with Claim / Kakera / Spheres rule pills. Controls include hourly + Roll $us. Help became Utilities.",
+ h:"<b>H · Dock.</b> Dock bar carries the simplified actions. Side column is last claim, perk 8/9, session haul. Utilities in the sidebar.",
+ i:"<b>I · Bento.</b> Sparkline tile is session haul (ka + claims / spheres / keys). Timer tile shows perk 8/9. Control tile has hourly + Roll $us.",
+ j:"<b>J · Remote.</b> Phone first row: Stop, Disconnect, hourly, Roll $us. KPIs are rolls, claim, perk 8, perk 9. Feed header is the session haul."
+};
+const stage=document.getElementById('stage'),note=document.getElementById('note');
+const lbtn=[...document.querySelectorAll('#layouts button')];
+const pbtn=[...document.querySelectorAll('#palettes button')];
+function setLayout(t){
+  lbtn.forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.t===t)));
+  document.querySelectorAll('.dir').forEach(s=>s.classList.toggle('on',s.dataset.d===t));
+  note.innerHTML=notes[t];fit();
+}
+function setPal(c){
+  pbtn.forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.c===c)));
+  stage.dataset.p=c;
+}
+lbtn.forEach(b=>b.addEventListener('click',()=>setLayout(b.dataset.t)));
+pbtn.forEach(b=>b.addEventListener('click',()=>setPal(b.dataset.c)));
+function fit(){
+  const vp=document.querySelector('.viewport');
+  const s=Math.min(1,vp.clientWidth/1200);
+  stage.style.transform='scale('+s+')';
+  vp.style.height=(770*s)+'px';
+}
+addEventListener('resize',fit);
+setLayout('a');setPal('kakera');
+</script>
+</body>
+</html>

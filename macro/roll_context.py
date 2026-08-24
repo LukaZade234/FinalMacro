@@ -2,7 +2,7 @@
 
 One :class:`RollContext` per running account. Nothing here is module-level or
 global, so a coordinator can drive several accounts concurrently by building one
-context each (see ``docs/MULTI_ACCOUNT.md``).
+context each (see Phase D in ``docs/ARCHITECTURE.md``).
 
 Subsystems must read ``ctx.config`` and ``ctx.state`` through the context on every
 use rather than caching them at construction: :meth:`RollCycleEngine.update_config`

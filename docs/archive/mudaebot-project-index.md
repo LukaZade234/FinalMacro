@@ -1,4 +1,9 @@
-# MudaeBot — Project index
+# MudaeBot — Project index (archived)
+
+> Moved out of the repo root on 24 Aug 2026. This is a map of the previous
+> CustomTkinter MudaeBot (`bot_client.py`, `event_coordinator.py`), not
+> FinalMacro. Current docs: [`docs/MUDAE_LOGIC.md`](../MUDAE_LOGIC.md) and
+> [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 This document maps modules, functions, and features so you can reuse them as blocks when building a new version.
 

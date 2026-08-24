@@ -28,6 +28,7 @@ from PySide6.QtGui import QGuiApplication
 from gui.accounts import AccountStore
 from gui.mudae_settings_presets import MudaeSettingsPresetStore
 from gui.presets import PresetStore
+from gui.run_summary import build_run_summary
 from gui.run_target import resolve_run_target
 from gui.server_profiles import ServerProfileStore
 from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
@@ -66,6 +67,22 @@ from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 _UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 _UPDATE_STARTUP_DELAY_MS = 4000
 _SETTINGS_RELOAD_DEBOUNCE_MS = 400
+_RUN_SUMMARY_THROTTLE_MS = 1000
+
+_DEFAULT_UI_LAYOUT = "classic"
+_DEFAULT_UI_PALETTE = "tokyonight"
+_UI_LAYOUTS = frozenset({"classic", "haul", "console", "boxed"})
+_UI_PALETTES = frozenset({
+    "kakera", "tokyonight", "ember", "phosphor", "ice", "bone", "mono",
+})
+# Each design was drawn against one palette; picking a design swaps the colours
+# to match unless the user has already chosen a palette of their own.
+_LAYOUT_PALETTE = {
+    "classic": "tokyonight",
+    "haul": "kakera",
+    "console": "kakera",
+    "boxed": "kakera",
+}
 
 _PROFILE_META_KEYS = frozenset({
     "command",
@@ -138,6 +155,8 @@ class AppBridge(QObject):
     runActionPendingChanged = Signal()
     usModeOptionsChanged = Signal()
     minimizeToTrayChanged = Signal()
+    appearanceChanged = Signal()
+    runSummaryChanged = Signal()
     updateStatusChanged = Signal()
     updateCheckingChanged = Signal()
     updatePullingChanged = Signal()
@@ -199,6 +218,13 @@ class AppBridge(QObject):
         self._run_account_id: str = ""
         self._run_channel_profile_id: str = ""
         self._run_token: str = ""
+        self._session_started_at: datetime | None = None
+        # Rebuilding the run summary walks the whole earning log, and the macro
+        # notifies on every activity line, so the change signal is coalesced.
+        self._run_summary_timer = QTimer(self)
+        self._run_summary_timer.setSingleShot(True)
+        self._run_summary_timer.setInterval(_RUN_SUMMARY_THROTTLE_MS)
+        self._run_summary_timer.timeout.connect(self.runSummaryChanged.emit)
         self._settings_file_mtime: float | None = None
         self._record_settings_file_mtime()
         self._settings_reload_timer = QTimer(self)
@@ -274,6 +300,21 @@ class AppBridge(QObject):
     @Property(int, constant=False, notify=macroStateChanged)
     def macroRollsLeft(self) -> int:
         return self._macro_state.rolls_left if self._macro_state.rolls_left is not None else -1
+
+    @Property(int, constant=False, notify=macroStateChanged)
+    def macroRollsMax(self) -> int:
+        """Rolls per hour from the channel's $settings, or -1 if never fetched.
+
+        The macro only ever learns how many rolls are *left*, so a full/empty
+        gauge is only meaningful once $settings has been read for the channel.
+        """
+        channel = self._profiles.active_channel()
+        raw = (channel.settings or {}).get("setrolls") if channel else None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return -1
+        return value if value > 0 else -1
 
     @Property(str, constant=False, notify=macroStateChanged)
     def macroClaimStatus(self) -> str:
@@ -468,6 +509,17 @@ class AppBridge(QObject):
         # dict (the kwarg name is just a label), so these are read from ``saved``
         # directly rather than a nested "run_ui" key.
         self._minimize_to_tray = bool(saved.get("minimize_to_tray", False))
+
+        layout = str(saved.get("ui_layout") or _DEFAULT_UI_LAYOUT)
+        palette = str(saved.get("ui_palette") or _DEFAULT_UI_PALETTE)
+        self._ui_layout = layout if layout in _UI_LAYOUTS else _DEFAULT_UI_LAYOUT
+        self._ui_palette = palette if palette in _UI_PALETTES else _DEFAULT_UI_PALETTE
+        # Set once the user picks a palette explicitly; until then switching
+        # design is free to move the palette with it.
+        self._ui_palette_pinned = bool(saved.get("ui_palette_pinned", False))
+        if not initial:
+            self.appearanceChanged.emit()
+
         self._update_dismissed_sha = str(saved.get("update_dismissed_sha") or "")
         self._update_notified_sha = str(saved.get("update_notified_sha") or "")
         auto_check = bool(saved.get("update_auto_check_enabled", True))
@@ -695,6 +747,7 @@ class AppBridge(QObject):
         self.macroPhaseChanged.emit(self._macro_state.phase.value)
         self.macroStateChanged.emit()
         self.macroLogChanged.emit()
+        self._notify_run_summary()
 
     @Slot(str)
     def setToken(self, value: str) -> None:
@@ -1068,6 +1121,11 @@ class AppBridge(QObject):
                 "us_mode_options": self._us_mode_options.to_dict(),
                 "minimize_to_tray": self._minimize_to_tray,
             },
+            appearance={
+                "ui_layout": self._ui_layout,
+                "ui_palette": self._ui_palette,
+                "ui_palette_pinned": self._ui_palette_pinned,
+            },
             updates={
                 "update_dismissed_sha": self._update_dismissed_sha,
                 "update_notified_sha": self._update_notified_sha,
@@ -1093,6 +1151,74 @@ class AppBridge(QObject):
         self._us_mode_options.stop_after_rolls = max(1, int(count))
         self.usModeOptionsChanged.emit()
         self._persist()
+
+    @Property(str, constant=False, notify=appearanceChanged)
+    def uiLayout(self) -> str:
+        return self._ui_layout
+
+    @Property(str, constant=False, notify=appearanceChanged)
+    def uiPalette(self) -> str:
+        return self._ui_palette
+
+    @Slot(str)
+    def setUiLayout(self, layout: str) -> None:
+        layout = str(layout)
+        if layout not in _UI_LAYOUTS or layout == self._ui_layout:
+            return
+        self._ui_layout = layout
+        if not self._ui_palette_pinned:
+            self._ui_palette = _LAYOUT_PALETTE.get(layout, self._ui_palette)
+        self.appearanceChanged.emit()
+        self._persist()
+
+    @Slot(str)
+    def setUiPalette(self, palette: str) -> None:
+        palette = str(palette)
+        if palette not in _UI_PALETTES:
+            return
+        self._ui_palette_pinned = True
+        if palette == self._ui_palette:
+            self._persist()
+            return
+        self._ui_palette = palette
+        self.appearanceChanged.emit()
+        self._persist()
+
+    @Slot(str)
+    def applyUiFont(self, family: str) -> None:
+        """Set the default application font for the current design.
+
+        The design's font lives in gui/skins.js, so QML pushes it here rather
+        than the mapping being duplicated in Python. Setting it application-wide
+        means the ~50 views that never specify a family follow the design too.
+        """
+        family = str(family).strip()
+        app = QGuiApplication.instance()
+        if not family or app is None:
+            return
+        font = app.font()
+        if font.family() == family:
+            return
+        font.setFamily(family)
+        app.setFont(font)
+
+    @Slot()
+    def resetUiPalette(self) -> None:
+        """Re-link the palette to the current design."""
+        self._ui_palette_pinned = False
+        palette = _LAYOUT_PALETTE.get(self._ui_layout, _DEFAULT_UI_PALETTE)
+        if palette != self._ui_palette:
+            self._ui_palette = palette
+            self.appearanceChanged.emit()
+        self._persist()
+
+    @Property(str, constant=False, notify=runSummaryChanged)
+    def runSummaryJson(self) -> str:
+        return json.dumps(build_run_summary(self._macro_state, self._session_started_at))
+
+    def _notify_run_summary(self) -> None:
+        if not self._run_summary_timer.isActive():
+            self._run_summary_timer.start()
 
     @Slot(bool)
     def setMinimizeToTray(self, enabled: bool) -> None:
@@ -1698,14 +1824,17 @@ class AppBridge(QObject):
     @Slot()
     def _deliver_kakera_notify(self) -> None:
         self.kakeraChanged.emit()
+        self._notify_run_summary()
 
     @Slot()
     def _deliver_spheres_notify(self) -> None:
         self.spheresChanged.emit()
+        self._notify_run_summary()
 
     @Slot()
     def _deliver_keys_notify(self) -> None:
         self.keysChanged.emit()
+        self._notify_run_summary()
 
     def _on_keys_recorded(self) -> None:
         QMetaObject.invokeMethod(
@@ -2005,6 +2134,8 @@ class AppBridge(QObject):
         self._run_preset_id = resolved.preset_id
         self._persist()
         self._macro_state = AccountState()
+        self._session_started_at = datetime.now(timezone.utc)
+        self._notify_run_summary()
         if resolved.macro_config.character_claim.persist_tu_state:
             self._load_persisted_runtime_state(
                 resolved.account_id,

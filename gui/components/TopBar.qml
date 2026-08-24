@@ -25,7 +25,7 @@ RowLayout {
     Rectangle {
         implicitHeight: 36
         implicitWidth: statusRow.implicitWidth + 24
-        radius: 18
+        radius: Theme.radiusPill
         color: Theme.bgMedium
         border.color: bar.statusOnline
             ? Theme.success

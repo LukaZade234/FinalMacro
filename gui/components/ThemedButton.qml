@@ -19,12 +19,13 @@ Button {
     TextMetrics {
         id: textMetrics
         text: control.text
-        font.pixelSize: 12
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.sizeBody
         font.weight: (control.accent || control.danger) ? Font.DemiBold : Font.Normal
     }
 
     background: Rectangle {
-        radius: 6
+        radius: Theme.radiusSm
         color: control.danger ? Theme.error
              : control.accent ? Theme.accentPrimary
              : Theme.bgLight
@@ -42,7 +43,8 @@ Button {
             color: control.danger ? "#ffffff"
                  : control.accent ? Theme.bgDark
                  : Theme.fgPrimary
-            font.pixelSize: 12
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.sizeBody
             font.weight: (control.accent || control.danger) ? Font.DemiBold : Font.Normal
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter

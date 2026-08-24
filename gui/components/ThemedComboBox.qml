@@ -10,7 +10,7 @@ ComboBox {
 
     background: Rectangle {
         implicitWidth: 120
-        radius: 6
+        radius: Theme.radiusSm
         color: Theme.inputBg
         border.color: control.pressed || control.popup.visible ? Theme.accentPrimary : Theme.border
         border.width: 1
@@ -54,7 +54,7 @@ ComboBox {
         }
 
         background: Rectangle {
-            radius: 4
+            radius: Theme.radiusXs
             color: itemDelegate.highlighted ? Theme.bgLight : "transparent"
         }
     }
@@ -75,7 +75,7 @@ ComboBox {
         }
 
         background: Rectangle {
-            radius: 6
+            radius: Theme.radiusSm
             color: Theme.bgMedium
             border.color: Theme.border
             border.width: 1

@@ -6,7 +6,7 @@ with a pause in between and record Mudae's raw reply.
 This is NOT meant to be part of the app's runtime — it's a documentation
 capture tool for the `$settings` parsing audit (see docs/TODO.md). Output is
 a raw JSON capture (data/settings_commands_capture.json) that a follow-up
-step turns into docs/MUDAE_SETTINGS_COMMANDS.md.
+step turns into docs/archive/MUDAE_SETTINGS_COMMANDS.md.
 
 Usage:
     .venv/bin/python scripts/document_settings_commands.py \\

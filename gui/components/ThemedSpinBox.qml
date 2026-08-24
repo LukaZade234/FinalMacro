@@ -35,7 +35,7 @@ SpinBox {
         x: 0
         height: parent.height
         implicitWidth: 28
-        radius: 6
+        radius: Theme.radiusSm
         color: control.down.pressed ? Theme.bgHover : Theme.bgLight
         opacity: control.enabled ? 1 : 0.4
 
@@ -51,7 +51,7 @@ SpinBox {
         x: parent.width - width
         height: parent.height
         implicitWidth: 28
-        radius: 6
+        radius: Theme.radiusSm
         color: control.up.pressed ? Theme.bgHover : Theme.bgLight
         opacity: control.enabled ? 1 : 0.4
 
@@ -65,7 +65,7 @@ SpinBox {
 
     background: Rectangle {
         implicitWidth: 120
-        radius: 6
+        radius: Theme.radiusSm
         color: Theme.inputBg
         border.color: Theme.border
         border.width: 1

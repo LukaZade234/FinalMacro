@@ -16,7 +16,7 @@ Rectangle {
 
     implicitHeight: chipRow.implicitHeight + 16
     implicitWidth: Math.max(88, chipRow.implicitWidth + 24)
-    radius: 8
+    radius: Theme.radiusMd
     color: chip.toneActive ? Qt.rgba(0.48, 0.64, 0.97, 0.12)
           : chip.toneGood ? Qt.rgba(0.62, 0.81, 0.42, 0.12)
           : chip.toneWarn ? Qt.rgba(0.88, 0.69, 0.41, 0.12)

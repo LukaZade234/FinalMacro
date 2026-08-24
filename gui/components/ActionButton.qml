@@ -14,7 +14,7 @@ Button {
     implicitHeight: buttonHeight
 
     background: Rectangle {
-        radius: 8
+        radius: Theme.radiusMd
         color: control.fillColor
         opacity: !control.enabled ? 0.45
                : control.loading ? 0.8

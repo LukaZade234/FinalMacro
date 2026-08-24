@@ -14,7 +14,7 @@ TextField {
     selectedTextColor: Theme.bgDark
 
     background: Rectangle {
-        radius: 6
+        radius: Theme.radiusSm
         color: Theme.inputBg
         border.color: control.activeFocus ? Theme.accentPrimary : Theme.border
         border.width: 1

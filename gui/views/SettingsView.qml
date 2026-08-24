@@ -35,8 +35,194 @@ Item {
         return "Not checked yet"
     }
 
+    function indexById(list, id) {
+        if (!list)
+            return 0
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === id)
+                return i
+        }
+        return 0
+    }
+
+    readonly property var layoutNames: {
+        var list = Theme.layoutList || []
+        var out = []
+        for (var i = 0; i < list.length; i++)
+            out.push(list[i].name)
+        return out
+    }
+
+    readonly property var paletteNames: {
+        var list = Theme.paletteList || []
+        var out = []
+        for (var i = 0; i < list.length; i++)
+            out.push(list[i].name)
+        return out
+    }
+
     ScrollablePage {
         anchors.fill: parent
+
+        PanelCard {
+            Layout.fillWidth: true
+            title: "Appearance"
+            titleSize: 14
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Pick the layout and colours for the whole app. Each design has its own Run page and navigation; the other pages follow the same shapes and fonts."
+                    color: Theme.fgMuted
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Label {
+                        Layout.preferredWidth: 100
+                        text: "Design"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                    }
+
+                    ThemedComboBox {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 220
+                        model: settingsRoot.layoutNames
+                        currentIndex: settingsRoot.indexById(Theme.layoutList, App.uiLayout)
+                        onActivated: function(i) {
+                            if (Theme.layoutList && Theme.layoutList[i])
+                                App.setUiLayout(Theme.layoutList[i].id)
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 110
+                    text: {
+                        var i = settingsRoot.indexById(Theme.layoutList, App.uiLayout)
+                        return Theme.layoutList && Theme.layoutList[i] ? Theme.layoutList[i].description : ""
+                    }
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 2
+                    spacing: 10
+
+                    Label {
+                        Layout.preferredWidth: 100
+                        text: "Colour theme"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                    }
+
+                    ThemedComboBox {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 220
+                        model: settingsRoot.paletteNames
+                        currentIndex: settingsRoot.indexById(Theme.paletteList, App.uiPalette)
+                        onActivated: function(i) {
+                            if (Theme.paletteList && Theme.paletteList[i])
+                                App.setUiPalette(Theme.paletteList[i].id)
+                        }
+                    }
+
+                    ThemedButton {
+                        text: "Match design"
+                        onClicked: App.resetUiPalette()
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    implicitHeight: paletteFlow.implicitHeight
+                    Layout.preferredHeight: implicitHeight
+
+                    Flow {
+                        id: paletteFlow
+                        width: parent.width
+                        spacing: 8
+
+                        Repeater {
+                            model: Theme.paletteList ? Theme.paletteList.length : 0
+
+                            delegate: Rectangle {
+                                id: paletteCard
+
+                                readonly property var item: Theme.paletteList[index]
+                                readonly property bool active: App.uiPalette === item.id
+
+                                width: 132
+                                height: 44
+                                radius: Theme.radiusMd
+                                color: item.surface
+                                border.width: active ? 2 : 1
+                                border.color: active ? item.accent
+                                    : (paletteHover.containsMouse ? Theme.fgMuted : item.line)
+
+                                Row {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    spacing: 8
+
+                                    Item {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 26
+                                        height: 16
+
+                                        Rectangle {
+                                            x: 0
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            color: paletteCard.item.accent
+                                        }
+                                        Rectangle {
+                                            x: 10
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            color: paletteCard.item.accent2
+                                            border.width: 1
+                                            border.color: paletteCard.item.surface
+                                        }
+                                    }
+
+                                    Label {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: paletteCard.item.name
+                                        color: paletteCard.item.fg
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: paletteHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: App.setUiPalette(paletteCard.item.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         PanelCard {
             Layout.fillWidth: true

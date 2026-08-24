@@ -1,4 +1,7 @@
-# Multi-account runtime (Phase D)
+# Multi-account runtime (Phase D) (archived)
+
+> Folded into [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) on 24 Aug 2026.
+> Kept here as the original write-up.
 
 FinalMacro persists configuration for multiple accounts today, but only **one** Discord connection runs at a time. This document describes how to extend runtime without repeating the old MudaeBot bug where one account used the wrong preset across channels.
 
