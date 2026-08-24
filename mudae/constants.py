@@ -69,7 +69,7 @@ SPHERE_OH_TYPE_LABELS = {
 # Purple 5 / blue 10 are confirmed. Teal→orange follow the same ladder as
 # $oq harvest-by-adjacency. Red 150 is the $oq/$oc jackpot.
 # Rainbow 500 is the $ot rare-ship / $oq "or more" figure.
-# Light has no fixed SP — it splits into 3–4 spheres (sum those).
+# Light has no fixed SP — it splits into other colours (sum those).
 # Dark has no fixed SP — it becomes one other colour (use that colour's SP).
 # Hidden ``spU`` on an $oh reward line is a bonus $oc use, not SP.
 SPHERE_BASE_SP: dict[str, int] = {

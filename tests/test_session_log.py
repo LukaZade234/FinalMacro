@@ -72,6 +72,30 @@ def test_format_session_text_header() -> None:
     assert "Roll 1" in text
 
 
+def test_session_log_embeds_minigame_board(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("macro.session_log._SESSION_DIR", tmp_path)
+    recorder = SessionLogRecorder()
+    recorder.start(mode="oh", account="Main", preset="default", channel="#mudae")
+    recorder.attach_minigame(
+        {
+            "game": "oh",
+            "clicks": [{"cell": 7, "emoji": "spD", "resolved": ["spP"], "paid": True}],
+            "board": ["spU"] * 25,
+            "clicks_paid": 1,
+            "clicks_budget": 5,
+            "base_value": 5,
+        }
+    )
+    path = recorder.finish("finished")
+    assert path is not None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["minigames"][0]["game"] == "oh"
+    assert payload["minigames"][0]["clicks"][0]["resolved"] == ["spP"]
+    text = path.with_suffix(".log").read_text(encoding="utf-8")
+    assert "$oh" in text
+    assert "1/5 paid" in text
+
+
 def test_session_log_dir_points_under_data() -> None:
     assert session_log_dir().name == "session_logs"
     assert session_log_dir().parent.name == "data"

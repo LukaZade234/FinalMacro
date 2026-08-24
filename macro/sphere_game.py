@@ -12,7 +12,7 @@ Dark spheres (``spD``) use a paid click and become one other colour; the
 grid stays dark. Mudae's tracker writes ``spD turns into spP`` (or another
 colour) and may add a ``(Free)`` payout line for the result — that is still
 the same paid dark click, not a free purple press. Light spheres (``spL``)
-split into 3–4 colours.
+split into other colours; the tracker writes ``spL breaks down into spB + …``.
 Clicking a face-down cell can grant a bonus ``$oc`` use — the reward tracker
 shows ``spU`` instead of a colour.
 
@@ -74,6 +74,11 @@ _TURNS_INTO_RE = re.compile(
     r"(?:<:(?P<dst1>[^:>]+):\d+>|:(?P<dst2>sp[A-Za-z]*):)",
     re.IGNORECASE,
 )
+_BREAKS_DOWN_RE = re.compile(r"breaks\s+down\s+into", re.IGNORECASE)
+# ":spL: breaks down into :spB: + :spT:  => +156" / "=> **+156**".
+_ARROW_AMOUNT_RE = re.compile(
+    r"=>\s*(?:\*\*)?\+\s*(?:\*\*)?(?P<amount>[\d,]+)",
+)
 # "<:spP:id> (Free) **+46**", "<:spY:id> **+59**", ":spO: +216".
 _PAYOUT_RE = re.compile(
     r"(?:<:(?P<emoji1>[^:>]+):\d+>|:(?P<emoji2>sp[A-Za-z]*):)"
@@ -127,7 +132,7 @@ def is_oh_reward_message(snapshot: Any) -> bool:
     if not has_sphere:
         return False
     lower = content.lower()
-    return "+" in content or "turns into" in lower
+    return "+" in content or "turns into" in lower or "breaks down into" in lower
 
 
 def parse_clicks_allowed(content: str) -> int:
@@ -144,6 +149,15 @@ def _sphere_emojis_in(text: str) -> list[str]:
     return _SPHERE_BARE_RE.findall(text or "")
 
 
+def _breakdown_fragments(line: str) -> list[str]:
+    """Colours after ``breaks down into``, ignoring the ``=> +N`` chat total."""
+    parts = _BREAKS_DOWN_RE.split(line, maxsplit=1)
+    if len(parts) < 2:
+        return []
+    tail = parts[1].split("=>", 1)[0]
+    return [emoji for emoji in _sphere_emojis_in(tail) if emoji]
+
+
 def _reward_events(content: str) -> list[tuple[str, str]]:
     """Ordered tracker events: ``("transform", dest)`` or ``("payout", emoji)``."""
     events: list[tuple[str, str]] = []
@@ -151,7 +165,8 @@ def _reward_events(content: str) -> list[tuple[str, str]]:
         line = raw_line.strip()
         if not line:
             continue
-        if "turns into" in line.lower():
+        lower = line.lower()
+        if "turns into" in lower:
             match = _TURNS_INTO_RE.search(line)
             dest = ""
             if match:
@@ -162,6 +177,10 @@ def _reward_events(content: str) -> list[tuple[str, str]]:
                     dest = emojis[-1]
             if dest:
                 events.append(("transform", dest))
+            continue
+        if "breaks down into" in lower:
+            for emoji in _breakdown_fragments(line):
+                events.append(("payout", emoji))
             continue
         match = _PAYOUT_RE.search(line)
         if match:
@@ -176,7 +195,15 @@ def total_reward_from_content(content: str) -> int:
     total = 0
     for raw_line in (content or "").splitlines():
         line = raw_line.strip()
-        if not line or "turns into" in line.lower():
+        if not line:
+            continue
+        lower = line.lower()
+        if "turns into" in lower:
+            continue
+        if "breaks down into" in lower:
+            match = _ARROW_AMOUNT_RE.search(line)
+            if match:
+                total += int((match.group("amount") or "0").replace(",", ""))
             continue
         match = _PAYOUT_RE.search(line)
         if not match:
@@ -194,7 +221,7 @@ def reward_line_types(content: str) -> list[str]:
 
 
 def reward_outcome_types(content: str) -> list[str]:
-    """Payout colours plus ``turns into`` destinations (dark → purple)."""
+    """Payout colours plus ``turns into`` destinations and light fragments."""
     return [emoji for _kind, emoji in _reward_events(content)]
 
 
@@ -731,8 +758,6 @@ class OhSphereGame:
                 + reward_note
                 + oc_note
             )
-            if session_clicks:
-                self._log(f"{label}: stats · Statistics → Minigames")
             return {
                 "clicks": clicks_spent,
                 "free_clicks": free_clicks,

@@ -22,6 +22,11 @@ _recording_account_name: str = ""
 
 _writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
 
+
+def log_path() -> Path:
+    """Absolute path of the minigame stats file (``data/minigame_log.json``)."""
+    return _LOG_PATH
+
 GAME_LABELS: dict[str, str] = {
     "oh": "$oh",
     "oc": "$oc",
@@ -56,6 +61,9 @@ _SPAWN_ORDER = (
     "spD",
     "spU",
 )
+
+# Only $oc / $oq have a red/rainbow win. $oh and $ot must not move win rate.
+WIN_GAMES = frozenset({"oc", "oq"})
 
 
 def game_label(game: str | None) -> str:
@@ -230,7 +238,8 @@ def _counts_to_series(counts: dict[str, int], total: int) -> list[dict[str, Any]
 
 def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
     games = len(entries)
-    wins = sum(1 for entry in entries if entry.get("won"))
+    scored = 0
+    wins = 0
     base_value = sum(int(entry.get("base_value") or 0) for entry in entries)
     oc_grants = 0
     by_game: dict[str, dict[str, Any]] = {}
@@ -250,10 +259,15 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
                 "wins": 0,
                 "base_value": 0,
                 "oc_bonus": 0,
+                "has_win": game in WIN_GAMES,
             },
         )
         bucket["games"] += 1
-        bucket["wins"] += 1 if entry.get("won") else 0
+        if game in WIN_GAMES:
+            scored += 1
+            if entry.get("won"):
+                wins += 1
+                bucket["wins"] += 1
         bucket["base_value"] += int(entry.get("base_value") or 0)
         grants = int(entry.get("oc_bonus") or 0)
         if not grants:
@@ -280,7 +294,9 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
     by_game_series = []
     for game, bucket in sorted(by_game.items()):
         count = int(bucket["games"])
-        bucket["win_rate"] = (bucket["wins"] / count) if count else 0.0
+        bucket["win_rate"] = (
+            (bucket["wins"] / count) if count and bucket["has_win"] else 0.0
+        )
         bucket["avg_base_value"] = (bucket["base_value"] / count) if count else 0.0
         by_game_series.append(bucket)
 
@@ -288,7 +304,8 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
         "totals": {
             "games": games,
             "wins": wins,
-            "win_rate": (wins / games) if games else 0.0,
+            "scored_games": scored,
+            "win_rate": (wins / scored) if scored else 0.0,
             "base_value": base_value,
             "avg_base_value": (base_value / games) if games else 0.0,
             "revealed_cells": revealed,

@@ -9,6 +9,18 @@ Item {
     clip: true
     anchors.fill: parent
 
+    readonly property var winGames: ({ oc: true, oq: true })
+    readonly property var sphereOrder: [
+        "spP", "spB", "spT", "spG", "spY", "spO", "spR", "spW", "spL", "spD", "spU"
+    ]
+    readonly property var summaryCardModel: [
+        { key: "games", label: "Games", winOnly: false },
+        { key: "wins", label: "Wins", winOnly: true },
+        { key: "win_rate", label: "Win rate", winOnly: true },
+        { key: "avg_base_value", label: "Avg base SP", winOnly: false },
+        { key: "base_value", label: "Total base SP", winOnly: false }
+    ]
+
     Rectangle {
         anchors.fill: parent
         color: Theme.bgDark
@@ -20,9 +32,29 @@ Item {
     property string gameFilter: "all"
     property int selectedIndex: 0
 
+    readonly property bool showWinStats: gameFilter === "all" || !!winGames[gameFilter]
+    readonly property bool showTypeRates: gameFilter !== "all"
+
+    readonly property var visibleEntries: {
+        var _ = [accountFilter, serverFilter, gameFilter, payload]
+        return filteredEntries()
+    }
+    readonly property var currentTotals: {
+        var _ = [accountFilter, serverFilter, gameFilter, payload]
+        return filteredTotals()
+    }
+    readonly property var spawnRows: {
+        var _ = [accountFilter, serverFilter, gameFilter, payload]
+        return spawnSeries()
+    }
+    readonly property var clickRows: {
+        var _ = [accountFilter, serverFilter, gameFilter, payload]
+        return clickSeries()
+    }
+
     function reload() {
         try {
-            payload = JSON.parse(App.minigamesJson)
+            payload = JSON.parse(String(App.minigamesJson))
         } catch (e) {
             payload = { entries: [], totals: {}, by_game: [], spawn: [], clicked: [] }
         }
@@ -33,10 +65,6 @@ Item {
 
     function entries() {
         return payload.entries || []
-    }
-
-    function totals() {
-        return payload.totals || {}
     }
 
     function formatSp(value) {
@@ -50,6 +78,16 @@ Item {
 
     function serverKey(entry) {
         return entry.guild_name || String(entry.guild_id || "unknown")
+    }
+
+    function hasWinCondition(game) {
+        return !!winGames[game]
+    }
+
+    function sphereLabel(emoji) {
+        if (emoji === "spU" && gameFilter === "oh")
+            return "Hidden ($oc)"
+        return SphereAssets.label(emoji) || emoji
     }
 
     function filteredEntries() {
@@ -101,8 +139,137 @@ Item {
         serverFilter = "all"
     }
 
-    function selectedEntry() {
+    function ocGrantsFor(entry) {
+        var grants = Number(entry.oc_bonus || 0)
+        if (grants)
+            return grants
+        var clicks = entry.clicks || []
+        for (var i = 0; i < clicks.length; i++)
+            grants += Number(clicks[i].oc_bonus || 0)
+        return grants
+    }
+
+    function filteredTotals() {
         var list = filteredEntries()
+        var games = list.length
+        var base = 0
+        var ocGrants = 0
+        var scored = 0
+        var wins = 0
+        for (var i = 0; i < list.length; i++) {
+            var entry = list[i]
+            base += Number(entry.base_value || 0)
+            ocGrants += ocGrantsFor(entry)
+            if (hasWinCondition(entry.game)) {
+                scored += 1
+                if (entry.won)
+                    wins += 1
+            }
+        }
+        return {
+            games: games,
+            wins: wins,
+            scored_games: scored,
+            win_rate: scored ? wins / scored : 0,
+            base_value: base,
+            avg_base_value: games ? base / games : 0,
+            oc_grants: ocGrants
+        }
+    }
+
+    function summaryText(key) {
+        var t = currentTotals
+        if (key === "games")
+            return formatSp(t.games)
+        if (key === "wins")
+            return formatSp(t.wins)
+        if (key === "win_rate")
+            return t.scored_games ? formatPct(t.win_rate) : "—"
+        if (key === "avg_base_value")
+            return formatSp(t.avg_base_value)
+        if (key === "base_value")
+            return formatSp(t.base_value)
+        return "—"
+    }
+
+    function countsToSeries(counts, total) {
+        var series = []
+        var seen = {}
+        for (var i = 0; i < sphereOrder.length; i++) {
+            var emoji = sphereOrder[i]
+            var count = counts[emoji] || 0
+            seen[emoji] = true
+            if (count <= 0)
+                continue
+            series.push({
+                emoji: emoji,
+                label: sphereLabel(emoji),
+                count: count,
+                rate: total ? count / total : 0
+            })
+        }
+        var extras = Object.keys(counts).sort()
+        for (var j = 0; j < extras.length; j++) {
+            var extra = extras[j]
+            if (seen[extra])
+                continue
+            var extraCount = counts[extra] || 0
+            if (extraCount <= 0)
+                continue
+            series.push({
+                emoji: extra,
+                label: sphereLabel(extra),
+                count: extraCount,
+                rate: total ? extraCount / total : 0
+            })
+        }
+        return series
+    }
+
+    function spawnSeries() {
+        if (gameFilter === "all")
+            return []
+        var list = filteredEntries()
+        var counts = {}
+        var total = 0
+        for (var i = 0; i < list.length; i++) {
+            var board = list[i].board || []
+            for (var c = 0; c < board.length; c++) {
+                var emoji = String(board[c] || "").trim()
+                if (!emoji || emoji === "spU")
+                    continue
+                if (emoji === "sp")
+                    emoji = "spR"
+                counts[emoji] = (counts[emoji] || 0) + 1
+                total += 1
+            }
+        }
+        return countsToSeries(counts, total)
+    }
+
+    function clickSeries() {
+        if (gameFilter === "all")
+            return []
+        var list = filteredEntries()
+        var counts = {}
+        var total = 0
+        for (var i = 0; i < list.length; i++) {
+            var clicks = list[i].clicks || []
+            for (var c = 0; c < clicks.length; c++) {
+                var emoji = String(clicks[c].emoji || "").trim()
+                if (!emoji)
+                    continue
+                if (emoji === "sp")
+                    emoji = "spR"
+                counts[emoji] = (counts[emoji] || 0) + 1
+                total += 1
+            }
+        }
+        return countsToSeries(counts, total)
+    }
+
+    function selectedEntry() {
+        var list = visibleEntries
         if (selectedIndex < 0 || selectedIndex >= list.length)
             return null
         return list[selectedIndex]
@@ -113,6 +280,56 @@ Item {
         if (isNaN(n) || n < 0)
             return "?"
         return "(" + (Math.floor(n / 5) + 1) + "," + ((n % 5) + 1) + ")"
+    }
+
+    function filterHint() {
+        if (gameFilter === "all")
+            return "Win rate is $oc / $oq only. Pick a game to see spawn and click rates for that type."
+        if (gameFilter === "oh")
+            return "Hidden $oh clicks that resolve as Hidden grant $oc. Light and dark keep their own identity."
+        if (hasWinCondition(gameFilter))
+            return "Win means we clicked red or rainbow. Value is base SP, not the chat total."
+        return "This game has no red/rainbow win. Value is base SP, not the chat total."
+    }
+
+    function resetSelection() {
+        selectedIndex = 0
+    }
+
+    Component {
+        id: sphereRateRow
+        RowLayout {
+            required property var modelData
+            Layout.fillWidth: true
+            spacing: 8
+
+            SphereTypeBadge { sphereId: modelData.emoji }
+
+            Label {
+                text: modelData.label
+                color: Theme.fgPrimary
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: minigamesRoot.formatSp(modelData.count)
+                color: Theme.fgSecondary
+                font.pixelSize: 12
+                Layout.preferredWidth: 36
+                horizontalAlignment: Text.AlignRight
+            }
+
+            Label {
+                text: minigamesRoot.formatPct(modelData.rate)
+                color: Theme.fgPrimary
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                Layout.preferredWidth: 52
+                horizontalAlignment: Text.AlignRight
+            }
+        }
     }
 
     Component.onCompleted: reload()
@@ -126,50 +343,6 @@ Item {
 
     ScrollablePage {
         anchors.fill: parent
-
-        Label {
-            text: "One row per $oh / $oc / $oq, stored in data/minigame_log.json (not the Run session log). Value is base SP (purple 5, blue 10, …) — not the chat total. Light/dark count as themselves; the colour they became is shown after the badge. Won means we clicked red or rainbow. Hidden $oh clicks that show spU in chat grant $oc (spent on play-all like bonus $oq)."
-            color: Theme.fgMuted
-            font.pixelSize: 11
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 10
-
-            Repeater {
-                model: [
-                    { label: "Games", key: "games" },
-                    { label: "Wins", key: "wins" },
-                    { label: "Win rate", key: "win_rate" },
-                    { label: "Avg base SP", key: "avg_base_value" },
-                    { label: "Total base SP", key: "base_value" },
-                    { label: "$oc from $oh", key: "oc_grants" }
-                ]
-                delegate: PanelCard {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 100
-                    Layout.preferredHeight: 68
-                    contentMargins: 12
-                    title: modelData.label
-                    titleSize: 11
-
-                    Label {
-                        text: modelData.key === "win_rate"
-                              ? formatPct(totals()[modelData.key] || 0)
-                              : (modelData.key === "avg_base_value"
-                                 ? formatSp(totals()[modelData.key] || 0)
-                                 : formatSp(totals()[modelData.key] || 0))
-                        color: Theme.accentPrimary
-                        font.pixelSize: 18
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-        }
 
         Item {
             Layout.fillWidth: true
@@ -185,6 +358,7 @@ Item {
                     model: ["All accounts"].concat(uniqueAccounts().map(function(a) { return a.label }))
                     onActivated: function(index) {
                         accountFilter = index <= 0 ? "all" : uniqueAccounts()[index - 1].id
+                        resetSelection()
                     }
                 }
 
@@ -193,17 +367,36 @@ Item {
                     model: ["All servers"].concat(uniqueServers().map(function(s) { return s.label }))
                     onActivated: function(index) {
                         serverFilter = index <= 0 ? "all" : uniqueServers()[index - 1].id
+                        resetSelection()
                     }
                 }
 
                 ThemedComboBox {
                     width: 140
-                    model: ["All games", "$oh", "$oc", "$oq"]
+                    model: ["All games", "$oh", "$oc", "$oq", "$ot"]
                     onActivated: function(index) {
-                        gameFilter = index <= 0 ? "all" : ["oh", "oc", "oq"][index - 1]
+                        gameFilter = index <= 0 ? "all" : ["oh", "oc", "oq", "ot"][index - 1]
+                        resetSelection()
                     }
                 }
+
+                Label {
+                    height: 32
+                    verticalAlignment: Text.AlignVCenter
+                    text: currentTotals.games + " games · "
+                          + formatSp(currentTotals.base_value) + " sp"
+                    color: Theme.fgSecondary
+                    font.pixelSize: 12
+                }
             }
+        }
+
+        Label {
+            text: filterHint()
+            color: Theme.fgMuted
+            font.pixelSize: 11
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
 
         RowLayout {
@@ -211,89 +404,86 @@ Item {
             spacing: 10
 
             Repeater {
-                model: payload.by_game || []
+                model: minigamesRoot.summaryCardModel
                 delegate: PanelCard {
                     required property var modelData
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 120
-                    Layout.preferredHeight: 72
+                    visible: !modelData.winOnly || minigamesRoot.showWinStats
+                    Layout.fillWidth: visible
+                    Layout.preferredWidth: visible ? 100 : 0
+                    Layout.minimumWidth: visible ? 100 : 0
+                    Layout.preferredHeight: 68
+                    Layout.maximumHeight: visible ? 68 : 0
                     contentMargins: 12
                     title: modelData.label
                     titleSize: 11
 
                     Label {
-                        text: modelData.wins + "/" + modelData.games
-                              + " · " + formatPct(modelData.win_rate)
-                              + " · " + formatSp(modelData.avg_base_value) + " sp"
-                        color: Theme.fgPrimary
-                        font.pixelSize: 12
+                        text: {
+                            minigamesRoot.currentTotals
+                            return minigamesRoot.summaryText(modelData.key)
+                        }
+                        color: Theme.accentPrimary
+                        font.pixelSize: 18
+                        font.weight: Font.DemiBold
                     }
                 }
             }
         }
 
-        PanelCard {
+        RowLayout {
+            visible: minigamesRoot.showTypeRates
             Layout.fillWidth: true
-            title: "Spawn rate (revealed board cells)"
-            titleSize: 14
+            spacing: 10
 
-            Flow {
+            PanelCard {
                 Layout.fillWidth: true
-                spacing: 12
+                Layout.alignment: Qt.AlignTop
+                title: "Spawn rate"
+                titleSize: 14
 
                 Repeater {
-                    model: payload.spawn || []
-                    delegate: RowLayout {
-                        required property var modelData
-                        spacing: 6
-                        SphereTypeBadge { sphereId: modelData.emoji }
-                        Label {
-                            text: modelData.label + "  " + modelData.count
-                                  + "  " + formatPct(modelData.rate)
-                            color: Theme.fgSecondary
-                            font.pixelSize: 11
-                        }
-                    }
+                    model: minigamesRoot.spawnRows
+                    delegate: sphereRateRow
                 }
 
                 Label {
-                    visible: (payload.spawn || []).length === 0
-                    text: "Play minigames while connected to record spawn rates."
+                    visible: minigamesRoot.spawnRows.length === 0
+                    text: "No revealed cells in the selected games."
                     color: Theme.fgMuted
                     font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
             }
-        }
 
-        PanelCard {
-            Layout.fillWidth: true
-            title: "Clicked mix (light/dark stay themselves; hidden $oh clicks are $oc)"
-            titleSize: 14
-
-            Flow {
+            PanelCard {
                 Layout.fillWidth: true
-                spacing: 12
+                Layout.alignment: Qt.AlignTop
+                title: "Click rate"
+                titleSize: 14
 
                 Repeater {
-                    model: payload.clicked || []
-                    delegate: RowLayout {
-                        required property var modelData
-                        spacing: 6
-                        SphereTypeBadge { sphereId: modelData.emoji }
-                        Label {
-                            text: modelData.label + "  " + modelData.count
-                                  + "  " + formatPct(modelData.rate)
-                            color: Theme.fgSecondary
-                            font.pixelSize: 11
-                        }
-                    }
+                    model: minigamesRoot.clickRows
+                    delegate: sphereRateRow
                 }
 
                 Label {
-                    visible: (payload.clicked || []).length === 0
-                    text: "Click colours appear here after a recorded game."
+                    visible: gameFilter === "oh"
+                    text: "$oc granted from hidden clicks: "
+                          + formatSp(currentTotals.oc_grants)
                     color: Theme.fgMuted
                     font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                Label {
+                    visible: minigamesRoot.clickRows.length === 0
+                    text: "No clicks in the selected games."
+                    color: Theme.fgMuted
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
             }
         }
@@ -316,7 +506,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: filteredEntries()
+                    model: minigamesRoot.visibleEntries
                     currentIndex: minigamesRoot.selectedIndex
                     delegate: Rectangle {
                         required property var modelData
@@ -351,8 +541,11 @@ Item {
                             }
                             Label {
                                 Layout.preferredWidth: 48
-                                text: modelData.won ? "win" : "—"
-                                color: modelData.won ? Theme.accentPrimary : Theme.fgMuted
+                                text: hasWinCondition(modelData.game)
+                                      ? (modelData.won ? "win" : "—")
+                                      : ""
+                                color: modelData.won && hasWinCondition(modelData.game)
+                                       ? Theme.accentPrimary : Theme.fgMuted
                                 font.pixelSize: 11
                             }
                             Label {
@@ -368,7 +561,7 @@ Item {
                         anchors.centerIn: parent
                         visible: gameList.count === 0
                         text: entries().length === 0
-                            ? "No minigames logged yet — play $oh / $oc / $oq while connected. Rows are written to data/minigame_log.json."
+                            ? "No minigames logged yet. Play $oh / $oc / $oq while connected."
                             : "No entries match the current filters."
                         color: Theme.fgMuted
                         font.pixelSize: 12
@@ -434,34 +627,51 @@ Item {
                         font.pixelSize: 10
                     }
 
-                    Flow {
+                    Flickable {
                         Layout.fillWidth: true
-                        spacing: 8
-                        Repeater {
-                            model: selectedEntry() ? (selectedEntry().clicks || []) : []
-                            delegate: RowLayout {
-                                required property var modelData
-                                required property int index
-                                spacing: 4
-                                Label {
-                                    text: (index + 1) + "."
-                                    color: Theme.fgMuted
-                                    font.pixelSize: 10
-                                }
-                                SphereTypeBadge { sphereId: modelData.emoji || "" }
-                                Repeater {
-                                    model: modelData.resolved || []
-                                    delegate: SphereTypeBadge {
-                                        required property var modelData
-                                        sphereId: modelData
+                        Layout.fillHeight: true
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        contentWidth: width
+                        contentHeight: clickColumn.implicitHeight
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                        ColumnLayout {
+                            id: clickColumn
+                            width: parent.width
+                            spacing: 6
+
+                            Repeater {
+                                model: selectedEntry() ? (selectedEntry().clicks || []) : []
+                                delegate: RowLayout {
+                                    required property var modelData
+                                    required property int index
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    Label {
+                                        text: (index + 1) + "."
+                                        color: Theme.fgMuted
+                                        font.pixelSize: 11
+                                        Layout.preferredWidth: 20
                                     }
-                                }
-                                Label {
-                                    text: cellLabel(modelData.cell)
-                                          + (modelData.paid ? "" : " free")
-                                          + (modelData.oc_bonus ? " +$oc" : "")
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 10
+                                    SphereTypeBadge { sphereId: modelData.emoji || "" }
+                                    Repeater {
+                                        model: modelData.resolved || []
+                                        delegate: SphereTypeBadge {
+                                            required property var modelData
+                                            sphereId: modelData
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: cellLabel(modelData.cell)
+                                              + (modelData.paid ? "" : " free")
+                                              + (modelData.oc_bonus ? " +$oc" : "")
+                                        color: Theme.fgSecondary
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
                                 }
                             }
                         }

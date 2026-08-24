@@ -46,6 +46,7 @@ class SessionLogRecorder:
     _lines: list[dict[str, Any]] = field(default_factory=list)
     _active: bool = False
     _path: Path | None = None
+    _minigames: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
@@ -62,8 +63,15 @@ class SessionLogRecorder:
             "started_at": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
         }
         self._lines = []
+        self._minigames = []
         self._active = True
         self._path = None
+
+    def attach_minigame(self, session: dict[str, Any]) -> None:
+        """Store a finished $oh / $oc / $oq board on this session file."""
+        if not self._active:
+            return
+        self._minigames.append(dict(session))
 
     def write(self, entry: ActivityLogEntry, *, ts: str) -> None:
         if not self._active:
@@ -89,6 +97,8 @@ class SessionLogRecorder:
             "meta": self._meta,
             "lines": self._lines,
         }
+        if self._minigames:
+            payload["minigames"] = self._minigames
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         text_path = path.with_suffix(".log")
         text_path.write_text(format_session_text(payload), encoding="utf-8")
@@ -116,4 +126,18 @@ def format_session_text(payload: dict[str, Any]) -> str:
             lines.append(f"[{hhmmss}] [debug] {text}")
         else:
             lines.append(f"[{hhmmss}] {text}")
+    games = payload.get("minigames") or []
+    if games:
+        lines.append("")
+        lines.append(f"# minigames={len(games)} (board + clicks also in the .json)")
+        for index, game in enumerate(games, start=1):
+            if not isinstance(game, dict):
+                continue
+            name = str(game.get("game") or "?")
+            paid = game.get("clicks_paid")
+            budget = game.get("clicks_budget")
+            value = game.get("base_value")
+            lines.append(
+                f"#   {index}. ${name} · {paid}/{budget} paid · {value} base SP"
+            )
     return "\n".join(lines).rstrip() + "\n"

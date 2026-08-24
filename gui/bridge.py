@@ -482,6 +482,12 @@ class AppBridge(QObject):
 
         return json.dumps(client_payload(self._accounts))
 
+    @Property(str, constant=True)
+    def minigameLogPath(self) -> str:
+        from mudae.minigame_log import log_path
+
+        return str(log_path())
+
     @Property(str, constant=False, notify=keysChanged)
     def keysJson(self) -> str:
         from mudae.key_log import client_payload
@@ -1961,21 +1967,44 @@ class AppBridge(QObject):
             Qt.ConnectionType.QueuedConnection,
         )
 
-    def _record_minigame_session(self, result: dict[str, Any] | None) -> None:
+    def _record_minigame_session(
+        self,
+        result: dict[str, Any] | None,
+        *,
+        recorder: Any | None = None,
+        log: Callable[[str], None] | None = None,
+    ) -> None:
         if not result or not self._monitor:
+            if log:
+                log("minigame stats skipped (no result or not connected)")
             return
         session = result.get("session")
         if not isinstance(session, dict):
+            if log:
+                log("minigame stats skipped (no board on this result)")
             return
-        from mudae.minigame_log import record_minigame_session
+        from mudae.minigame_log import log_path, record_minigame_session
 
-        record_minigame_session(
-            session,
-            channel_id=self._monitor.channel_id,
-            channel_name=self._run_channel_name,
-            guild_id=self._run_guild_id,
-            guild_name=self._run_guild_name,
-        )
+        try:
+            entry = record_minigame_session(
+                session,
+                channel_id=self._monitor.channel_id,
+                channel_name=self._run_channel_name,
+                guild_id=self._run_guild_id,
+                guild_name=self._run_guild_name,
+            )
+        except Exception as exc:  # noqa: BLE001 - stats must not kill the game
+            if log:
+                log(f"minigame stats failed: {exc}")
+            return
+        if entry is None:
+            if log:
+                log("minigame stats skipped (empty board)")
+            return
+        if recorder is not None:
+            recorder.attach_minigame(session)
+        if log:
+            log(f"Minigame stats saved: {log_path()}")
         QMetaObject.invokeMethod(
             self,
             "_deliver_minigames_notify",
@@ -2373,7 +2402,9 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
-                self._record_minigame_session(result)
+                self._record_minigame_session(
+                    result, recorder=recorder, log=activity.write
+                )
                 reward = int(result.get("reward") or 0)
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
@@ -2416,7 +2447,9 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
-                self._record_minigame_session(result)
+                self._record_minigame_session(
+                    result, recorder=recorder, log=activity.write
+                )
                 reward = int(result.get("reward") or 0)
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
@@ -2456,7 +2489,9 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
-                self._record_minigame_session(result)
+                self._record_minigame_session(
+                    result, recorder=recorder, log=activity.write
+                )
                 reward = int(result.get("reward") or 0)
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
@@ -2495,7 +2530,9 @@ class AppBridge(QObject):
             self._record_minigame_spheres(game, amount, clicks=clicks)
 
         def _on_result(_game: str, result: dict[str, Any]) -> None:
-            self._record_minigame_session(result)
+            self._record_minigame_session(
+                result, recorder=recorder, log=activity.write
+            )
 
         runner = PlayAllMinigames(
             self._actions,

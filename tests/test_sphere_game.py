@@ -306,6 +306,35 @@ def test_reward_parses_bare_emoji_copy_paste():
     assert total_reward_from_content(content) == 216 + 46 + 146 + 146 + 76 + 76
 
 
+def test_reward_parses_light_breaks_down_into():
+    """Mudae writes one light line with fragments and ``=> +N``, not per-colour +N."""
+    line = ":spL: breaks down into :spB: + :spB: + :spB: + :spT: + :spB:  => +156"
+    tracker = (
+        f"{line}\n"
+        ":spG: +106\n"
+        ":spB: +56\n"
+        ":spY: +146\n"
+        ":spG: +106\n"
+    )
+    fragments = ["spB", "spB", "spB", "spT", "spB"]
+    assert reward_outcome_types(line) == fragments
+    assert reward_line_types(line) == fragments
+    assert new_reward_outcome_types("", line) == fragments
+    assert new_reward_line_types("", line) == fragments
+    assert reward_has_entries(line) is True
+    assert total_reward_from_content(tracker) == 156 + 106 + 56 + 146 + 106
+    assert is_oh_reward_message(_reward_snapshot(line)) is True
+
+    custom = (
+        "<:spL:1> breaks down into "
+        "<:spB:2> + <:spB:2> + <:spB:2> + <:spT:3> + <:spB:2>  => **+156**"
+    )
+    assert reward_outcome_types(custom) == fragments
+    assert total_reward_from_content(custom) == 156
+    compact = "<:spL:1> breaks down into <:spB:2>+<:spB:2>+<:spT:3>"
+    assert reward_outcome_types(compact) == ["spB", "spB", "spT"]
+
+
 def test_grid_signature_detects_disabled_change():
     before = [_btn(0, "spD")]
     after = [_btn(0, "spD", disabled=True)]
@@ -626,7 +655,9 @@ def test_oh_game_light_keeps_identity_and_logs_fragments():
     logs: list[str] = []
     scripted = [
         grid0,
-        _reward_snapshot("<:spB:1> **+10**\n<:spT:2> **+20**\n<:spG:3> **+35**"),
+        _reward_snapshot(
+            ":spL: breaks down into :spB: + :spB: + :spB: + :spT: + :spB:  => +156"
+        ),
     ]
     actions = _FakeActions(scripted)
     monitor = SimpleNamespace(macro_active=False)
@@ -641,10 +672,10 @@ def test_oh_game_light_keeps_identity_and_logs_fragments():
 
     click = result["session"]["clicks"][0]
     assert click["emoji"] == "spL"
-    assert click["resolved"] == ["spB", "spT", "spG"]
-    assert click["base_sp"] == 10 + 20 + 35
+    assert click["resolved"] == ["spB", "spB", "spB", "spT", "spB"]
+    assert click["base_sp"] == 10 + 10 + 10 + 20 + 10
     assert result["session"]["board"][0] == "spL"
-    assert any("spL → spB+spT+spG" in line for line in logs)
+    assert any("spL → spB+spB+spB+spT+spB" in line for line in logs)
 
 
 def test_oh_game_hidden_purple_reveal_on_grid_is_free():

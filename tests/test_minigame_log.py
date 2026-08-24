@@ -9,6 +9,7 @@ from macro.minigame_board import build_session, classify_oh_click, make_click
 from mudae.minigame_log import (
     build_stats,
     client_payload,
+    log_path,
     record_minigame_session,
     set_recording_account,
 )
@@ -54,6 +55,18 @@ def test_light_click_keeps_identity_and_sums_fragments():
     assert click["emoji"] == "spL"
     assert click["resolved"] == ["spB", "spT", "spG"]
     assert click["base_sp"] == 10 + 20 + 35
+    five = classify_oh_click(
+        clicked_emoji="spL",
+        reward_types=["spB", "spB", "spB", "spT", "spB"],
+    )
+    five_click = make_click(
+        21,
+        five["emoji"],
+        paid=True,
+        resolved=five["resolved"],
+    )
+    assert five_click["resolved"] == ["spB", "spB", "spB", "spT", "spB"]
+    assert five_click["base_sp"] == 60
     board = ["spL"] + ["spU"] * 24
     session = build_session(
         "oh", [click], board, clicks_paid=1, clicks_budget=5, reason="done"
@@ -152,6 +165,42 @@ def test_hidden_oh_click_grants_oc_not_sp():
     assert clicked == {"spU": 1}
     assert stats["totals"]["oc_grants"] == 1
     assert stats["spawn"] == []
+
+
+def test_oh_does_not_affect_win_rate():
+    oh = build_session(
+        "oh",
+        [make_click(0, "spD", paid=True, resolved=["spR"])],
+        ["spD"] + ["spU"] * 24,
+        clicks_paid=1,
+        clicks_budget=5,
+        reason="done",
+    )
+    oq = build_session(
+        "oq",
+        [make_click(15, "spT", paid=True)],
+        ["spU"] * 25,
+        clicks_paid=1,
+        clicks_budget=7,
+        reason="done",
+    )
+    assert oh["won"] is True
+    assert oq["won"] is False
+    stats = build_stats([oh, oq])
+    assert stats["totals"]["games"] == 2
+    assert stats["totals"]["scored_games"] == 1
+    assert stats["totals"]["wins"] == 0
+    assert stats["totals"]["win_rate"] == 0.0
+    by_id = {row["id"]: row for row in stats["by_game"]}
+    assert by_id["oh"]["has_win"] is False
+    assert by_id["oh"]["wins"] == 0
+    assert by_id["oq"]["has_win"] is True
+
+
+def test_log_path_is_under_data():
+    path = log_path()
+    assert path.name == "minigame_log.json"
+    assert path.parent.name == "data"
 
 
 def test_record_minigame_session_skips_no_grid(tmp_path, monkeypatch):

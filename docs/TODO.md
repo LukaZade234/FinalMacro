@@ -59,7 +59,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - ~~After `force_reconnect`, restore `macro_active` if it was set.~~ `startMacro` refuses while a minigame is running.
 - ~~`$oq` MIXED hunt.~~ Replay harness in `macro/oq_replay.py` (`scripts/oq_bakeoff.py`). Opening is Colblitz `(1,1)` (index 6). Finding 3 purples auto-reveals the 4th as a clickable red — we claim it, we do not search hidden cells. Two-purple hunt uses expectimax. Full replay MIXED **95.6% red / 344.8 avg** (Colblitz 95.4% / 342.7).
 - Timezones. Every later “today”, daily report, and perk-8/minigame skip uses this clock.
-- Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` tracker lines are parsed (session log shows `spD → spP`). Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
+- Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
 - Chaos parser in the same key/sphere pass.
 - Empty states + reaction-power max while the GUI is open (stop lying).
 
@@ -163,7 +163,7 @@ Pass over the running app after the rankings above. Items already listed earlier
 - ~~**Hardcoded `lukazade234` display fallback**~~ — soulmate rows get `account_name` from `owner`; missing name shows `"Unknown"`. The duplicate GUI profile still named Default is leftover config, not a display hack.
 - **`CLAIM_INTERVAL` is parsed and then ignored** — pipeline classifies “once per interval” rejections; `wait_for_claim` only accepts `CLAIM` / `MARRIAGE`, so the attempt times out, `claim_available` stays true, and the macro may retry into the same wall.
 - **Unknown reaction power is treated as infinite** — `can_afford_reaction` returns true when `power_percent is None`. After a skipped `$tu` or a partial restore, paid kakera fire until Mudae denies. `$us` stop-on-power does the opposite (returns false when unknown) and also assumes a chaos key when computing min cost, so it stops too late without one.
-- ~~**`$oh` dark “turns into” was dropped**~~ — Mudae writes `<:spD:…> turns into <:spP:…>` (no `**+**` on that line) then `<:spP:…> (Free) **+N**`. Parser now reads transform + `(Free)` lines; dark stays a **paid** click and the session log shows `spD → spP`. Hidden clicks log `hidden → spY` (etc.) instead of just `hidden`. Stats rows: `data/minigame_log.json` and Statistics → Minigames — not `data/session_logs/`.
+- ~~**`$oh` dark “turns into” / light “breaks down into” were dropped**~~ — Dark: `<:spD:…> turns into <:spP:…>` then `(Free) **+N**`. Light: `:spL: breaks down into :spB: + … => +156` (fragments, not a single `**+**` on `spL`). Dark/light stay paid; session log shows `spD → spP` / `spL → spB+…`. Hidden clicks log `hidden → spY`. Stats: `data/minigame_log.json` / Statistics → Minigames.
 
 ### Robustness (not wrong today, fail overnight)
 
