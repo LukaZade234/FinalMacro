@@ -169,6 +169,7 @@ class AppBridge(QObject):
     soulmatesChanged = Signal()
     kakeraChanged = Signal()
     spheresChanged = Signal()
+    minigamesChanged = Signal()
     keysChanged = Signal()
     mudaeSettingsPresetsChanged = Signal()
     settingsApplyChanged = Signal()
@@ -472,6 +473,12 @@ class AppBridge(QObject):
     @Property(str, constant=False, notify=spheresChanged)
     def spheresJson(self) -> str:
         from mudae.sphere_log import client_payload
+
+        return json.dumps(client_payload(self._accounts))
+
+    @Property(str, constant=False, notify=minigamesChanged)
+    def minigamesJson(self) -> str:
+        from mudae.minigame_log import client_payload
 
         return json.dumps(client_payload(self._accounts))
 
@@ -1454,6 +1461,7 @@ class AppBridge(QObject):
         from mudae.key_log import set_recording_account as set_key_account
         from mudae.soulmate_log import set_recording_account
         from mudae.sphere_log import set_recording_account as set_sphere_account
+        from mudae.minigame_log import set_recording_account as set_minigame_account
 
         self._run_token = resolved.token.strip()
         self._run_account_id = resolved.account_id
@@ -1468,6 +1476,7 @@ class AppBridge(QObject):
         set_kakera_account(resolved.account_id, account_name)
         set_key_account(resolved.account_id, account_name)
         set_sphere_account(resolved.account_id, account_name)
+        set_minigame_account(resolved.account_id, account_name)
 
         channel_profile = self._profiles.find_channel_by_profile_id(
             resolved.channel_profile_id
@@ -1832,6 +1841,10 @@ class AppBridge(QObject):
         self._notify_run_summary()
 
     @Slot()
+    def _deliver_minigames_notify(self) -> None:
+        self.minigamesChanged.emit()
+
+    @Slot()
     def _deliver_keys_notify(self) -> None:
         self.keysChanged.emit()
         self._notify_run_summary()
@@ -1948,6 +1961,27 @@ class AppBridge(QObject):
             Qt.ConnectionType.QueuedConnection,
         )
 
+    def _record_minigame_session(self, result: dict[str, Any] | None) -> None:
+        if not result or not self._monitor:
+            return
+        session = result.get("session")
+        if not isinstance(session, dict):
+            return
+        from mudae.minigame_log import record_minigame_session
+
+        record_minigame_session(
+            session,
+            channel_id=self._monitor.channel_id,
+            channel_name=self._run_channel_name,
+            guild_id=self._run_guild_id,
+            guild_name=self._run_guild_name,
+        )
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_minigames_notify",
+            Qt.ConnectionType.QueuedConnection,
+        )
+
     @Slot(str)
     def _deliver_profile_update(self, payload_json: str) -> None:
         data = json.loads(payload_json)
@@ -1971,10 +2005,12 @@ class AppBridge(QObject):
         from mudae.kakera_log import flush_disk_log
         from mudae.key_log import flush_disk_log as flush_key_log
         from mudae.sphere_log import flush_disk_log as flush_sphere_log
+        from mudae.minigame_log import flush_disk_log as flush_minigame_log
 
         flush_disk_log()
         flush_key_log()
         flush_sphere_log()
+        flush_minigame_log()
         self._on_connected(False)
         self._on_notification_standby(True)
         return True
@@ -2089,14 +2125,20 @@ class AppBridge(QObject):
                 clear_recording_account as clear_sphere_account,
                 flush_disk_log as flush_sphere_log,
             )
+            from mudae.minigame_log import (
+                clear_recording_account as clear_minigame_account,
+                flush_disk_log as flush_minigame_log,
+            )
 
             clear_recording_account()
             clear_soulmate_account()
             clear_key_account()
             clear_sphere_account()
+            clear_minigame_account()
             flush_disk_log()
             flush_key_log()
             flush_sphere_log()
+            flush_minigame_log()
             self._run_guild_id = None
             self._run_guild_name = None
             self._run_channel_name = None
@@ -2331,6 +2373,7 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
+                self._record_minigame_session(result)
                 reward = int(result.get("reward") or 0)
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
@@ -2373,6 +2416,7 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
+                self._record_minigame_session(result)
                 reward = int(result.get("reward") or 0)
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
@@ -2412,6 +2456,7 @@ class AppBridge(QObject):
             reason = "finished"
             try:
                 result = await game.play(prefix=self._macro_config.prefix)
+                self._record_minigame_session(result)
                 reward = int(result.get("reward") or 0)
                 clicks = int(result.get("clicks") or 0)
                 if reward > 0:
@@ -2449,11 +2494,15 @@ class AppBridge(QObject):
         def _on_reward(game: str, amount: int, clicks: int) -> None:
             self._record_minigame_spheres(game, amount, clicks=clicks)
 
+        def _on_result(_game: str, result: dict[str, Any]) -> None:
+            self._record_minigame_session(result)
+
         runner = PlayAllMinigames(
             self._actions,
             self._monitor,
             log=activity.write,
             on_game_reward=_on_reward,
+            on_game_result=_on_result,
         )
 
         async def _run() -> None:

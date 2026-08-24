@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import random
-
+from macro.oq_replay import auto_reveal_fourth_purple, reveal_oq_cell
 from macro.oq_solver import (
     CLICK_BUDGET,
     DEFAULT_OPENING_CELL,
@@ -12,7 +11,9 @@ from macro.oq_solver import (
     filter_worlds,
     get_game_state,
     harvest_ranking,
+    heuristic_analysis,
     is_paid_reveal,
+    locate_mine_candidates_from,
     observations_from_buttons,
     states_from_observations,
 )
@@ -39,21 +40,23 @@ def _board_from_world(world_index: int) -> dict[int, str]:
 
 def _simulate_clicks(grid: dict[int, str], *, budget: int = CLICK_BUDGET) -> list[int]:
     obs: dict[int, str] = {}
+    clicked: set[int] = set()
     clicks: list[int] = []
     paid = 0
+    emoji_of = {
+        "t": "spP",
+        "r": "sp",
+        "0": "spB",
+        "1": "spT",
+        "2": "spG",
+        "3": "spY",
+        "4": "spO",
+    }
     for _ in range(budget + 4):
+        auto_reveal_fourth_purple(grid, obs)
         buttons = [_btn(i, "spU") for i in range(25)]
         for idx, color in obs.items():
-            emoji = {
-                "t": "spP",
-                "r": "sp",
-                "0": "spB",
-                "1": "spT",
-                "2": "spG",
-                "3": "spY",
-                "4": "spO",
-            }[color]
-            buttons[idx] = _btn(idx, emoji, disabled=True)
+            buttons[idx] = _btn(idx, emoji_of[color], disabled=idx in clicked)
         choice = choose_oq_click(
             buttons,
             obs,
@@ -64,8 +67,9 @@ def _simulate_clicks(grid: dict[int, str], *, budget: int = CLICK_BUDGET) -> lis
             break
         index = int(choice["custom_id"].split("s")[1])
         clicks.append(index)
-        reveal = grid[index]
+        reveal = reveal_oq_cell(grid, obs, index)
         obs[index] = reveal
+        clicked.add(index)
         if is_paid_reveal(reveal):
             paid += 1
         if paid >= budget:
@@ -104,8 +108,8 @@ def test_filter_worlds_empty_board():
     assert len(valid) == len(oq_worlds.ALL_WORLDS) == 12_650
 
 
-def test_opening_cell_is_inner_edge():
-    assert DEFAULT_OPENING_CELL == 7
+def test_opening_cell_is_colblitz_inner():
+    assert DEFAULT_OPENING_CELL == 6
     buttons = [_btn(i) for i in range(25)]
     choice = choose_oq_click(buttons, {})
     assert choice is not None
@@ -137,8 +141,19 @@ def test_solver_finds_three_purples_on_sample_board():
     purples = {index for index, color in grid.items() if color == "t"}
     clicks = _simulate_clicks(grid)
     found = [index for index in clicks if grid[index] == "t"]
-    assert len(found) >= 3
-    assert purples & set(clicks)
+    assert len(found) == 4
+    assert found[:3]  # three purples first, then the auto-red 4th
+    assert set(found) == purples
+
+
+def test_choose_does_not_search_when_three_purples_and_no_red():
+    """The 4th becomes visible red on the grid — do not probe hidden cells."""
+    buttons = [_btn(i) for i in range(25)]
+    for index in (0, 5, 10):
+        buttons[index] = _btn(index, "spP", disabled=True)
+    obs = {0: "t", 5: "t", 10: "t"}
+    choice = choose_oq_click(buttons, obs, clicks_spent=4, clicks_budget=CLICK_BUDGET)
+    assert choice is None
 
 
 def test_choose_clickable_revealed_red():
@@ -227,3 +242,20 @@ def test_game_state_red_visible_is_not_a_spent_click():
     assert phase.value == "bonus_harvest"
     assert targets == 3
     assert clicks == 2
+
+
+def test_heuristic_last_click_uses_paid_remain_not_board_size():
+    """Passing remaining paid clicks must not collapse to last-click early."""
+    ensure_built()
+    states = ["?"] * 25
+    states[0] = states[5] = states[10] = "t"
+    valid = filter_worlds(states)
+    allowed = locate_mine_candidates_from(valid, states)
+    _cell, reason = heuristic_analysis(
+        valid, states, clicks_remain=3, allowed=allowed
+    )
+    assert not reason.startswith("last click")
+    _cell, last = heuristic_analysis(
+        valid, states, clicks_remain=1, allowed=allowed
+    )
+    assert last.startswith("last click")

@@ -18,10 +18,12 @@ from macro.sphere_game import (
     is_oh_grid_message,
     is_oh_reward_message,
     new_reward_line_types,
+    new_reward_outcome_types,
     parse_clicks_allowed,
     purple_free_outcome,
     reward_has_entries,
     reward_line_types,
+    reward_outcome_types,
     total_reward_from_content,
     wait_for_minigame_click_ack,
 )
@@ -159,6 +161,8 @@ def test_parse_clicks_allowed():
 def test_total_reward_from_content():
     content = "<:spY:1> **+59**\n<:spB:2> **+14**\n<:spT:3> **+1,200** (Stock: **5**)"
     assert total_reward_from_content(content) == 59 + 14 + 1200
+    hidden_oc = "<:spU:1> **+1**\n<:spY:2> **+59**"
+    assert total_reward_from_content(hidden_oc) == 59
 
 
 def test_is_oh_grid_message_requires_grid_and_text():
@@ -262,6 +266,44 @@ def test_reward_line_parsing():
     assert reward_has_entries("(Rewards appear here)") is False
     before = "<:spY:1> **+59**"
     assert new_reward_line_types(before, content) == ["spY", "spP"]
+
+
+def test_reward_parses_dark_turns_into_and_free_payout():
+    """Mudae writes a transform line with no +amount, then a (Free) purple payout."""
+    content = (
+        "<:spO:1> **+216**\n"
+        "<:spD:2> turns into <:spP:3>\n"
+        "<:spP:3> (Free) **+46**\n"
+        "<:spY:4> **+146**\n"
+        "<:spT:5> **+76** (Stock: 37,458)"
+    )
+    assert reward_line_types(content) == ["spO", "spP", "spY", "spT"]
+    assert reward_outcome_types(content) == ["spO", "spP", "spP", "spY", "spT"]
+    assert new_reward_outcome_types("<:spO:1> **+216**", content) == [
+        "spP",
+        "spP",
+        "spY",
+        "spT",
+    ]
+    assert new_reward_outcome_types("", "<:spD:2> turns into <:spP:3>") == ["spP"]
+    assert new_reward_line_types("", "<:spD:2> turns into <:spP:3>") == []
+    assert total_reward_from_content(content) == 216 + 46 + 146 + 76
+    assert reward_has_entries("<:spD:2> turns into <:spP:3>") is True
+
+
+def test_reward_parses_bare_emoji_copy_paste():
+    content = (
+        ":spO: +216\n"
+        ":spD:  turns into :spP:\n"
+        ":spP: (Free) +46\n"
+        ":spY: +146\n"
+        ":spY: +146\n"
+        ":spT: +76\n"
+        ":spT: +76 (Stock: 37,458)\n"
+    )
+    assert "spP" in reward_outcome_types(content)
+    assert new_reward_outcome_types(":spO: +216", content)[0] == "spP"
+    assert total_reward_from_content(content) == 216 + 46 + 146 + 146 + 76 + 76
 
 
 def test_grid_signature_detects_disabled_change():
@@ -388,6 +430,41 @@ def test_oh_game_waits_for_grid_when_reward_arrives_first():
 
     assert clicks == ["cmd s12", "cmd s11"]
     assert result["clicks"] == 2
+    assert int(result.get("oc_bonus") or 0) == 1
+    session = result["session"]
+    assert session["clicks"][0]["emoji"] == "spU"
+    assert session["clicks"][0]["oc_bonus"] == 1
+    assert session["clicks"][0]["base_sp"] == 0
+
+
+def test_oh_game_hidden_colour_logs_what_it_became():
+    grid0 = _grid_snapshot(
+        [_btn(i, "spU", disabled=(i != 8)) for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    grid1 = _grid_snapshot(
+        [_btn(i, "spU", disabled=True) for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    logs: list[str] = []
+    scripted = [
+        grid0,
+        _reward_snapshot("<:spY:1> **+59**"),
+        grid1,
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=logs.append,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+    click = result["session"]["clicks"][0]
+    assert click["emoji"] == "spY"
+    assert any("hidden → spY" in line for line in logs)
 
 
 def test_oh_game_plays_until_clicks_exhausted():
@@ -495,6 +572,13 @@ def test_purple_free_outcome_from_reward_or_grid():
     assert purple_free_outcome("cmd s5", "", "<:spP:1> **+42**", buttons) is True
     dark_buttons = [_btn(5, "spD", disabled=True)]
     assert purple_free_outcome("cmd s5", "", "<:spD:1> **+10**", dark_buttons) is False
+    assert purple_free_outcome(
+        "cmd s5",
+        "",
+        "<:spD:1> turns into <:spP:2>\n<:spP:2> (Free) **+46**",
+        dark_buttons,
+        clicked_emoji="spD",
+    ) is False
     hidden_reveal = [_btn(5, "spP", disabled=True)] + [_btn(i, "spU") for i in range(25) if i != 5]
     assert purple_free_outcome("cmd s5", "", "", hidden_reveal) is True
 
@@ -504,24 +588,63 @@ def test_oh_game_dark_purple_bonus_from_reward_tracker():
         [_btn(i, "spD" if i == 5 else "spU", disabled=(i != 5)) for i in range(25)],
         content="You can click **1** times on the buttons below.",
     )
+    logs: list[str] = []
     scripted = [
         grid0,
-        _reward_snapshot("<:spP:1> **+42**"),
+        _reward_snapshot(
+            "<:spD:1> turns into <:spP:2>\n"
+            "<:spP:2> (Free) **+42**"
+        ),
     ]
     actions = _FakeActions(scripted)
     monitor = SimpleNamespace(macro_active=False)
     game = OhSphereGame(
         actions,
         monitor,
-        log=lambda _t: None,
+        log=logs.append,
         rng=random.Random(0),
         click_delay=0.0,
     )
     result = asyncio.run(game.play(prefix="$"))
 
     assert len(actions.clicks) == 1
-    assert result["clicks"] == 0
-    assert result["free_clicks"] == 1
+    assert result["clicks"] == 1
+    assert result["free_clicks"] == 0
+    click = result["session"]["clicks"][0]
+    assert click["emoji"] == "spD"
+    assert click["resolved"] == ["spP"]
+    assert click["paid"] is True
+    assert click["base_sp"] == 5
+    assert any("spD → spP" in line for line in logs)
+
+
+def test_oh_game_light_keeps_identity_and_logs_fragments():
+    grid0 = _grid_snapshot(
+        [_btn(i, "spL" if i == 0 else "spU", disabled=(i != 0)) for i in range(25)],
+        content="You can click **1** times on the buttons below.",
+    )
+    logs: list[str] = []
+    scripted = [
+        grid0,
+        _reward_snapshot("<:spB:1> **+10**\n<:spT:2> **+20**\n<:spG:3> **+35**"),
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    game = OhSphereGame(
+        actions,
+        monitor,
+        log=logs.append,
+        rng=random.Random(0),
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    click = result["session"]["clicks"][0]
+    assert click["emoji"] == "spL"
+    assert click["resolved"] == ["spB", "spT", "spG"]
+    assert click["base_sp"] == 10 + 20 + 35
+    assert result["session"]["board"][0] == "spL"
+    assert any("spL → spB+spT+spG" in line for line in logs)
 
 
 def test_oh_game_hidden_purple_reveal_on_grid_is_free():

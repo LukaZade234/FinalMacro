@@ -1,8 +1,8 @@
 """Play the Mudae ``$oq`` (Orb Quest) sphere minigame.
 
 Four purple spheres hide on a 5×5 grid. Revealed numbers count adjacent purples
-(Minesweeper-style). Find 3 purples within 7 paid clicks; the 4th becomes red,
-then remaining clicks harvest high-value orbs.
+(Minesweeper-style). Find 3 purples within 7 paid clicks; Mudae then auto-reveals
+the 4th as a clickable red (or rainbow). Remaining clicks harvest high-value orbs.
 """
 
 from __future__ import annotations
@@ -14,8 +14,17 @@ from collections.abc import Callable
 from typing import Any
 
 from macro.minigame_util import minigame_command
+from macro.minigame_board import (
+    board_emojis,
+    build_session,
+    cell_index,
+    make_click,
+    revealed_click_emoji,
+)
 from macro.oq_solver import (
     CLICK_BUDGET,
+    OQ_RED_EMOJIS,
+    TARGET_PURPLES,
     choose_oq_click,
     emoji_to_oq_state,
     format_solver_stats,
@@ -33,6 +42,7 @@ from macro.sphere_game import (
     parse_clicks_allowed,
     reward_has_entries,
     total_reward_from_content,
+    wait_for_final_grid,
     wait_for_minigame_click_ack,
 )
 
@@ -52,6 +62,13 @@ def _sphere_buttons(buttons: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _is_clickable(button: dict[str, Any]) -> bool:
     return bool(button.get("custom_id")) and not button.get("disabled")
+
+
+def _has_clickable_red(buttons: list[dict[str, Any]]) -> bool:
+    return any(
+        _is_clickable(button) and _emoji(button) in OQ_RED_EMOJIS
+        for button in _sphere_buttons(buttons)
+    )
 
 
 def is_oq_grid_message(snapshot: Any) -> bool:
@@ -118,14 +135,16 @@ class OqSphereGame:
             grid_id = grid.message_id
             buttons = list(grid.buttons)
             clicks_budget = parse_clicks_allowed(grid.content) or CLICK_BUDGET
+            session_clicks: list[dict[str, Any]] = []
             self._observations = observations_from_buttons(buttons)
             self._paid_clicks = 0
             self._log(
                 f"{label}: grid ready · {clicks_budget} paid clicks · "
-                f"{format_solver_stats(self._observations)}"
+                f"{format_solver_stats(self._observations, clicks_spent=0)}"
             )
             await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
 
+            awaited_red = False
             while not is_oq_game_over(buttons):
                 try:
                     self._observations = merge_observations(
@@ -142,6 +161,29 @@ class OqSphereGame:
                     clicks_budget=clicks_budget,
                 )
                 if choice is None:
+                    n_purple = sum(
+                        1 for state in self._observations.values() if state == "t"
+                    )
+                    if (
+                        paid_clicks < clicks_budget
+                        and n_purple >= TARGET_PURPLES
+                        and not _has_clickable_red(buttons)
+                        and not awaited_red
+                    ):
+                        self._log("$oq: waiting for the 4th purple to become red")
+                        buttons = await wait_for_final_grid(
+                            self._actions,
+                            grid_id=grid_id,
+                            buttons=buttons,
+                            is_grid_message=is_oq_grid_message,
+                            get_reward_content=lambda: self._reward_content,
+                            set_reward_content=lambda content: setattr(
+                                self, "_reward_content", content
+                            ),
+                            timeout=self._edit_timeout,
+                        )
+                        awaited_red = True
+                        continue
                     if paid_clicks >= clicks_budget:
                         self._log("$oq: click budget spent")
                     else:
@@ -149,7 +191,7 @@ class OqSphereGame:
                     break
 
                 custom_id = choice["custom_id"]
-                cell_index = self._cell_index(buttons, custom_id)
+                clicked_index = cell_index(buttons, custom_id)
                 before_sig = grid_signature(buttons)
                 before_reward = self._reward_content
 
@@ -163,7 +205,7 @@ class OqSphereGame:
                     before_sig,
                     before_reward,
                     custom_id=custom_id,
-                    clicked_index=cell_index,
+                    clicked_index=clicked_index,
                 )
                 if updated is None and reward_content == before_reward:
                     self._log("$oq: click ack timeout — stopping")
@@ -181,21 +223,48 @@ class OqSphereGame:
                 reveal_state = self._sync_observations(
                     buttons,
                     reward_content,
-                    clicked_index=cell_index,
+                    clicked_index=clicked_index,
                     before_reward=before_reward,
                 )
-                if is_paid_reveal(reveal_state):
+                paid = is_paid_reveal(reveal_state)
+                if paid:
                     paid_clicks += 1
+                reveal_emoji = revealed_click_emoji(
+                    reward_types=new_reward_line_types(before_reward, reward_content),
+                    buttons=buttons,
+                    clicked_index=clicked_index,
+                    fallback=reveal_state if reveal_state not in {"?", ""} else "",
+                )
+                session_clicks.append(
+                    make_click(clicked_index, reveal_emoji, paid=paid)
+                )
 
                 self._log(
                     f"$oq: click {paid_clicks}/{clicks_budget} paid → cell "
-                    f"{self._cell_label(cell_index)} · "
-                    f"{format_solver_stats(self._observations)}"
+                    f"{self._cell_label(clicked_index)} · "
+                    f"{format_solver_stats(self._observations, clicks_spent=paid_clicks)}"
                 )
                 await asyncio.sleep(self._click_delay)
 
             if is_oq_game_over(buttons):
                 self._log("$oq: grid locked — minigame finished")
+
+            buttons = await wait_for_final_grid(
+                self._actions,
+                grid_id=grid_id,
+                buttons=buttons,
+                is_grid_message=is_oq_grid_message,
+                get_reward_content=lambda: self._reward_content,
+                set_reward_content=lambda content: setattr(self, "_reward_content", content),
+            )
+            session = build_session(
+                "oq",
+                session_clicks,
+                board_emojis(buttons),
+                clicks_paid=paid_clicks,
+                clicks_budget=clicks_budget,
+                reason="done",
+            )
 
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
@@ -204,6 +273,7 @@ class OqSphereGame:
                 "clicks": paid_clicks,
                 "reward": reward,
                 "reason": "done",
+                "session": session,
             }
         finally:
             self._monitor.macro_active = previously_active

@@ -159,6 +159,7 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
                 "clicks": 5,
                 "reward": 100,
                 "oq_bonus": 2,
+                "oc_bonus": 3,
                 "spheres_bonus": 5344,
                 "reason": "done",
             },
@@ -202,14 +203,16 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
     result = asyncio.run(runner.play(prefix="$"))
 
     assert actions.sent == [("ohu", "$")]
-    assert sent == ["oh:7:$", "oc:4:$", "oq:10:$", "oq:1:$"]
+    assert sent == ["oh:7:$", "oc:7:$", "oq:10:$", "oq:1:$"]
     assert result["availability"]["oq_total"] == 11
+    assert result["availability"]["oc_total"] == 7
     assert result["availability"]["ot_total"] == 3
     assert ("oh", 100, 5) in rewards
     assert ("oh", 5344, 0) in rewards
     assert ("oc", 50, 5) in rewards
     assert ("oq", 80, 7) in rewards
     assert any("$ot 3 (saved, not played)" in line for line in logs)
+    assert any("$oc from $oh hidden clicks" in line for line in logs)
 
 
 def test_play_all_skips_zero_uses(monkeypatch):

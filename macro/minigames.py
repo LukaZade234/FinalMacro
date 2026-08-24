@@ -37,6 +37,7 @@ def _merge_game_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "clicks": 0,
         "reward": 0,
         "oq_bonus": 0,
+        "oc_bonus": 0,
         "spheres_bonus": 0,
         "reason": "done",
         "batches": len(results),
@@ -45,6 +46,7 @@ def _merge_game_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         merged["clicks"] += int(result.get("clicks") or 0)
         merged["reward"] += int(result.get("reward") or 0)
         merged["oq_bonus"] += int(result.get("oq_bonus") or 0)
+        merged["oc_bonus"] += int(result.get("oc_bonus") or 0)
         merged["spheres_bonus"] += int(result.get("spheres_bonus") or 0)
         if result.get("reason") not in {None, "done"}:
             merged["reason"] = result.get("reason")
@@ -61,12 +63,14 @@ class PlayAllMinigames:
         *,
         log: Callable[[str], None],
         on_game_reward: Callable[[str, int, int], None] | None = None,
+        on_game_result: Callable[[str, dict[str, Any]], None] | None = None,
         between_games_sec: float = _BETWEEN_GAMES_SEC,
     ) -> None:
         self._actions = actions
         self._monitor = monitor
         self._log = log
         self._on_game_reward = on_game_reward
+        self._on_game_result = on_game_result
         self._between_games_sec = between_games_sec
         self.availability: dict[str, int] = {
             f"{game}_{kind}": 0
@@ -106,12 +110,19 @@ class PlayAllMinigames:
             for result in oh_results:
                 self._record_reward("oh", result)
             oq_bonus = int(oh_result.get("oq_bonus") or 0)
+            oc_bonus = int(oh_result.get("oc_bonus") or 0)
             spheres_bonus = int(oh_result.get("spheres_bonus") or 0)
             if oq_bonus > 0:
                 oq_uses += oq_bonus
                 self.availability["oq_total"] = oq_uses
                 self._log(
                     f"play-all: +{oq_bonus} $oq from invested spheres → $oq {oq_uses}"
+                )
+            if oc_bonus > 0:
+                oc_uses += oc_bonus
+                self.availability["oc_total"] = oc_uses
+                self._log(
+                    f"play-all: +{oc_bonus} $oc from $oh hidden clicks → $oc {oc_uses}"
                 )
             if spheres_bonus > 0 and self._on_game_reward:
                 self._on_game_reward("oh", spheres_bonus, 0)
@@ -181,6 +192,8 @@ class PlayAllMinigames:
         return results
 
     def _record_reward(self, game: str, result: dict[str, Any]) -> None:
+        if self._on_game_result:
+            self._on_game_result(game, result)
         if not self._on_game_reward:
             return
         reward = int(result.get("reward") or 0)

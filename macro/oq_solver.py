@@ -1,8 +1,12 @@
 """Solver for the Mudae ``$oq`` (Orb Quest) sphere minigame.
 
-Ported from the public `OQ Solver <https://orb-quest-book.pages.dev/>` world
-filter + adaptive heuristic. Opening move uses the EV-optimal inner-edge cell
-from that solver's basic book (cell 7 / index 7).
+World filter is the 12,650 purple placements in ``oq_worlds``. Hunt uses the
+Colblitz MIXED scorer (``P(purple) + 0.1×Gini``). Opening is Colblitz overlay
+cell ``(1,1)`` (0-based) = index 6. Last paid click is max ``P(purple)``.
+Finding 3 purples auto-reveals the 4th as red (or rainbow) on the grid — we
+claim that visible sphere, we do not search for it. Leftover clicks harvest.
+When 2 purples are already found, hunt expectimax treats the third as a free
+click that unlocks the auto-red. Entropy hunt is ``hunt_policy="entropy"``.
 """
 
 from __future__ import annotations
@@ -13,15 +17,35 @@ from typing import Any
 
 import macro.oq_worlds as oq_worlds
 from macro.oq_worlds import GRID_CELLS, ensure_built
+from mudae.constants import SPHERE_BASE_SP
 
-# EV-optimal opening from orb-quest-book (canon 7 · inner edge).
-DEFAULT_OPENING_CELL = 7
+# Colblitz overlay ``(1,1)`` is 0-based (inner 3×3). Same cell MIXED picks
+# on an empty board (highest Gini, lowest index).
+DEFAULT_OPENING_CELL = 6
 
 CLICK_BUDGET = 7
 TARGET_PURPLES = 3
 
 # Orb payout during bonus harvest by adjacent-purple count (Blue..Orange).
-HARVEST_VALUE = (10, 20, 35, 55, 90)
+HARVEST_VALUE = (
+    SPHERE_BASE_SP["spB"],
+    SPHERE_BASE_SP["spT"],
+    SPHERE_BASE_SP["spG"],
+    SPHERE_BASE_SP["spY"],
+    SPHERE_BASE_SP["spO"],
+)
+
+# Colblitz MIXED: P(purple) plus a small Gini tie-breaker.
+MIXED_ALPHA = 1.0
+MIXED_BETA = 0.1
+HUNT_POLICY_MIXED = "mixed"
+HUNT_POLICY_ENTROPY = "entropy"
+
+# Depth-limited expectimax once two purples are found. The third is free and
+# unlocks the auto-revealed red; 0–1 purple hunt stays MIXED so colour EV
+# does not steal paid clicks from information.
+EXPECTIMAX_DEPTH = 2
+EXPECTIMAX_TOP_K = 6
 
 OQ_COLORS = frozenset({"0", "1", "2", "3", "4", "t", "r"})
 
@@ -108,15 +132,272 @@ def filter_worlds(states: list[str]) -> frozenset[int]:
 
 def locate_mine_candidates(states: list[str]) -> frozenset[int]:
     """Cells that could hold the 4th purple after 3 are found."""
-    valid = filter_worlds(states)
+    return locate_mine_candidates_from(filter_worlds(states), states)
+
+
+def locate_mine_candidates_from(
+    valid_worlds: frozenset[int],
+    states: list[str],
+) -> frozenset[int]:
     known_targets = {i for i, s in enumerate(states) if s == "t"}
     candidates: set[int] = set()
-    for wi in valid:
+    for wi in valid_worlds:
         for mine in oq_worlds.ALL_WORLDS[wi]:
             if mine not in known_targets:
                 candidates.add(mine)
                 break
     return frozenset(candidates)
+
+
+def _paid_clicks_from_states(states: list[str]) -> int:
+    """Colour and red cells cost a click; purple is free."""
+    return sum(1 for state in states if state not in {"?", "t"})
+
+
+def _hidden_cells(
+    states: list[str],
+    allowed: frozenset[int] | None = None,
+) -> list[int]:
+    return [
+        index
+        for index, state in enumerate(states)
+        if state == "?" and (allowed is None or index in allowed)
+    ]
+
+
+def _purple_sp(purples_found: int) -> int:
+    if purples_found >= TARGET_PURPLES:
+        return SPHERE_BASE_SP["spR"]
+    return SPHERE_BASE_SP["spP"]
+
+
+def _with_cell(states: list[str], cell: int, token: str) -> list[str]:
+    out = list(states)
+    out[cell] = token
+    return out
+
+
+def _analyze_cells(
+    valid_worlds: frozenset[int],
+    cells: list[int],
+) -> dict[int, dict[str, Any]]:
+    """Per-cell P(purple), Gini, MIXED score, and world partitions."""
+    total = len(valid_worlds)
+    if total == 0 or not cells:
+        return {}
+    inv = 1.0 / total
+    result: dict[int, dict[str, Any]] = {}
+    for cell in cells:
+        buckets: dict[int, list[int]] = {}
+        for wi in valid_worlds:
+            outcome = oq_worlds.WORLD_OUTCOMES[wi][cell]
+            bucket = buckets.get(outcome)
+            if bucket is None:
+                buckets[outcome] = [wi]
+            else:
+                bucket.append(wi)
+        mine_count = len(buckets.get(-1, ()))
+        p_purple = mine_count * inv
+        entropy = 0.0
+        gini_sum = 0.0
+        for bucket in buckets.values():
+            p = len(bucket) * inv
+            if p > 0:
+                entropy -= p * math.log2(p)
+                gini_sum += p * p
+        gini = 1.0 - gini_sum
+        result[cell] = {
+            "p_purple": p_purple,
+            "gini": gini,
+            "entropy": entropy,
+            "mixed": MIXED_ALPHA * p_purple + MIXED_BETA * gini,
+            "buckets": buckets,
+        }
+    return result
+
+
+def _immediate_ev(row: dict[str, Any], purples_found: int) -> float:
+    total = 0
+    for bucket in row["buckets"].values():
+        total += len(bucket)
+    if total == 0:
+        return 0.0
+    inv = 1.0 / total
+    ev = 0.0
+    for outcome, bucket in row["buckets"].items():
+        p = len(bucket) * inv
+        if outcome == -1:
+            ev += p * _purple_sp(purples_found)
+        else:
+            ev += p * HARVEST_VALUE[min(int(outcome), 4)]
+    return ev
+
+
+def _greedy_harvest_sp(states: list[str], clicks_remain: int) -> float:
+    if clicks_remain <= 0:
+        return 0.0
+    mines = {index for index, state in enumerate(states) if state in {"t", "r"}}
+    payouts = [
+        HARVEST_VALUE[
+            min(sum(1 for n in oq_worlds.NEIGHBORS[cell] if n in mines), 4)
+        ]
+        for cell, state in enumerate(states)
+        if state == "?"
+    ]
+    payouts.sort(reverse=True)
+    return float(sum(payouts[:clicks_remain]))
+
+
+def _leaf_ev(
+    valid_worlds: frozenset[int],
+    states: list[str],
+    clicks_remain: int,
+    purples_found: int,
+    allowed: frozenset[int] | None,
+) -> float:
+    if clicks_remain <= 0:
+        return 0.0
+    if any(state == "r" for state in states):
+        return _greedy_harvest_sp(states, clicks_remain)
+    hidden = _hidden_cells(states, allowed)
+    info = _analyze_cells(valid_worlds, hidden)
+    if not info:
+        return 0.0
+    if clicks_remain <= 1:
+        cell = max(info, key=lambda c: (info[c]["p_purple"], -c))
+    else:
+        cell = max(info, key=lambda c: (info[c]["mixed"], -c))
+    return _immediate_ev(info[cell], purples_found)
+
+
+def _expectimax(
+    valid_worlds: frozenset[int],
+    states: list[str],
+    clicks_remain: int,
+    purples_found: int,
+    depth: int,
+    allowed: frozenset[int] | None,
+) -> tuple[float, int]:
+    """Return ``(expected_sp, best_cell)`` for the two-purple hunt."""
+    hidden = _hidden_cells(states, allowed)
+    if clicks_remain <= 0 or not hidden or not valid_worlds:
+        return 0.0, -1
+    if any(state == "r" for state in states):
+        return _greedy_harvest_sp(states, clicks_remain), -1
+
+    info = _analyze_cells(valid_worlds, hidden)
+    if not info:
+        return 0.0, -1
+
+    for cell, row in info.items():
+        if row["p_purple"] < 0.9999:
+            continue
+        sp = _purple_sp(purples_found)
+        paid = 0 if purples_found < TARGET_PURPLES else 1
+        child_states = _with_cell(
+            states, cell, "t" if purples_found < TARGET_PURPLES else "r"
+        )
+        nk = clicks_remain - paid
+        npur = min(purples_found + 1, TARGET_PURPLES)
+        child_valid = frozenset(row["buckets"].get(-1, ()))
+        extra = _expectimax_child_value(
+            child_valid, child_states, nk, npur, depth - 1, token="t" if paid == 0 else "r",
+        )
+        return sp + extra, cell
+
+    if clicks_remain <= 1 or depth <= 0:
+        if clicks_remain <= 1:
+            cell = max(info, key=lambda c: (info[c]["p_purple"], -c))
+        else:
+            cell = max(info, key=lambda c: (info[c]["mixed"], -c))
+        return _immediate_ev(info[cell], purples_found), cell
+
+    ranked = sorted(info, key=lambda c: (-info[c]["mixed"], c))
+    best_cell = ranked[0]
+    best_val = -1.0
+    n_worlds = len(valid_worlds)
+    for cell in ranked[:EXPECTIMAX_TOP_K]:
+        row = info[cell]
+        total = 0.0
+        for outcome, worlds in row["buckets"].items():
+            p = len(worlds) / n_worlds
+            if p <= 0:
+                continue
+            child_valid = frozenset(worlds)
+            if outcome == -1:
+                sp = _purple_sp(purples_found)
+                paid = 0 if purples_found < TARGET_PURPLES else 1
+                nk = clicks_remain - paid
+                npur = min(purples_found + 1, TARGET_PURPLES)
+                token = "t" if paid == 0 else "r"
+            else:
+                sp = HARVEST_VALUE[min(int(outcome), 4)]
+                nk = clicks_remain - 1
+                npur = purples_found
+                token = str(outcome)
+            child_states = _with_cell(states, cell, token)
+            extra = _expectimax_child_value(
+                child_valid, child_states, nk, npur, depth - 1, token=token,
+            )
+            total += p * (sp + extra)
+        if total > best_val:
+            best_val = total
+            best_cell = cell
+    return best_val, best_cell
+
+
+def _expectimax_child_value(
+    child_valid: frozenset[int],
+    child_states: list[str],
+    clicks_remain: int,
+    purples_found: int,
+    depth: int,
+    *,
+    token: str,
+) -> float:
+    if clicks_remain <= 0:
+        return 0.0
+    if token == "r":
+        return _greedy_harvest_sp(child_states, clicks_remain)
+    if purples_found >= TARGET_PURPLES:
+        # 3rd purple is in; Mudae auto-reveals the 4th as red. Claim it, then
+        # harvest with that mine on the board.
+        return _auto_red_then_harvest(child_valid, child_states, clicks_remain)
+    if depth <= 0:
+        return _leaf_ev(
+            child_valid, child_states, clicks_remain, purples_found, None,
+        )
+    sub, _ = _expectimax(
+        child_valid, child_states, clicks_remain, purples_found, depth, None,
+    )
+    return sub
+
+
+def _auto_red_then_harvest(
+    valid_worlds: frozenset[int],
+    states: list[str],
+    clicks_remain: int,
+) -> float:
+    if clicks_remain <= 0:
+        return 0.0
+    red_sp = float(SPHERE_BASE_SP["spR"])
+    known = {index for index, state in enumerate(states) if state == "t"}
+    total = 0.0
+    n = 0
+    for world_index in valid_worlds:
+        fourth = next(
+            (mine for mine in oq_worlds.ALL_WORLDS[world_index] if mine not in known),
+            None,
+        )
+        if fourth is None:
+            total += red_sp
+        else:
+            stated = _with_cell(states, fourth, "r")
+            total += red_sp + _greedy_harvest_sp(stated, clicks_remain - 1)
+        n += 1
+    if n == 0:
+        return red_sp + _greedy_harvest_sp(states, clicks_remain - 1)
+    return total / n
 
 
 def _mine_indices(
@@ -162,57 +443,99 @@ def harvest_ranking(
 def heuristic_analysis(
     valid_worlds: frozenset[int],
     states: list[str],
+    *,
+    hunt_policy: str = HUNT_POLICY_MIXED,
+    clicks_remain: int | None = None,
+    allowed: frozenset[int] | None = None,
 ) -> tuple[int, str]:
-    """Return ``(best_cell_index, reason)`` for the main playing phase."""
-    total = len(valid_worlds)
-    if total == 0:
+    """Return ``(best_cell_index, reason)`` for MIXED / entropy / last-click.
+
+    ``clicks_remain`` is paid clicks left. If omitted it is inferred from
+    colour/red cells on ``states`` (never from masked boards).
+    """
+    if not valid_worlds:
         return -1, "no valid worlds"
+    hidden = _hidden_cells(states, allowed)
+    info = _analyze_cells(valid_worlds, hidden)
+    if not info:
+        return -1, "no hidden cells"
 
-    inv = 1.0 / total
-    probs: dict[int, float] = {}
-    entropies: dict[int, float] = {}
+    remain = clicks_remain
+    if remain is None:
+        remain = CLICK_BUDGET - _paid_clicks_from_states(states)
 
-    for cell, state in enumerate(states):
-        if state != "?":
-            continue
-        counts: dict[int, int] = {}
-        mine_count = 0
-        for wi in valid_worlds:
-            outcome = oq_worlds.WORLD_OUTCOMES[wi][cell]
-            counts[outcome] = counts.get(outcome, 0) + 1
-            if outcome == -1:
-                mine_count += 1
-        probs[cell] = mine_count * inv
-        entropy = 0.0
-        for count in counts.values():
-            p = count * inv
-            if p > 0:
-                entropy -= p * math.log2(p)
-        entropies[cell] = entropy
-
-    clicks = sum(1 for s in states if s not in {"?", "t"})
-    clicks_remain = CLICK_BUDGET - clicks
-
-    for cell, prob in probs.items():
-        if prob >= 0.9999:
+    for cell, row in info.items():
+        if row["p_purple"] >= 0.9999:
             return cell, "100% purple (free)"
 
-    if clicks_remain <= 1:
-        best = max(probs, key=lambda c: probs[c])
-        return best, f"last click ({probs[best]:.0%} purple)"
+    if remain <= 1:
+        best = max(info, key=lambda c: (info[c]["p_purple"], -c))
+        return best, f"last click ({info[best]['p_purple']:.0%} purple)"
 
-    base_threshold = 0.06
-    threshold = base_threshold + base_threshold * clicks_remain
-    best_prob_cell = max(probs, key=lambda c: probs[c])
-    if probs[best_prob_cell] > threshold:
-        p = probs[best_prob_cell]
-        return best_prob_cell, f"purple {p:.0%} > {threshold:.0%}"
+    if hunt_policy == HUNT_POLICY_ENTROPY:
+        threshold = 0.06 + 0.06 * remain
+        best_prob_cell = max(info, key=lambda c: (info[c]["p_purple"], -c))
+        if info[best_prob_cell]["p_purple"] > threshold:
+            p = info[best_prob_cell]["p_purple"]
+            return best_prob_cell, f"purple {p:.0%} > {threshold:.0%}"
+        best_entropy_cell = max(info, key=lambda c: (info[c]["entropy"], -c))
+        return (
+            best_entropy_cell,
+            f"entropy {info[best_entropy_cell]['entropy']:.2f} (thresh {threshold:.0%})",
+        )
 
-    best_entropy_cell = max(entropies, key=lambda c: entropies[c])
+    best_cell = max(info, key=lambda c: (info[c]["mixed"], -c))
+    row = info[best_cell]
     return (
-        best_entropy_cell,
-        f"entropy {entropies[best_entropy_cell]:.2f} (thresh {threshold:.0%})",
+        best_cell,
+        f"mixed {row['mixed']:.3f} (P={row['p_purple']:.0%} G={row['gini']:.2f})",
     )
+
+
+def recommend_oq_cell(
+    valid_worlds: frozenset[int],
+    states: list[str],
+    *,
+    clicks_remain: int,
+    hunt_policy: str = HUNT_POLICY_MIXED,
+    allowed: frozenset[int] | None = None,
+) -> tuple[int, str]:
+    """Hunt pick: last-click, MIXED, entropy, or two-purple expectimax."""
+    hidden = _hidden_cells(states, allowed)
+    if not hidden or not valid_worlds:
+        return -1, "no hidden cells"
+
+    cell, reason = heuristic_analysis(
+        valid_worlds,
+        states,
+        hunt_policy=hunt_policy,
+        clicks_remain=clicks_remain,
+        allowed=allowed,
+    )
+    if hunt_policy != HUNT_POLICY_MIXED:
+        return cell, reason
+    if clicks_remain <= 1:
+        return cell, reason
+    if reason.startswith("100%"):
+        return cell, reason
+
+    purples_found = min(sum(1 for state in states if state == "t"), TARGET_PURPLES)
+    # Only once two purples are down: the next purple is free and unlocks
+    # the auto-revealed red. Earlier hunt stays MIXED so we do not spend
+    # paid clicks on colour EV instead of information.
+    if purples_found != 2:
+        return cell, reason
+
+    depth = EXPECTIMAX_DEPTH
+    hidden_n = len(hidden)
+    if hidden_n <= 8 and clicks_remain <= 3:
+        depth = 3
+    _ev, best = _expectimax(
+        valid_worlds, states, clicks_remain, purples_found, depth, allowed,
+    )
+    if best < 0:
+        return cell, reason
+    return best, f"expectimax d{depth} EV={_ev:.0f} · {reason}"
 
 
 def observations_from_buttons(buttons: list[dict[str, Any]]) -> dict[int, str]:
@@ -297,6 +620,7 @@ def choose_oq_click(
     *,
     clicks_spent: int = 0,
     clicks_budget: int = CLICK_BUDGET,
+    hunt_policy: str = HUNT_POLICY_MIXED,
 ) -> dict[str, Any] | None:
     """Pick the next cell to click, or ``None`` when the session should stop."""
     free_purples = _revealed_collectible_indices(buttons, emojis=frozenset({"spP"}))
@@ -329,16 +653,21 @@ def choose_oq_click(
             if DEFAULT_OPENING_CELL in hidden_unrevealed:
                 return _button_at_index(buttons, DEFAULT_OPENING_CELL)
         valid = filter_worlds(states)
-        best_index, _reason = heuristic_analysis(valid, states)
+        remain = clicks_budget - clicks_spent
+        best_index, _reason = recommend_oq_cell(
+            valid,
+            states,
+            clicks_remain=remain,
+            hunt_policy=hunt_policy,
+        )
         if best_index >= 0 and best_index in hidden_unrevealed:
             return _button_at_index(buttons, best_index)
         return _button_at_index(buttons, hidden_unrevealed[0])
 
     if targets >= TARGET_PURPLES and not _red_on_grid(buttons, observations):
-        candidates = locate_mine_candidates(states)
-        locate_hidden = [index for index in hidden if index in candidates]
-        pick = min(locate_hidden) if locate_hidden else min(hidden)
-        return _button_at_index(buttons, pick)
+        # The 4th purple becomes a visible red/rainbow on the grid. Do not
+        # probe hidden cells looking for it — the live loop waits for the edit.
+        return None
 
     # Red collected (or was already on grid) — harvest by adjacent mine count.
     ranking = harvest_ranking(buttons, observations)
@@ -351,12 +680,24 @@ def is_paid_reveal(state: str) -> bool:
     return state not in {"?", "t"}
 
 
-def format_solver_stats(observations: dict[int, str]) -> str:
+def format_solver_stats(
+    observations: dict[int, str],
+    *,
+    hunt_policy: str = HUNT_POLICY_MIXED,
+    clicks_spent: int | None = None,
+) -> str:
     states = states_from_observations(observations)
     phase, clicks, targets = get_game_state(states)
     valid = filter_worlds(states)
+    remain = (
+        CLICK_BUDGET - clicks_spent
+        if clicks_spent is not None
+        else CLICK_BUDGET - _paid_clicks_from_states(states)
+    )
     if phase == OqPhase.PLAYING:
-        best_index, reason = heuristic_analysis(valid, states)
+        best_index, reason = recommend_oq_cell(
+            valid, states, clicks_remain=remain, hunt_policy=hunt_policy,
+        )
         if best_index >= 0:
             row, col = divmod(best_index, 5)
             return (
@@ -364,7 +705,13 @@ def format_solver_stats(observations: dict[int, str]) -> str:
                 f" · {targets}/3 purple · {clicks}/{CLICK_BUDGET} paid"
                 f" · next ({row + 1},{col + 1}) · {reason}"
             )
-    if phase in {OqPhase.BONUS_LOCATE, OqPhase.BONUS_HARVEST}:
+    if phase == OqPhase.BONUS_LOCATE:
+        return (
+            f"solver: {len(valid)} worlds · {phase.value}"
+            f" · {targets}/3 purple · {clicks}/{CLICK_BUDGET} paid"
+            f" · waiting for auto-revealed red"
+        )
+    if phase == OqPhase.BONUS_HARVEST:
         return (
             f"solver: {len(valid)} worlds · {phase.value}"
             f" · {targets}/3 purple · {clicks}/{CLICK_BUDGET} paid"

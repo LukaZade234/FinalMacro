@@ -64,6 +64,35 @@ SPHERE_OH_TYPE_LABELS = {
     "spW": "Rainbow",
 }
 
+# Base SP with no bonuses. Minigame logs and the $oq bake-off use this, not
+# the chat ``+N`` (perk 9, invested spheres, and $bonus inflate that).
+# Purple 5 / blue 10 are confirmed. Teal→orange follow the same ladder as
+# $oq harvest-by-adjacency. Red 150 is the $oq/$oc jackpot.
+# Rainbow 500 is the $ot rare-ship / $oq "or more" figure.
+# Light has no fixed SP — it splits into 3–4 spheres (sum those).
+# Dark has no fixed SP — it becomes one other colour (use that colour's SP).
+# Hidden ``spU`` on an $oh reward line is a bonus $oc use, not SP.
+SPHERE_BASE_SP: dict[str, int] = {
+    "spP": 5,
+    "spB": 10,
+    "spT": 20,
+    "spG": 35,
+    "spY": 55,
+    "spO": 90,
+    "spR": 150,
+    "sp": 150,
+    "spW": 500,
+}
+
+# Clicking one of these counts as winning the minigame (got the jackpot).
+SPHERE_WIN_EMOJIS = frozenset({"sp", "spR", "spW"})
+
+
+def sphere_base_sp(emoji: str | None) -> int:
+    key = str(emoji or "").strip()
+    return int(SPHERE_BASE_SP.get(key, 0))
+
+
 KAKERA_EMOJIS = frozenset({
     "kakera",   # blue (default)
     "kakeraP",  # purple — free

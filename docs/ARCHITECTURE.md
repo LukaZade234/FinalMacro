@@ -82,6 +82,8 @@ changes.
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
 | `sphere_game.py` / `oc_game.py` / `oq_game.py` | Individual minigames |
+| `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
+| `minigame_board.py` | 5×5 board / click helpers for the minigame log |
 | `settings_apply.py` | Push a settings preset to the server |
 | `state.py` | `AccountState`, `MacroPhase` |
 | `activity_log.py` / `session_log.py` | In-app log + on-disk session |
@@ -95,12 +97,12 @@ changes.
 |------|------|
 | `discord_reader.py` | `ChannelMonitor` — user-token client, one channel |
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
-| `constants.py` | Bot ids, kakera / sphere emoji names and ranks |
+| `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP** |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere) |
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `ohu8`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
-| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` | Persistent stats |
+| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` / `minigame_log.py` | Persistent stats (`data/minigame_log.json` → Statistics → Minigames) |
 | `settings_catalog.py` / `settings_commands.py` / `settings_preset.py` | GUI settings templates |
 | `command_ack.py` / `command_context.py` / `claim_context.py` | Match replies to the command we just sent |
 
@@ -117,6 +119,7 @@ under test (`test_roll_cycle.py`, `test_parsers.py`, …).
 | `ui_preview.py` | Offscreen grab of a shell + page to a PNG |
 | `build_fonts.py` | Static Space Grotesk weights from the variable font |
 | `document_settings_commands.py` | Live `$settings` command capture (see archive + TODO) |
+| `oq_bakeoff.py` | Replay MIXED vs entropy on every `$oq` world |
 
 ---
 
@@ -154,7 +157,7 @@ Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
 
 Also in that file: tray / update prefs, `ui_layout`, `ui_palette`. Session
 logs go under `data/session_logs/`. Kakera / key / sphere / soulmate logs
-are `data/*_log.json`.
+are `data/*_log.json` (kakera, key, sphere, soulmate, minigame).
 
 ---
 

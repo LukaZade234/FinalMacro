@@ -14,6 +14,7 @@ Item {
         { label: "Soulmates", title: "Soulmates" },
         { label: "Kakera", title: "Kakera" },
         { label: "Spheres", title: "Spheres" },
+        { label: "Minigames", title: "Minigames" },
         { label: "Keys", title: "Keys" }
     ]
 
@@ -21,6 +22,7 @@ Item {
         "SoulmatesView.qml",
         "KakeraView.qml",
         "SpheresView.qml",
+        "MinigamesView.qml",
         "KeysView.qml"
     ]
 

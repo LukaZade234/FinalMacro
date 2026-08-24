@@ -216,6 +216,11 @@ include power exhausted and “stop after N rolls”.
 **Play all minigames** queries `$ohu`, then spends `$oh` / `$oc` / `$oq`.
 `$ot` is parsed but not played yet.
 
+Each finished `$oh` / `$oc` / `$oq` writes one row to `data/minigame_log.json`
+(Statistics → Minigames): the 5×5 after the final reveal, clicks in order,
+whether we hit red/rainbow, and **base SP** from `SPHERE_BASE_SP` — not the
+chat `+N`, which includes bonuses. `$oq` hunt uses MIXED (`P(purple)+0.1×Gini`).
+
 | Command | What it is | Engine |
 |---------|------------|--------|
 | `$oh` | 5×5 sphere grid | `macro/sphere_game.py` |

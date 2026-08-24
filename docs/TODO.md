@@ -14,19 +14,18 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 2. **Compile leftover parser regexes** — mechanical.
 3. **Humanized delays** — jitter existing sleeps.
 4. **Reaction power max on the account page** — move a hardcoded `155`.
-5. **`$oq` MIXED bake-off** — worlds already in `oq_worlds.py`; no game-loop change.
-6. **Timezones** — pick UTC (Mudae dailies), fix QML “today”.
-7. **`$p` / `$daily`** — send at the right time; parsers exist.
-8. **Chaos parser** — tighten an existing parse, do not invent a feature.
-9. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
-10. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
-11. **Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.
-12. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
-13. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
-14. **EventLog + JSONL** then **shared stats model** — medium, but one design kills five GUI bugs.
-15. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
-16. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
-17. Last: split `bridge.py`, achievements, GUI polish. Do not hoist `uniqueSources` / cache `filteredEntries` if the shared model is next — they die with it.
+5. **Timezones** — pick UTC (Mudae dailies), fix QML “today”.
+6. **`$p` / `$daily`** — send at the right time; parsers exist.
+7. **Chaos parser** — tighten an existing parse, do not invent a feature.
+8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
+9. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
+10. **Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.
+11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
+12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
+13. **EventLog + JSONL** then **shared stats model** — medium, but one design kills five GUI bugs.
+14. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
+15. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
+16. Last: split `bridge.py`, achievements, GUI polish. Do not hoist `uniqueSources` / cache `filteredEntries` if the shared model is next — they die with it.
 
 ---
 
@@ -42,7 +41,7 @@ Highest first. What makes an overnight run correct and complete.
 6. **Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`. Overnight sessions mis-attribute `$tu` and can collide with a minigame.
 7. **Timezones** — “today” and daily series lie across UTC midnight.
 8. **Overnight completeness** — chaos parser, `$p`/`$daily`, `$us` on a clock.
-9. **More SP from games we already play** — `$oq` MIXED, then `$oh` DP / `$oc` lookahead.
+9. **More SP from games we already play** — `$oh` DP / `$oc` lookahead. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase).
 10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker.
 11. **`$dl` switch**, humanized delays, empty states, reaction-power max, shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
@@ -58,9 +57,9 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - ~~ParseLab must not persist the live token on keystroke~~ — Debug uses the Run/Accounts token and no longer has a token field.
 - ~~Soulmate rows: write `account_id` / `account_name` from Mudae `owner` (lukazade234).~~ QML fallback is `"Unknown"` only if a row still has no name.
 - ~~After `force_reconnect`, restore `macro_active` if it was set.~~ `startMacro` refuses while a minigame is running.
-- `$oq` bake-off. Isolated, and the replay harness is reused for `$oh` / `$oc` / `$ot`.
+- ~~`$oq` MIXED hunt.~~ Replay harness in `macro/oq_replay.py` (`scripts/oq_bakeoff.py`). Opening is Colblitz `(1,1)` (index 6). Finding 3 purples auto-reveals the 4th as a clickable red — we claim it, we do not search hidden cells. Two-purple hunt uses expectimax. Full replay MIXED **95.6% red / 344.8 avg** (Colblitz 95.4% / 342.7).
 - Timezones. Every later “today”, daily report, and perk-8/minigame skip uses this clock.
-- Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. Unblocks perk 9 frequencies and the `$oh` DP.
+- Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` tracker lines are parsed (session log shows `spD → spP`). Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
 - Chaos parser in the same key/sphere pass.
 - Empty states + reaction-power max while the GUI is open (stop lying).
 
@@ -80,7 +79,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 - Perk 9 adaptive threshold (needs wave 1 colour + wave 2 `$bonus`).
 - `$ot` play + Phase 2 enumerator (`$ohu` already counts it; wave 3 skip logic should already know the id).
-- Apply the `$oq` bake-off result; `$oc` leftover-click lookahead; `$oh` DP only if the wave 1 histogram is stable.
+- `$oc` leftover-click lookahead; `$oh` DP only if the wave 1 histogram is stable. `$oq` MIXED matches Colblitz — leave it.
 
 **Wave 5 — after one account is boringly reliable**
 
@@ -99,7 +98,7 @@ Optional / when asked: `$ov` parser. Skip unless someone wants them: disablelist
 - **`$settings` / `$bonus` audit** — capture `$bonus` the same way as `$settings`; fix both parsers field-by-field (`docs/archive/MUDAE_SETTINGS_COMMANDS.md`); then use parsed fields in macro decisions. 16 commands are **direct toggles** (bare send flips the live server) — capture tooling must skip or auto-revert them. Claim-via-emoji stays blocked until this lands.
 - **Chaos parser** — chaos-kakera bonus rolls (1–15+ extra) are not logged; `$us` spends them but overnight runs cannot show when they appeared. Tighten key / chaos-kakera parse while here.
 - **Optional `$ov` parser** — parse when we need it; do not send it unless asked.
-- **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, invested-sphere bonuses, and perk 9. `$oh` invested-bonus parse currently only looks for `+$oq` and spheres — **`$oc` granted from `$oh` is likely dropped**. While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
+- **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, invested-sphere bonuses, and perk 9. `$oh` hidden clicks that show ``spU`` in chat now grant ``$oc`` (play-all spends them like bonus `$oq`). While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
 - **`$p` / `$daily`** — send and record the daily poke / `$daily` at the right time.
 
 Do not change per-server claim / kakera / roll rules until the settings audit (steps above) is done.
@@ -147,7 +146,7 @@ Do the shared model first; the copy-paste and most of the slowness go away with 
 
 - **Split `gui/bridge.py`** — ~2.7k lines, 90+ slots. Logical groups already exist (run, config, stats, mudae settings, updates). Separate context properties once the stats payload is off the JSON string. Leave `macro/roll_cycle.py` alone; it is long because the domain is.
 - **Compile leftover parser regexes** — many `mudae/parsers/` patterns are still built inside functions. Move to module constants on the hot path.
-- **`$oq` opening move** — already short-circuits to `DEFAULT_OPENING_CELL` on a blank board. Only revisit if `heuristic_analysis` still runs on the first click. Benchmark vs MIXED is in **Colblitz tools**.
+- ~~**`$oq` opening move**~~ — Colblitz overlay `(1,1)` (0-based, index 6). Short-circuits on a blank board. Hunt is MIXED; leave the Bellman DP.
 - **Achievements** — soulmate / chaos-key / rainbow milestones. After the logs are one `EventLog`.
 
 ---
@@ -164,6 +163,7 @@ Pass over the running app after the rankings above. Items already listed earlier
 - ~~**Hardcoded `lukazade234` display fallback**~~ — soulmate rows get `account_name` from `owner`; missing name shows `"Unknown"`. The duplicate GUI profile still named Default is leftover config, not a display hack.
 - **`CLAIM_INTERVAL` is parsed and then ignored** — pipeline classifies “once per interval” rejections; `wait_for_claim` only accepts `CLAIM` / `MARRIAGE`, so the attempt times out, `claim_available` stays true, and the macro may retry into the same wall.
 - **Unknown reaction power is treated as infinite** — `can_afford_reaction` returns true when `power_percent is None`. After a skipped `$tu` or a partial restore, paid kakera fire until Mudae denies. `$us` stop-on-power does the opposite (returns false when unknown) and also assumes a chaos key when computing min cost, so it stops too late without one.
+- ~~**`$oh` dark “turns into” was dropped**~~ — Mudae writes `<:spD:…> turns into <:spP:…>` (no `**+**` on that line) then `<:spP:…> (Free) **+N**`. Parser now reads transform + `(Free)` lines; dark stays a **paid** click and the session log shows `spD → spP`. Hidden clicks log `hidden → spY` (etc.) instead of just `hidden`. Stats rows: `data/minigame_log.json` and Statistics → Minigames — not `data/session_logs/`.
 
 ### Robustness (not wrong today, fail overnight)
 
@@ -217,7 +217,7 @@ The guide is a fair transcription of their published “How it works” pages. S
 
 ### Solvers — room to improve
 
-- **`$oq` — easy, do first.** Both sides enumerate all 12,650 purple placements (`macro/oq_worlds.py`). They rank `α·P(purple) + β·Gini` (MIXED, α=1 β=0.1) and publish **95.4% red / 342.7 avg SP**; a depth-2 expectimax reaches 98.1% / 356.3. We use Shannon entropy plus a rising P(purple) threshold, and hard-code opening cell 7. Same belief, different policy — and we have **no** 12,650-board score for ours. **Action:** replay every world with the current heuristic and with MIXED; switch if we are closer to the 81% “exact P(purple)” row than to 95%. Expectimax only if MIXED still leaves ≥5 SP on the table. Opening short-circuit can stay.
+- **`$oq` — MIXED is live; leave it.** Hunt scores `α·P(purple) + β·Gini` (α=1 β=0.1). Opening is Colblitz overlay `(1,1)` (0-based, index 6). Mudae auto-reveals the 4th purple as a clickable red (or rainbow) once 3 are found — the live loop waits for that grid edit instead of probing hidden cells. When 2 purples are already found, hunt expectimax treats the third as a free click that unlocks the auto-red. Full replay (`scripts/oq_bakeoff.py`, all 12,650 worlds, our base SP): MIXED **95.6% red / 344.8 avg**, entropy **92.2% / 337.8**. Colblitz MIXED 95.4% / 342.7; their Bellman DP is 98.1% / 356.3. Remaining MIXED losses never find 3 purples. Do not chase hunt-wide expectimax / full DP unless we specifically want those ~11 SP. Boards log to `data/minigame_log.json` (Statistics → Minigames).
 
 - **`$oh` — medium, blocked on frequencies.** They run a Bellman DP over *counts* `(clicks left, covered, blue, teal, dark, top flats)` — position does not matter. We never click revealed blue/teal and otherwise take the highest revealed paid sphere, else a random `spU` (`macro/sphere_game.py`). That static skip is wrong with 1–2 clicks left (a teal at 20, or a blue that unveils 3 cells, can beat a face-down). **Action:** log colour / value of each `$oh` reveal (including `$oc` procs — see sphere-tracking audit) until the reveal table is stable; then add `oh_solver.py` and keep greedy as fallback. Do not ship a DP on guessed priors.
 

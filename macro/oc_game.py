@@ -16,6 +16,13 @@ from collections.abc import Callable
 from typing import Any
 
 from macro.minigame_util import minigame_command
+from macro.minigame_board import (
+    board_emojis,
+    build_session,
+    cell_index,
+    make_click,
+    revealed_click_emoji,
+)
 from macro.oc_solver import (
     choose_oc_click,
     emoji_to_oc_color,
@@ -33,6 +40,7 @@ from macro.sphere_game import (
     parse_clicks_allowed,
     reward_has_entries,
     total_reward_from_content,
+    wait_for_final_grid,
     wait_for_minigame_click_ack,
 )
 
@@ -114,6 +122,7 @@ class OcSphereGame:
             grid_id = grid.message_id
             buttons = list(grid.buttons)
             clicks_budget = parse_clicks_allowed(grid.content)
+            session_clicks: list[dict[str, Any]] = []
             self._observations = observations_from_buttons(buttons)
             self._log(
                 f"{label}: grid ready · {clicks_budget} clicks · {format_solver_stats(self._observations)}"
@@ -137,7 +146,7 @@ class OcSphereGame:
                     break
 
                 custom_id = choice["custom_id"]
-                cell_index = self._cell_index(buttons, custom_id)
+                clicked_index = cell_index(buttons, custom_id)
                 before_sig = grid_signature(buttons)
                 before_reward = self._reward_content
 
@@ -149,7 +158,7 @@ class OcSphereGame:
                 clicks_spent += 1
                 self._log(
                     f"$oc: click {clicks_spent}/{clicks_budget} → cell "
-                    f"{self._cell_label(cell_index)} · "
+                    f"{self._cell_label(clicked_index)} · "
                     f"{format_solver_stats(self._observations)}"
                 )
 
@@ -158,7 +167,7 @@ class OcSphereGame:
                     before_sig,
                     before_reward,
                     custom_id=custom_id,
-                    clicked_index=cell_index,
+                    clicked_index=clicked_index,
                 )
                 if updated is None and reward_content == before_reward:
                     self._log("$oc: click ack timeout — stopping")
@@ -176,14 +185,44 @@ class OcSphereGame:
                 self._sync_observations(
                     buttons,
                     reward_content,
-                    clicked_index=cell_index,
+                    clicked_index=clicked_index,
                     before_reward=before_reward,
+                )
+                reveal_emoji = revealed_click_emoji(
+                    reward_types=new_reward_line_types(before_reward, reward_content),
+                    buttons=buttons,
+                    clicked_index=clicked_index,
+                    fallback=(
+                        self._observations.get(clicked_index, "")
+                        if clicked_index is not None
+                        else ""
+                    ),
+                )
+                session_clicks.append(
+                    make_click(clicked_index, reveal_emoji, paid=True)
                 )
                 self._log(f"$oc: {format_solver_stats(self._observations)}")
                 await asyncio.sleep(self._click_delay)
 
             if is_oc_game_over(buttons):
                 self._log("$oc: grid locked — minigame finished")
+
+            buttons = await wait_for_final_grid(
+                self._actions,
+                grid_id=grid_id,
+                buttons=buttons,
+                is_grid_message=is_oc_grid_message,
+                get_reward_content=lambda: self._reward_content,
+                set_reward_content=lambda content: setattr(self, "_reward_content", content),
+            )
+            session = build_session(
+                "oc",
+                session_clicks,
+                board_emojis(buttons),
+                clicks_paid=clicks_spent,
+                clicks_budget=clicks_budget,
+                reason="done",
+            )
 
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
@@ -192,6 +231,7 @@ class OcSphereGame:
                 "clicks": clicks_spent,
                 "reward": reward,
                 "reason": "done",
+                "session": session,
             }
         finally:
             self._monitor.macro_active = previously_active

@@ -8,9 +8,13 @@ buttons (3 and 1 respectively). The grid lives in a single message that Mudae
 deciding its next move.
 
 Purple spheres (``spP``) are **free**: they do not consume the click allowance.
-Dark spheres (``spD``) use a paid click; if they resolve to purple, that outcome
-appears only in the **reward tracker message** below the grid (the grid button
-emoji does not flip to ``spP``). Those purple payout lines are free as well.
+Dark spheres (``spD``) use a paid click and become one other colour; the
+grid stays dark. Mudae's tracker writes ``spD turns into spP`` (or another
+colour) and may add a ``(Free)`` payout line for the result — that is still
+the same paid dark click, not a free purple press. Light spheres (``spL``)
+split into 3–4 colours.
+Clicking a face-down cell can grant a bonus ``$oc`` use — the reward tracker
+shows ``spU`` instead of a colour.
 
 Strategy (per the user's spec):
     * always take free purple (``spP``) when available;
@@ -37,6 +41,14 @@ from mudae.constants import (
 from mudae.parsers.ohu import parse_oh_invested_bonus
 
 from macro.minigame_util import minigame_command
+from macro.minigame_board import (
+    TRANSFORM_EMOJIS,
+    board_emojis,
+    build_session,
+    cell_index,
+    classify_oh_click,
+    make_click,
+)
 
 
 def sphere_value_rank(emoji: str) -> int:
@@ -53,9 +65,21 @@ def _button_sort_key(buttons: list[dict[str, Any]], button: dict[str, Any]) -> t
 
 # "You can click **5** times on the buttons below ..."
 _CLICKS_ALLOWED_RE = re.compile(r"click\s*\*{0,2}(\d+)\*{0,2}\s*times", re.IGNORECASE)
-# Reward lines look like "<:spY:123> **+59**" or "<:spP:123> **+42**".
-_REWARD_AMOUNT_RE = re.compile(r"\*\*\+\s*([\d,]+)")
-_REWARD_LINE_EMOJI_RE = re.compile(r"<:([^:>]+):\d+>\s*\*\*\+")
+# Custom <:spY:id> or bare :spY: (copy-paste from the Discord client).
+_SPHERE_CUSTOM_RE = re.compile(r"<:([^:>]+):\d+>")
+_SPHERE_BARE_RE = re.compile(r"(?<!<):(sp[A-Za-z]*):")
+_TURNS_INTO_RE = re.compile(
+    r"(?:<:(?P<src1>[^:>]+):\d+>|:(?P<src2>sp[A-Za-z]*):)"
+    r"\s*turns\s+into\s*"
+    r"(?:<:(?P<dst1>[^:>]+):\d+>|:(?P<dst2>sp[A-Za-z]*):)",
+    re.IGNORECASE,
+)
+# "<:spP:id> (Free) **+46**", "<:spY:id> **+59**", ":spO: +216".
+_PAYOUT_RE = re.compile(
+    r"(?:<:(?P<emoji1>[^:>]+):\d+>|:(?P<emoji2>sp[A-Za-z]*):)"
+    r"(?:\s*\([^)]*\))?"
+    r"\s*(?:\*\*)?\+\s*(?:\*\*)?(?P<amount>[\d,]+)",
+)
 _DEFAULT_CLICKS_ALLOWED = 5
 # Minimum sphere buttons that distinguishes the $oh grid from a roll's lone
 # sphere react button.
@@ -99,7 +123,11 @@ def is_oh_reward_message(snapshot: Any) -> bool:
     if getattr(snapshot, "buttons", None):
         return False
     content = getattr(snapshot, "content", "") or ""
-    return "<:sp" in content and "+" in content
+    has_sphere = "<:sp" in content or bool(_SPHERE_BARE_RE.search(content))
+    if not has_sphere:
+        return False
+    lower = content.lower()
+    return "+" in content or "turns into" in lower
 
 
 def parse_clicks_allowed(content: str) -> int:
@@ -109,22 +137,94 @@ def parse_clicks_allowed(content: str) -> int:
     return max(1, int(match.group(1)))
 
 
+def _sphere_emojis_in(text: str) -> list[str]:
+    custom = _SPHERE_CUSTOM_RE.findall(text or "")
+    if custom:
+        return custom
+    return _SPHERE_BARE_RE.findall(text or "")
+
+
+def _reward_events(content: str) -> list[tuple[str, str]]:
+    """Ordered tracker events: ``("transform", dest)`` or ``("payout", emoji)``."""
+    events: list[tuple[str, str]] = []
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "turns into" in line.lower():
+            match = _TURNS_INTO_RE.search(line)
+            dest = ""
+            if match:
+                dest = (match.group("dst1") or match.group("dst2") or "").strip()
+            if not dest:
+                emojis = _sphere_emojis_in(line)
+                if len(emojis) >= 2:
+                    dest = emojis[-1]
+            if dest:
+                events.append(("transform", dest))
+            continue
+        match = _PAYOUT_RE.search(line)
+        if match:
+            emoji = (match.group("emoji1") or match.group("emoji2") or "").strip()
+            if emoji:
+                events.append(("payout", emoji))
+    return events
+
+
 def total_reward_from_content(content: str) -> int:
+    """Sum chat ``+N`` sphere lines, skipping hidden ``spU`` ($oc grant, not SP)."""
     total = 0
-    for raw in _REWARD_AMOUNT_RE.findall(content or ""):
-        total += int(raw.replace(",", ""))
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+        if not line or "turns into" in line.lower():
+            continue
+        match = _PAYOUT_RE.search(line)
+        if not match:
+            continue
+        emoji = (match.group("emoji1") or match.group("emoji2") or "").strip()
+        if emoji == SPHERE_HIDDEN_EMOJI:
+            continue
+        total += int((match.group("amount") or "0").replace(",", ""))
     return total
 
 
 def reward_line_types(content: str) -> list[str]:
     """Emoji names from each payout line in the reward tracker message."""
-    return _REWARD_LINE_EMOJI_RE.findall(content or "")
+    return [emoji for kind, emoji in _reward_events(content) if kind == "payout"]
+
+
+def reward_outcome_types(content: str) -> list[str]:
+    """Payout colours plus ``turns into`` destinations (dark → purple)."""
+    return [emoji for _kind, emoji in _reward_events(content)]
+
+
+def _click_outcome_note(classified: dict[str, Any], kind: str) -> str:
+    """Activity-log fragment: identity plus what light/dark / hidden became."""
+    oc_grant = int(classified.get("oc_bonus") or 0)
+    if oc_grant:
+        return f"{kind} · +{oc_grant} $oc"
+    identity = str(classified.get("emoji") or "")
+    resolved = [str(item) for item in (classified.get("resolved") or []) if item]
+    if identity in TRANSFORM_EMOJIS and resolved:
+        return f"{kind} → {'+'.join(resolved)}"
+    if kind == "hidden" and identity and identity not in {SPHERE_HIDDEN_EMOJI, ""}:
+        return f"hidden → {identity}"
+    return kind
 
 
 def new_reward_line_types(before: str, after: str) -> list[str]:
-    """Emoji names added to the reward tracker since ``before``."""
+    """Payout emoji names added to the reward tracker since ``before``."""
     prev = reward_line_types(before)
     curr = reward_line_types(after)
+    if len(curr) <= len(prev):
+        return []
+    return curr[len(prev):]
+
+
+def new_reward_outcome_types(before: str, after: str) -> list[str]:
+    """New payouts and transform destinations since ``before``."""
+    prev = reward_outcome_types(before)
+    curr = reward_outcome_types(after)
     if len(curr) <= len(prev):
         return []
     return curr[len(prev):]
@@ -133,7 +233,7 @@ def new_reward_line_types(before: str, after: str) -> list[str]:
 def reward_has_entries(content: str) -> bool:
     if not content or "rewards appear here" in content.lower():
         return False
-    return bool(reward_line_types(content))
+    return bool(_reward_events(content))
 
 
 def disabled_count(buttons: list[dict[str, Any]]) -> int:
@@ -158,6 +258,46 @@ def is_oh_game_over(buttons: list[dict[str, Any]]) -> bool:
     if len(spheres) < _MIN_GRID_BUTTONS:
         return True
     return not any(_is_clickable(button) for button in spheres)
+
+
+def _board_has_hidden(buttons: list[dict[str, Any]]) -> bool:
+    for button in _sphere_buttons(buttons)[:25]:
+        emoji = _emoji(button)
+        if not emoji or emoji == SPHERE_HIDDEN_EMOJI:
+            return True
+    return False
+
+
+async def wait_for_final_grid(
+    actions: Any,
+    *,
+    grid_id: int,
+    buttons: list[dict[str, Any]],
+    is_grid_message: Callable[[Any], bool],
+    get_reward_content: Callable[[], str],
+    set_reward_content: Callable[[str], None],
+    timeout: float = 2.5,
+) -> list[dict[str, Any]]:
+    """Wait for the post-game reveal that fills remaining hidden cells."""
+    if timeout <= 0 or not _board_has_hidden(buttons):
+        return buttons
+    before_sig = grid_signature(buttons)
+
+    def predicate(snapshot: Any, _parsed: Any) -> bool:
+        if is_oh_reward_message(snapshot):
+            content = getattr(snapshot, "content", "") or ""
+            if reward_has_entries(content):
+                set_reward_content(content)
+        if getattr(snapshot, "message_id", None) != grid_id:
+            return False
+        if not is_grid_message(snapshot):
+            return False
+        return grid_signature(getattr(snapshot, "buttons", []) or []) != before_sig
+
+    result = await actions.wait_for(predicate, timeout=timeout)
+    if result is None:
+        return buttons
+    return list(result[0].buttons)
 
 
 def _disable_button(buttons: list[dict[str, Any]], custom_id: str) -> list[dict[str, Any]]:
@@ -338,12 +478,16 @@ def purple_free_outcome(
     before_reward: str,
     after_reward: str,
     buttons: list[dict[str, Any]],
+    *,
+    clicked_emoji: str = "",
 ) -> bool:
     """True when a paid click resolved to a free purple outcome.
 
-    Dark spheres stay ``spD`` on the grid but add an ``spP`` reward line.
-    Hidden buttons can flip to ``spP`` on the grid when revealed.
+    Hidden buttons can flip to ``spP`` on the grid (or add an ``spP`` payout).
+    Dark/light transforms stay paid even when the tracker says they became purple.
     """
+    if clicked_emoji.strip() in TRANSFORM_EMOJIS:
+        return False
     for outcome in new_reward_line_types(before_reward, after_reward):
         if outcome in SPHERE_FREE_EMOJIS:
             return True
@@ -444,6 +588,7 @@ class OhSphereGame:
                     "free_clicks": 0,
                     "reward": 0,
                     "oq_bonus": 0,
+                    "oc_bonus": 0,
                     "spheres_bonus": 0,
                     "reason": "no grid",
                 }
@@ -458,6 +603,7 @@ class OhSphereGame:
             grid_id = grid.message_id
             buttons = list(grid.buttons)
             clicks_budget = parse_clicks_allowed(grid.content)
+            session_clicks: list[dict[str, Any]] = []
             self._log(f"{label}: grid ready · {clicks_budget} paid clicks allowed")
             await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
 
@@ -476,6 +622,7 @@ class OhSphereGame:
                     break
 
                 custom_id = choice["custom_id"]
+                clicked_index = cell_index(buttons, custom_id)
                 emoji = _emoji(choice)
                 free = is_free_oh_click(choice)
                 kind = "free purple" if free else (
@@ -513,11 +660,35 @@ class OhSphereGame:
                     before_reward,
                     reward_content,
                     buttons,
+                    clicked_emoji=emoji,
                 )
+                grid_emoji = ""
+                if clicked_index is not None:
+                    board_now = board_emojis(buttons)
+                    if 0 <= clicked_index < len(board_now):
+                        grid_emoji = board_now[clicked_index]
+                classified = classify_oh_click(
+                    clicked_emoji=emoji,
+                    reward_types=new_reward_outcome_types(before_reward, reward_content),
+                    grid_emoji=grid_emoji,
+                )
+                oc_grant = int(classified.get("oc_bonus") or 0)
+                session_clicks.append(
+                    make_click(
+                        clicked_index,
+                        str(classified["emoji"]),
+                        paid=not resolved_free,
+                        resolved=list(classified.get("resolved") or []),
+                        oc_bonus=oc_grant,
+                    )
+                )
+                outcome = _click_outcome_note(classified, kind)
+                if oc_grant:
+                    self._log(f"$oh: hidden click granted +{oc_grant} $oc")
                 if resolved_free:
                     free_clicks += 1
                     if free:
-                        self._log(f"$oh: free click → {kind} ({free_clicks} free)")
+                        self._log(f"$oh: free click → {outcome} ({free_clicks} free)")
                     else:
                         self._log(
                             f"$oh: free click → purple reveal ({free_clicks} free)"
@@ -525,7 +696,7 @@ class OhSphereGame:
                 else:
                     clicks_spent += 1
                     self._log(
-                        f"$oh: click {clicks_spent}/{clicks_budget} → {kind}"
+                        f"$oh: click {clicks_spent}/{clicks_budget} → {outcome}"
                     )
 
                 await asyncio.sleep(self._click_delay)
@@ -533,20 +704,44 @@ class OhSphereGame:
             if is_oh_game_over(buttons):
                 self._log("$oh: grid locked — minigame finished")
 
+            buttons = await wait_for_final_grid(
+                self._actions,
+                grid_id=grid_id,
+                buttons=buttons,
+                is_grid_message=is_oh_grid_message,
+                get_reward_content=lambda: self._reward_content,
+                set_reward_content=lambda content: setattr(self, "_reward_content", content),
+            )
+            session = build_session(
+                "oh",
+                session_clicks,
+                board_emojis(buttons),
+                clicks_paid=clicks_spent,
+                clicks_budget=clicks_budget,
+                reason="done",
+            )
+            oc_bonus = int(session.get("oc_bonus") or 0)
+
             reward = total_reward_from_content(self._reward_content)
             reward_note = f" · +{reward} spheres" if reward else ""
+            oc_note = f" · +{oc_bonus} $oc" if oc_bonus else ""
             self._log(
                 f"{label}: finished · {clicks_spent} paid"
                 + (f", {free_clicks} free" if free_clicks else "")
                 + reward_note
+                + oc_note
             )
+            if session_clicks:
+                self._log(f"{label}: stats · Statistics → Minigames")
             return {
                 "clicks": clicks_spent,
                 "free_clicks": free_clicks,
                 "reward": reward,
                 "oq_bonus": bonus["oq_bonus"],
+                "oc_bonus": oc_bonus,
                 "spheres_bonus": bonus["spheres_bonus"],
                 "reason": "done",
+                "session": session,
             }
         finally:
             self._monitor.macro_active = previously_active

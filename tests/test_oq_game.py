@@ -100,6 +100,11 @@ def test_oq_game_plays_one_paid_click():
     result = asyncio.run(game.play(prefix="$"))
     assert result["clicks"] == 1
     assert actions.clicks[0][1] == f"cmd s{DEFAULT_OPENING_CELL}"
+    session = result["session"]
+    assert session["game"] == "oq"
+    assert session["clicks"][0]["cell"] == DEFAULT_OPENING_CELL
+    assert session["clicks"][0]["emoji"] == "spT"
+    assert session["clicks"][0]["base_sp"] == 20
 
 
 def test_oq_game_purple_click_does_not_spend_budget():
@@ -164,4 +169,57 @@ def test_oq_game_claims_rainbow_then_harvests():
 
     assert f"cmd s{DEFAULT_OPENING_CELL}" in clicks
     assert "cmd s15" in clicks  # rainbow claimed
+    assert result["clicks"] >= 2
+
+
+def test_oq_game_waits_for_auto_revealed_red():
+    """After 3 purples, wait for Mudae's red edit instead of probing hidden cells."""
+    grid0 = _grid_snapshot([_btn(i) for i in range(25)])
+    after_opening = [_btn(i, "spU") for i in range(25)]
+    after_opening[DEFAULT_OPENING_CELL] = _btn(DEFAULT_OPENING_CELL, "spT", disabled=True)
+    for index in (0, 5, 10):
+        after_opening[index] = _btn(index, "spP", disabled=True)
+    after_opening_snap = _grid_snapshot(after_opening)
+
+    with_red = [_btn(i, "spU") for i in range(25)]
+    with_red[DEFAULT_OPENING_CELL] = _btn(DEFAULT_OPENING_CELL, "spT", disabled=True)
+    for index in (0, 5, 10):
+        with_red[index] = _btn(index, "spP", disabled=True)
+    with_red[15] = _btn(15, "sp")
+    with_red_snap = _grid_snapshot(with_red)
+
+    claimed = [_btn(i, "spU") for i in range(25)]
+    claimed[DEFAULT_OPENING_CELL] = _btn(DEFAULT_OPENING_CELL, "spT", disabled=True)
+    for index in (0, 5, 10):
+        claimed[index] = _btn(index, "spP", disabled=True)
+    claimed[15] = _btn(15, "sp", disabled=True)
+    claimed_snap = _grid_snapshot(claimed)
+
+    scripted = [
+        grid0,
+        _reward_snapshot("<:spT:1> **+20**"),
+        after_opening_snap,
+        with_red_snap,
+        _reward_snapshot("<:spT:1> **+20**\n<:sp:2> **+150**"),
+        claimed_snap,
+    ]
+    actions = _FakeActions(scripted)
+    monitor = SimpleNamespace(macro_active=False)
+    clicks: list[str] = []
+
+    async def track_click(message_id: int, custom_id: str) -> bool:
+        clicks.append(custom_id)
+        return True
+
+    actions.click_button = track_click  # type: ignore[method-assign]
+    game = OqSphereGame(
+        actions,
+        monitor,
+        log=lambda _t: None,
+        click_delay=0.0,
+    )
+    result = asyncio.run(game.play(prefix="$"))
+
+    assert clicks[0] == f"cmd s{DEFAULT_OPENING_CELL}"
+    assert clicks[1] == "cmd s15"
     assert result["clicks"] >= 2
