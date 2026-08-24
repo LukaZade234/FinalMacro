@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
+import "../clock.js" as Clock
 import "../components"
 
 Item {
@@ -139,32 +140,11 @@ Item {
     function filteredTotals() {
         var list = filteredEntries()
         var out = { all_time: 0, today: 0, week: 0, month: 0, year: 0 }
-        var now = new Date()
-        var todayKey = Qt.formatDate(now, "yyyy-MM-dd")
-        var weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-        weekStart.setDate(weekStart.getDate() - ((now.getDay() + 6) % 7))
-        weekStart.setHours(0, 0, 0, 0)
-        var monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        var yearStart = new Date(now.getFullYear(), 0, 1)
-
+        var periods = Clock.periodKeys()
         for (var i = 0; i < list.length; i++) {
             var amount = Number(list[i].amount || 0)
             out.all_time += amount
-            var dk = list[i].date_key
-            if (!dk)
-                continue
-            var parts = dk.split("-")
-            if (parts.length !== 3)
-                continue
-            var entryDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
-            if (dk === todayKey)
-                out.today += amount
-            if (entryDate >= weekStart)
-                out.week += amount
-            if (entryDate >= monthStart)
-                out.month += amount
-            if (entryDate >= yearStart)
-                out.year += amount
+            Clock.addDateKey(out, list[i].date_key, amount, periods)
         }
         return out
     }

@@ -20,6 +20,7 @@ ApplicationWindow {
     visible: true
     title: "FinalMacro"
     color: Theme.bg
+    font.family: Theme.fontFamily
 
     property alias currentPage: switcher.currentPage
 
@@ -35,12 +36,23 @@ ApplicationWindow {
         property: "paletteId"
         value: App.uiPalette
     }
+    Binding {
+        target: Theme
+        property: "systemFonts"
+        value: App.uiSystemFonts
+    }
+    Binding {
+        target: Theme
+        property: "systemFontFamily"
+        value: App.systemFontFamily
+    }
 
     // Views that do not set font.family fall back to the application font, so
     // pushing the design's family there keeps every page consistent.
     Connections {
         target: Theme
         function onLayoutIdChanged() { App.applyUiFont(Theme.fontFamily) }
+        function onFontFamilyChanged() { App.applyUiFont(Theme.fontFamily) }
     }
     Component.onCompleted: App.applyUiFont(Theme.fontFamily)
 

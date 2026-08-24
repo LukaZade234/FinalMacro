@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from macro.state import AccountState
+from mudae.clock import local_hhmmss, utc_now
 
 if TYPE_CHECKING:
     from macro.session_log import SessionLogRecorder
@@ -76,17 +76,11 @@ def classify_activity_line(text: str) -> ActivitySeverity:
 
 
 def _now_ts() -> str:
-    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    return utc_now().isoformat(timespec="seconds")
 
 
 def _display_ts(iso_ts: str) -> str:
-    if not iso_ts:
-        return ""
-    try:
-        parsed = dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-    except ValueError:
-        return iso_ts
-    return parsed.astimezone().strftime("%H:%M:%S")
+    return local_hhmmss(iso_ts) or iso_ts
 
 
 class ActivityLog:

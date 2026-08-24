@@ -221,6 +221,34 @@ Item {
                         }
                     }
                 }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 6
+                    spacing: 10
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Normal fonts"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+
+                    ThemedSwitch {
+                        checked: App.uiSystemFonts
+                        onToggled: App.setUiSystemFonts(checked)
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 0
+                    text: "Use the desktop's default typeface instead of Space Grotesk and IBM Plex Mono."
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
             }
         }
 

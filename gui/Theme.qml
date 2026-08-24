@@ -25,6 +25,8 @@ QtObject {
 
     property string paletteId: "tokyonight"
     property string layoutId: "classic"
+    property bool systemFonts: false
+    property string systemFontFamily: ""
 
     readonly property var colors: Palettes.get(paletteId)
     readonly property var shape: Skins.get(layoutId)
@@ -68,11 +70,13 @@ QtObject {
 
     // ---- typography --------------------------------------------------------
 
-    readonly property string fontFamily: shape.font
-    readonly property string monoFamily: shape.mono
+    readonly property string fontFamily: systemFonts
+        ? (systemFontFamily || shape.font) : shape.font
+    readonly property string monoFamily: systemFonts
+        ? (systemFontFamily || shape.mono) : shape.mono
     // True for the designs that are monospace throughout, so a component can
     // skip its own mono override rather than switching to a second font.
-    readonly property bool monoUi: shape.monoUi
+    readonly property bool monoUi: systemFonts ? false : shape.monoUi
 
     readonly property int sizeMicro: shape.micro
     readonly property int sizeTiny: shape.tiny

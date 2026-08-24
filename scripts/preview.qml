@@ -14,10 +14,13 @@ Item {
 
     Binding { target: Theme; property: "layoutId"; value: root.layoutId }
     Binding { target: Theme; property: "paletteId"; value: root.paletteId }
+    Binding { target: Theme; property: "systemFonts"; value: App.uiSystemFonts }
+    Binding { target: Theme; property: "systemFontFamily"; value: App.systemFontFamily }
 
     Connections {
         target: Theme
         function onLayoutIdChanged() { App.applyUiFont(Theme.fontFamily) }
+        function onFontFamilyChanged() { App.applyUiFont(Theme.fontFamily) }
     }
     Component.onCompleted: App.applyUiFont(Theme.fontFamily)
 

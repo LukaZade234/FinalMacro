@@ -45,6 +45,15 @@ ColumnLayout {
         return n
     }
 
+    function formatLocalTime(iso) {
+        if (!iso)
+            return ""
+        var ms = Date.parse(iso)
+        if (isNaN(ms))
+            return ""
+        return Qt.formatTime(new Date(ms), "HH:mm:ss")
+    }
+
     function escapeHtml(text) {
         return String(text)
             .replace(/&/g, "&amp;")
@@ -65,8 +74,9 @@ ColumnLayout {
             var entry = rows[i]
             var color = severityColor(entry.severity).toString()
             var prefix = ""
-            if (entry.ts && entry.ts.length >= 19)
-                prefix = "[" + entry.ts.substring(11, 19) + "] "
+            var localTime = formatLocalTime(entry.ts)
+            if (localTime)
+                prefix = "[" + localTime + "] "
             parts.push('<span style="color:' + color + '">' + escapeHtml(prefix + entry.text) + "</span>")
         }
         return parts.join("<br>")

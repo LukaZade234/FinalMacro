@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 from macro.reaction_power import display_reaction_power
+from mudae.clock import utc_date_key
 
 
 class MacroPhase(str, Enum):
@@ -72,7 +72,7 @@ class AccountState:
         }
 
     def _today_key(self) -> str:
-        return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+        return utc_date_key()
 
     def rollover_kakera_budget_if_needed(self) -> None:
         today = self._today_key()

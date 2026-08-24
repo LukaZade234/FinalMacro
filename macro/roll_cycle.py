@@ -255,6 +255,12 @@ class RollCycleEngine:
         )
 
     def _finish_session(self, reason: str) -> None:
+        from mudae.chaos_capture import close_open_window
+
+        closed = close_open_window("session_end")
+        if closed:
+            n = int(closed.get("message_count") or 0)
+            self._log(f"chaos capture: {n} message(s) (session_end)")
         if not self._session or not self._session.active:
             return
         self._activity.write(f"Session ending ({reason})")

@@ -14,9 +14,9 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 2. **Compile leftover parser regexes** — mechanical.
 3. **Humanized delays** — jitter existing sleeps.
 4. **Reaction power max on the account page** — move a hardcoded `155`.
-5. **Timezones** — pick UTC (Mudae dailies), fix QML “today”.
+5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
 6. **`$p` / `$daily`** — send at the right time; parsers exist.
-7. **Chaos parser** — tighten an existing parse, do not invent a feature.
+7. **Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.
 8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
 9. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
 10. **Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.
@@ -39,8 +39,8 @@ Highest first. What makes an overnight run correct and complete.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
 5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played), perk 9 static filter, perk 8 power not saved for refill.
 6. **Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`. Overnight sessions mis-attribute `$tu` and can collide with a minigame.
-7. **Timezones** — “today” and daily series lie across UTC midnight.
-8. **Overnight completeness** — chaos parser, `$p`/`$daily`, `$us` on a clock.
+7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
+8. **Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`), `$p`/`$daily`, `$us` on a clock.
 9. **More SP from games we already play** — `$oh` DP / `$oc` lookahead. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase).
 10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker.
 11. **`$dl` switch**, humanized delays, empty states, reaction-power max, shell Run parity.
@@ -58,9 +58,9 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - ~~Soulmate rows: write `account_id` / `account_name` from Mudae `owner` (lukazade234).~~ QML fallback is `"Unknown"` only if a row still has no name.
 - ~~After `force_reconnect`, restore `macro_active` if it was set.~~ `startMacro` refuses while a minigame is running.
 - ~~`$oq` MIXED hunt.~~ Replay harness in `macro/oq_replay.py` (`scripts/oq_bakeoff.py`). Opening is Colblitz `(1,1)` (index 6). Finding 3 purples auto-reveals the 4th as a clickable red — we claim it, we do not search hidden cells. Two-purple hunt uses expectimax. Full replay MIXED **95.6% red / 344.8 avg** (Colblitz 95.4% / 342.7).
-- Timezones. Every later “today”, daily report, and perk-8/minigame skip uses this clock.
+- ~~Timezones.~~ Mudae dailies / `date_key` / stats “today” are UTC (`mudae/clock.py`, `gui/clock.js`). In-app live feed stays local time (Classic `ActivityLogPanel` + Haul `RunModel.timeOf`).
 - Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
-- Chaos parser in the same key/sphere pass.
+- ~~Chaos parser in the same key/sphere pass.~~ Capture first: every Mudae message after a `kakeraC` click until the next commanded roll goes to `data/chaos_log.json` (`kind: unparsed`). Bonus spheres, extra `$oh`/`$oc`/`$oq`, +rolls, `$kl`, power refund, self-only kakera spawn, and wish spawn are too varied to parse until those windows are documented. Parser later.
 - Empty states + reaction-power max while the GUI is open (stop lying).
 
 **Wave 2 — two foundations (do not skip)**
@@ -96,7 +96,7 @@ Optional / when asked: `$ov` parser. Skip unless someone wants them: disablelist
 ## Parsers and server rules
 
 - **`$settings` / `$bonus` audit** — capture `$bonus` the same way as `$settings`; fix both parsers field-by-field (`docs/archive/MUDAE_SETTINGS_COMMANDS.md`); then use parsed fields in macro decisions. 16 commands are **direct toggles** (bare send flips the live server) — capture tooling must skip or auto-revert them. Claim-via-emoji stays blocked until this lands.
-- **Chaos parser** — chaos-kakera bonus rolls (1–15+ extra) are not logged; `$us` spends them but overnight runs cannot show when they appeared. Tighten key / chaos-kakera parse while here.
+- **Chaos parser** — chaos-kakera outcomes are too varied to parse up front (bonus spheres, extra `$oh`/`$oc`/`$oq`, +5/10/15 rolls, `$kl 1`/`$kl 10`, 50% react-power refund, self-only character with 1–4 free kakera, wish spawn). Raw windows: `data/chaos_log.json` from `kakeraC` click until the next commanded roll. Parser comes after those cases are documented. `$us` already spends bonus rolls; overnight runs still cannot *name* which outcome appeared until the parser exists.
 - **Optional `$ov` parser** — parse when we need it; do not send it unless asked.
 - **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, invested-sphere bonuses, and perk 9. `$oh` hidden clicks that show ``spU`` in chat now grant ``$oc`` (play-all spends them like bonus `$oq`). While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
 - **`$p` / `$daily`** — send and record the daily poke / `$daily` at the right time.
@@ -133,7 +133,7 @@ Do the shared model first; the copy-paste and most of the slowness go away with 
 - **`uniqueSources()` is O(n²)** — `SpheresView.sourceBreakdown` / `KeysView` call it inside the inner loop (and it walks all entries each time). Hoist if the shared model is not next; otherwise it dies with the shared model.
 - **`filteredEntries()` is a function in bindings** — every re-eval re-filters; `sourceBreakdown` / series / totals each call it again. Cache as a property if views stay in QML.
 - **Four log modules are one class** — `kakera_log` / `sphere_log` / `key_log` share load/save/account helpers; `soulmate_log` still writes the whole file synchronously. One `EventLog` + four small record functions. While there: **append-only JSONL** instead of rewriting the pretty JSON list on every flush (`DebouncedJsonLog` still `json.dumps` the full list).
-- **Timezones** — log `date_key` is UTC; QML “today” / week / month use local `Date`. Crossing midnight UTC vs local makes “today” and daily series lie. Pick one clock (Mudae dailies are 00:00 UTC) and use it in both layers.
+- ~~**Timezones** — log `date_key` is UTC; QML “today” / week / month use local `Date`.~~ `mudae/clock.py` + `gui/clock.js`: UTC for `date_key` / stats “today”; live feed local.
 - **Reaction power max is hardcoded `155`** — `DEFAULT_MAX_REACTION_POWER` / `AccountState.power_max_percent`. Badge-dependent; belongs on the account page. Efficiency math is wrong when it is stale.
 - **Empty states** — “No spheres logged yet” should say the macro has to be connected and running for anything to record.
 - **Session row on Statistics** — one line per connect/disconnect with kakera + spheres + keys + claims. Today each log is filtered alone (`gui/run_summary.py` already does a session haul on Run).

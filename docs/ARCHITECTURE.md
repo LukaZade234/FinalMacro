@@ -50,7 +50,7 @@ FinalMacro/
 | `bridge.py` | `AppBridge` — QML `App` object; owns stores, connect/start/stop |
 | `Main.qml` | Window; binds `Theme` to `App.uiLayout` / `App.uiPalette` |
 | `Theme.qml` | Singleton design tokens (colors from `palettes.js`, shape from `skins.js`) |
-| `palettes.js` / `skins.js` | Colour themes and layout shells (QML `.pragma library`) |
+| `palettes.js` / `skins.js` / `clock.js` | Colour themes, layout shells, UTC stats buckets (QML `.pragma library`) |
 | `qmldir` | Registers `Theme` and `SphereAssets` singletons |
 | `accounts.py` / `presets.py` / `server_profiles.py` / `targets.py` | JSON stores inside `data/settings.json` |
 | `run_target.py` | Resolve active account + channel + preset |
@@ -95,6 +95,7 @@ changes.
 
 | Path | Role |
 |------|------|
+| `clock.py` | UTC `date_key` (Mudae dailies); local HH:MM:SS for the live feed |
 | `discord_reader.py` | `ChannelMonitor` — user-token client, one channel |
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP** |
@@ -102,7 +103,7 @@ changes.
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `ohu8`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
-| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` / `minigame_log.py` | Persistent stats (`data/minigame_log.json` → Statistics → Minigames) |
+| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` / `minigame_log.py` / `chaos_capture.py` | Persistent stats; chaos is raw follow-up windows (`data/chaos_log.json`) until outcomes are documented |
 | `settings_catalog.py` / `settings_commands.py` / `settings_preset.py` | GUI settings templates |
 | `command_ack.py` / `command_context.py` / `claim_context.py` | Match replies to the command we just sent |
 

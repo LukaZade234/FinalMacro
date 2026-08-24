@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from mudae.account_context import defaults_from_store, resolve_log_account
+from mudae.clock import utc_date_key
 from mudae.constants import sphere_base_sp
 from mudae.log_store import DebouncedJsonLog
 
@@ -169,7 +170,7 @@ def record_minigame_session(
         "oc_bonus": int(session.get("oc_bonus") or 0),
         "reason": reason,
         "recorded_at": stamp.isoformat(),
-        "date_key": stamp.strftime("%Y-%m-%d"),
+        "date_key": utc_date_key(stamp),
         "time": stamp.strftime("%H:%M:%S"),
     }
     _events.append(entry)

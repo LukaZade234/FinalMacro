@@ -38,6 +38,7 @@ Switch {
     contentItem: Text {
         text: control.showLabel ? (control.checked ? "On" : "Off") : ""
         color: control.checked ? Theme.success : Theme.fgMuted
+        font.family: Theme.fontFamily
         font.pixelSize: 11
         verticalAlignment: Text.AlignVCenter
         leftPadding: control.indicator.width + (control.showLabel ? 6 : 0)

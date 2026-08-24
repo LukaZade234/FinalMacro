@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mudae.account_context import defaults_from_store, resolve_log_account
+from mudae.clock import utc_date_key
 from mudae.log_store import DebouncedJsonLog
 from mudae.types import MessageKind, MudaeMessageSnapshot
 
@@ -162,7 +163,7 @@ def record_sphere_earning(
         "character_name": fields.get("character_name"),
         "claimed_by": fields.get("claimed_by"),
         "recorded_at": stamp.isoformat(),
-        "date_key": stamp.strftime("%Y-%m-%d"),
+        "date_key": utc_date_key(stamp),
         "time": snapshot.created_at,
         "message_id": snapshot.message_id,
     }

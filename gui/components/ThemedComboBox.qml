@@ -22,6 +22,7 @@ ComboBox {
         rightPadding: 24
         text: control.displayText
         color: control.enabled ? Theme.fgPrimary : Theme.fgMuted
+        font.family: Theme.fontFamily
         font.pixelSize: 12
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
@@ -32,6 +33,7 @@ ComboBox {
         anchors.verticalCenter: parent.verticalCenter
         text: "\u25be"
         color: Theme.fgMuted
+        font.family: Theme.fontFamily
         font.pixelSize: 12
     }
 
@@ -47,6 +49,7 @@ ComboBox {
         contentItem: Text {
             text: control.textAt(index)
             color: Theme.fgPrimary
+            font.family: Theme.fontFamily
             font.pixelSize: 12
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight

@@ -24,7 +24,7 @@ var skins = {
     },
     haul: {
         name: "Haul",
-        description: "Icon rail, rounded cards, session haul beside the feed.",
+        description: "Icon rail that expands on hover, rounded cards, session haul beside the feed.",
         shell: "HaulShell.qml",
         defaultPalette: "kakera",
         font: SANS, mono: MONO, monoUi: false,

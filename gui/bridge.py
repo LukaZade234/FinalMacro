@@ -23,7 +23,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QFont, QGuiApplication
 
 from gui.accounts import AccountStore
 from gui.mudae_settings_presets import MudaeSettingsPresetStore
@@ -176,6 +176,9 @@ class AppBridge(QObject):
 
     def __init__(self) -> None:
         super().__init__()
+        app = QGuiApplication.instance()
+        self._system_font = QFont(app.font()) if app is not None else QFont()
+        self._ui_system_fonts = False
         saved = load_settings()
         self._profiles = ServerProfileStore()
         self._accounts = AccountStore()
@@ -530,6 +533,7 @@ class AppBridge(QObject):
         # Set once the user picks a palette explicitly; until then switching
         # design is free to move the palette with it.
         self._ui_palette_pinned = bool(saved.get("ui_palette_pinned", False))
+        self._ui_system_fonts = bool(saved.get("ui_system_fonts", False))
         if not initial:
             self.appearanceChanged.emit()
 
@@ -1138,6 +1142,7 @@ class AppBridge(QObject):
                 "ui_layout": self._ui_layout,
                 "ui_palette": self._ui_palette,
                 "ui_palette_pinned": self._ui_palette_pinned,
+                "ui_system_fonts": self._ui_system_fonts,
             },
             updates={
                 "update_dismissed_sha": self._update_dismissed_sha,
@@ -1173,6 +1178,14 @@ class AppBridge(QObject):
     def uiPalette(self) -> str:
         return self._ui_palette
 
+    @Property(bool, constant=False, notify=appearanceChanged)
+    def uiSystemFonts(self) -> bool:
+        return self._ui_system_fonts
+
+    @Property(str, constant=True)
+    def systemFontFamily(self) -> str:
+        return self._system_font.family()
+
     @Slot(str)
     def setUiLayout(self, layout: str) -> None:
         layout = str(layout)
@@ -1197,6 +1210,15 @@ class AppBridge(QObject):
         self.appearanceChanged.emit()
         self._persist()
 
+    @Slot(bool)
+    def setUiSystemFonts(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._ui_system_fonts == enabled:
+            return
+        self._ui_system_fonts = enabled
+        self.appearanceChanged.emit()
+        self._persist()
+
     @Slot(str)
     def applyUiFont(self, family: str) -> None:
         """Set the default application font for the current design.
@@ -1204,15 +1226,19 @@ class AppBridge(QObject):
         The design's font lives in gui/skins.js, so QML pushes it here rather
         than the mapping being duplicated in Python. Setting it application-wide
         means the ~50 views that never specify a family follow the design too.
+        An empty family (or system-fonts mode) restores the desktop default
+        captured at startup.
         """
-        family = str(family).strip()
         app = QGuiApplication.instance()
-        if not family or app is None:
+        if app is None:
             return
-        font = app.font()
-        if font.family() == family:
+        family = str(family).strip()
+        font = QFont(self._system_font)
+        if family:
+            font.setFamily(family)
+        current = app.font()
+        if current.family() == font.family() and current.pointSize() == font.pointSize():
             return
-        font.setFamily(family)
         app.setFont(font)
 
     @Slot()
@@ -1463,6 +1489,7 @@ class AppBridge(QObject):
 
     def _bind_run_target_metadata(self, resolved: ResolvedRunTarget) -> None:
         """Update session labels, log recorders, and engine persistence for a target."""
+        from mudae.chaos_capture import set_recording_account as set_chaos_account
         from mudae.kakera_log import set_recording_account as set_kakera_account
         from mudae.key_log import set_recording_account as set_key_account
         from mudae.soulmate_log import set_recording_account
@@ -1483,6 +1510,7 @@ class AppBridge(QObject):
         set_key_account(resolved.account_id, account_name)
         set_sphere_account(resolved.account_id, account_name)
         set_minigame_account(resolved.account_id, account_name)
+        set_chaos_account(resolved.account_id, account_name)
 
         channel_profile = self._profiles.find_channel_by_profile_id(
             resolved.channel_profile_id
@@ -1780,6 +1808,15 @@ class AppBridge(QObject):
     def _on_parsed(self, snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> None:
         if self._actions:
             self._actions.feed(snapshot, parsed)
+        from mudae.chaos_capture import note_parsed as note_chaos_parsed
+
+        closed = note_chaos_parsed(snapshot, parsed)
+        if closed:
+            n = int(closed.get("message_count") or 0)
+            reason = str(closed.get("closed_reason") or "?")
+            log = getattr(self._engine, "_log", None)
+            if callable(log):
+                log(f"chaos capture: {n} message(s) ({reason})")
         profile_kind = profile_kind_from_parse(parsed)
         if profile_kind:
             payload = json.dumps(
@@ -2035,11 +2072,17 @@ class AppBridge(QObject):
         from mudae.key_log import flush_disk_log as flush_key_log
         from mudae.sphere_log import flush_disk_log as flush_sphere_log
         from mudae.minigame_log import flush_disk_log as flush_minigame_log
+        from mudae.chaos_capture import (
+            close_open_window,
+            flush_disk_log as flush_chaos_log,
+        )
 
+        close_open_window("disconnect")
         flush_disk_log()
         flush_key_log()
         flush_sphere_log()
         flush_minigame_log()
+        flush_chaos_log()
         self._on_connected(False)
         self._on_notification_standby(True)
         return True
@@ -2158,16 +2201,24 @@ class AppBridge(QObject):
                 clear_recording_account as clear_minigame_account,
                 flush_disk_log as flush_minigame_log,
             )
+            from mudae.chaos_capture import (
+                clear_recording_account as clear_chaos_account,
+                close_open_window,
+                flush_disk_log as flush_chaos_log,
+            )
 
+            close_open_window("disconnect")
             clear_recording_account()
             clear_soulmate_account()
             clear_key_account()
             clear_sphere_account()
             clear_minigame_account()
+            clear_chaos_account()
             flush_disk_log()
             flush_key_log()
             flush_sphere_log()
             flush_minigame_log()
+            flush_chaos_log()
             self._run_guild_id = None
             self._run_guild_name = None
             self._run_channel_name = None

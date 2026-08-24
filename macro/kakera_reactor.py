@@ -31,7 +31,10 @@ from macro.rule_eval import (
     perk8_mode_from_state,
 )
 from macro.state import AccountState
+from mudae.chaos_capture import begin_window, close_open_window
 from mudae.types import MessageKind, ParseResult
+
+_CHAOS_EMOJI = "kakeraC"
 
 # Pauses around ``$dk`` so Mudae finishes processing the prior kakera denial.
 _DK_PAUSE_BEFORE_SEC = 1.0
@@ -212,108 +215,121 @@ class KakeraReactor:
         roll_index: int,
         rules: KakeraReactionRules,
     ) -> bool:
-        dk_attempts = 0
-        while True:
-            if not can_afford_reaction(self.state, cost):
-                if (
-                    rules.auto_use_dk
-                    and has_dk_available(self.state)
-                    and dk_attempts < _MAX_DK_ATTEMPTS_PER_CLICK
-                ):
-                    dk_attempts += 1
-                    if await self._try_use_dk(
-                        character,
-                        attempt=dk_attempts,
-                        roll_index=roll_index,
-                        reason="insufficient tracked power",
+        chaos = (choice.emoji or "") == _CHAOS_EMOJI
+        if chaos:
+            begin_window(clicked_message_id=message_id, character_name=character)
+        confirmed = False
+        try:
+            dk_attempts = 0
+            while True:
+                if not can_afford_reaction(self.state, cost):
+                    if (
+                        rules.auto_use_dk
+                        and has_dk_available(self.state)
+                        and dk_attempts < _MAX_DK_ATTEMPTS_PER_CLICK
                     ):
-                        self.log(
-                            f"kakera: retrying {character} after $dk "
-                            f"(need {cost:g}% · have "
-                            f"{display_reaction_power(self.state.power_percent)}%)"
-                        )
-                        continue
-                self.log(
-                    f"kakera skip {character}: insufficient power "
-                    f"({display_reaction_power(self.state.power_percent)}% "
-                    f"need {cost:g}%)"
-                )
-                return False
-            for attempt in range(1, _MAX_KAKERA_CLICK_ATTEMPTS + 1):
-                ok = await self.actions.click_button(message_id, choice.custom_id)
-                if not ok:
-                    self._debug(
-                        f"kakera: button click failed {character} "
-                        f"(msg {message_id})"
+                        dk_attempts += 1
+                        if await self._try_use_dk(
+                            character,
+                            attempt=dk_attempts,
+                            roll_index=roll_index,
+                            reason="insufficient tracked power",
+                        ):
+                            self.log(
+                                f"kakera: retrying {character} after $dk "
+                                f"(need {cost:g}% · have "
+                                f"{display_reaction_power(self.state.power_percent)}%)"
+                            )
+                            continue
+                    self.log(
+                        f"kakera skip {character}: insufficient power "
+                        f"({display_reaction_power(self.state.power_percent)}% "
+                        f"need {cost:g}%)"
                     )
                     return False
-                await asyncio.sleep(_KAKERA_CLICK_SETTLE_SEC)
-                wait_timeout = (
-                    _KAKERA_OUTCOME_TIMEOUT_SEC
-                    if attempt == 1
-                    else _KAKERA_OUTCOME_RETRY_TIMEOUT_SEC
-                )
-                qsize = getattr(self.actions, "queue_size", lambda: 0)()
-                self._debug(
-                    f"kakera: wait outcome {character} "
-                    f"attempt {attempt}/{_MAX_KAKERA_CLICK_ATTEMPTS} "
-                    f"timeout={wait_timeout:g}s queue={qsize}"
-                )
-                outcome = await self._wait_for_kakera_outcome(timeout=wait_timeout)
-                if outcome is not None:
-                    self._debug(
-                        f"kakera: outcome {character} · {outcome.kind.value} · "
-                        f"{outcome.summary or '?'}"
-                    )
-                    break
-                self._drain_stale_kakera_outcomes()
-                if attempt < _MAX_KAKERA_CLICK_ATTEMPTS:
-                    self.log(
-                        f"kakera: retrying click on {character} "
-                        f"(attempt {attempt + 1}/{_MAX_KAKERA_CLICK_ATTEMPTS})"
-                    )
-            else:
-                self._log_kakera_timeout(character)
-                return False
-            if outcome.kind == MessageKind.KAKERA_REACT_DENIED:
-                cooldown = int(outcome.fields.get("kakera_cooldown_minutes") or 0)
-                sync_reaction_power_from_denial(
-                    self.state,
-                    cooldown_minutes=cooldown,
-                    cost=cost,
-                )
-                self._notify_state()
-                self.log(
-                    f"kakera denied {character}: Mudae cooldown {cooldown}m "
-                    f"(tracked power ≈ "
-                    f"{display_reaction_power(self.state.power_percent)}%)"
-                )
-                if (
-                    rules.auto_use_dk
-                    and has_dk_available(self.state)
-                    and dk_attempts < _MAX_DK_ATTEMPTS_PER_CLICK
-                ):
-                    dk_attempts += 1
-                    if await self._try_use_dk(
-                        character,
-                        attempt=dk_attempts,
-                        roll_index=roll_index,
-                        reason=f"denied · wait {cooldown}m",
-                    ):
-                        self.log(
-                            f"kakera: retrying {character} after $dk refill "
-                            f"(need {cost:g}%)"
+                for attempt in range(1, _MAX_KAKERA_CLICK_ATTEMPTS + 1):
+                    ok = await self.actions.click_button(message_id, choice.custom_id)
+                    if not ok:
+                        self._debug(
+                            f"kakera: button click failed {character} "
+                            f"(msg {message_id})"
                         )
-                        continue
-                return False
-            if not spend_reaction_power(self.state, cost):
-                self.log(
-                    f"kakera claim {character} but power tracker rejected "
-                    f"{cost:g}% spend"
-                )
-                return False
-            self._notify_state()
-            return True
+                        return False
+                    await asyncio.sleep(_KAKERA_CLICK_SETTLE_SEC)
+                    wait_timeout = (
+                        _KAKERA_OUTCOME_TIMEOUT_SEC
+                        if attempt == 1
+                        else _KAKERA_OUTCOME_RETRY_TIMEOUT_SEC
+                    )
+                    qsize = getattr(self.actions, "queue_size", lambda: 0)()
+                    self._debug(
+                        f"kakera: wait outcome {character} "
+                        f"attempt {attempt}/{_MAX_KAKERA_CLICK_ATTEMPTS} "
+                        f"timeout={wait_timeout:g}s queue={qsize}"
+                    )
+                    outcome = await self._wait_for_kakera_outcome(timeout=wait_timeout)
+                    if outcome is not None:
+                        self._debug(
+                            f"kakera: outcome {character} · {outcome.kind.value} · "
+                            f"{outcome.summary or '?'}"
+                        )
+                        break
+                    self._drain_stale_kakera_outcomes()
+                    if attempt < _MAX_KAKERA_CLICK_ATTEMPTS:
+                        self.log(
+                            f"kakera: retrying click on {character} "
+                            f"(attempt {attempt + 1}/{_MAX_KAKERA_CLICK_ATTEMPTS})"
+                        )
+                else:
+                    self._log_kakera_timeout(character)
+                    return False
+                if outcome.kind == MessageKind.KAKERA_REACT_DENIED:
+                    cooldown = int(outcome.fields.get("kakera_cooldown_minutes") or 0)
+                    sync_reaction_power_from_denial(
+                        self.state,
+                        cooldown_minutes=cooldown,
+                        cost=cost,
+                    )
+                    self._notify_state()
+                    self.log(
+                        f"kakera denied {character}: Mudae cooldown {cooldown}m "
+                        f"(tracked power ≈ "
+                        f"{display_reaction_power(self.state.power_percent)}%)"
+                    )
+                    if (
+                        rules.auto_use_dk
+                        and has_dk_available(self.state)
+                        and dk_attempts < _MAX_DK_ATTEMPTS_PER_CLICK
+                    ):
+                        dk_attempts += 1
+                        if await self._try_use_dk(
+                            character,
+                            attempt=dk_attempts,
+                            roll_index=roll_index,
+                            reason=f"denied · wait {cooldown}m",
+                        ):
+                            self.log(
+                                f"kakera: retrying {character} after $dk refill "
+                                f"(need {cost:g}%)"
+                            )
+                            continue
+                    return False
+                if not spend_reaction_power(self.state, cost):
+                    self.log(
+                        f"kakera claim {character} but power tracker rejected "
+                        f"{cost:g}% spend"
+                    )
+                    return False
+                self._notify_state()
+                confirmed = True
+                if chaos:
+                    self._debug(
+                        f"chaos capture: watching follow-ups after {character}"
+                    )
+                return True
+        finally:
+            if chaos and not confirmed:
+                close_open_window("click_unconfirmed")
 
     async def _try_use_dk(
         self,
