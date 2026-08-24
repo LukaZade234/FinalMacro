@@ -83,7 +83,11 @@ class ConnectionRecovery:
             if not await self.release_for_notifications():
                 return False
             return await self.restore_for_notifications()
-        return await _resolve(reconnect())
+        was_active = bool(getattr(ctx.monitor, "macro_active", False))
+        ok = await _resolve(reconnect())
+        if ok and was_active:
+            ctx.monitor.macro_active = True
+        return ok
 
     async def recover_transient(
         self,

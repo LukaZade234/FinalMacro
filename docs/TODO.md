@@ -2,7 +2,7 @@
 
 Open work. Game rules: [`MUDAE_LOGIC.md`](MUDAE_LOGIC.md). Code map: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-Follow **Unlock path** unless you specifically want a quick win or a single high-impact slice. Skip list is at the bottom of **Colblitz tools**. New holes from a full-app pass: **Found in audit**. New holes from a full-app pass: **Found in audit**.
+Follow **Unlock path** unless you specifically want a quick win or a single high-impact slice. Skip list is at the bottom of **Colblitz tools**. New holes from a full-app pass: **Found in audit**.
 
 ---
 
@@ -11,25 +11,22 @@ Follow **Unlock path** unless you specifically want a quick win or a single high
 Cheapest first. “Easy” means a sitting or two and little new machinery.
 
 1. **Empty states** — copy.
-2. **Hardcoded `lukazade234` fallbacks** — Soulmates + `DEFAULT_ACCOUNT_NAME`; should be `"Unknown"`.
-3. **ParseLab token field** — stop calling `setToken` on every keystroke.
-4. **`startMacro` during a minigame** / restore `macro_active` after reconnect — one-line guards.
-5. **Compile leftover parser regexes** — mechanical.
-6. **Humanized delays** — jitter existing sleeps.
-7. **Reaction power max on the account page** — move a hardcoded `155`.
-8. **`$oq` MIXED bake-off** — worlds already in `oq_worlds.py`; no game-loop change.
-9. **Timezones** — pick UTC (Mudae dailies), fix QML “today”.
-10. **`$p` / `$daily`** — send at the right time; parsers exist.
-11. **Chaos parser** — tighten an existing parse, do not invent a feature.
-12. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
-13. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
-14. **Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.
-15. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
-16. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
-17. **EventLog + JSONL** then **shared stats model** — medium, but one design kills five GUI bugs.
-18. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
-19. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
-20. Last: split `bridge.py`, achievements, GUI polish. Do not hoist `uniqueSources` / cache `filteredEntries` if the shared model is next — they die with it.
+2. **Compile leftover parser regexes** — mechanical.
+3. **Humanized delays** — jitter existing sleeps.
+4. **Reaction power max on the account page** — move a hardcoded `155`.
+5. **`$oq` MIXED bake-off** — worlds already in `oq_worlds.py`; no game-loop change.
+6. **Timezones** — pick UTC (Mudae dailies), fix QML “today”.
+7. **`$p` / `$daily`** — send at the right time; parsers exist.
+8. **Chaos parser** — tighten an existing parse, do not invent a feature.
+9. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
+10. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
+11. **Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.
+12. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
+13. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
+14. **EventLog + JSONL** then **shared stats model** — medium, but one design kills five GUI bugs.
+15. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
+16. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
+17. Last: split `bridge.py`, achievements, GUI polish. Do not hoist `uniqueSources` / cache `filteredEntries` if the shared model is next — they die with it.
 
 ---
 
@@ -58,9 +55,9 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 **Wave 1 — cheap data, harness, and stop-the-bleeding**
 
-- ParseLab must not persist the live token on keystroke; Debug Connect must match Run’s connection state. Truncating that field currently writes a broken token into `settings.json`.
-- Replace hardcoded `lukazade234` (`mudae/account_context.py`, `SoulmatesView.qml`) with `"Unknown"`.
-- After `force_reconnect`, restore `macro_active` if the engine is still running. `startMacro` must refuse while `$oh`/`$oc`/`$oq` is in flight ( `$us` already does).
+- ~~ParseLab must not persist the live token on keystroke~~ — Debug uses the Run/Accounts token and no longer has a token field.
+- ~~Soulmate rows: write `account_id` / `account_name` from Mudae `owner` (lukazade234).~~ QML fallback is `"Unknown"` only if a row still has no name.
+- ~~After `force_reconnect`, restore `macro_active` if it was set.~~ `startMacro` refuses while a minigame is running.
 - `$oq` bake-off. Isolated, and the replay harness is reused for `$oh` / `$oc` / `$ot`.
 - Timezones. Every later “today”, daily report, and perk-8/minigame skip uses this clock.
 - Sphere tracking audit: colour on `sphere_click`, `$oc` granted from `$oh`. Unblocks perk 9 frequencies and the `$oh` DP.
@@ -161,10 +158,10 @@ Pass over the running app after the rankings above. Items already listed earlier
 
 ### Bugs
 
-- **ParseLab writes the live token on every keystroke** — `ParseLabView.qml` `onTextChanged: App.setToken(text)` plus `Component.onCompleted: tokenField.text = App.getToken()`. Editing or clearing Debug’s token field persists a truncated/empty token on the active account. Connect/Disconnect buttons also only update in `onConnectedChanged`, so opening Debug while already connected from Run shows Connect enabled.
-- **Hourly Start is allowed during a minigame** — `startUsMode` / `playOhSphere` refuse when `_oh_running` etc.; `startMacro` does not. Haul / Console / Boxed only gate minigame buttons on `run.connected`, so the UI invites overlap. Backend rejects some of those clicks with a status line; hourly-during-`$oh` is the hole.
-- **`force_reconnect` clears `macro_active` and never puts it back** — `ChannelMonitor._clear_channel_state` sets the flag false. `$us` roll-timeout reconnect and transient 503 recovery go through that path. While the flag is false, Mudae replies are treated as passive channel traffic instead of `_pending_macro_command`. Queue is also drained, so in-flight roll/kakera lines vanish.
-- **Hardcoded `lukazade234`** — `mudae/account_context.py` `DEFAULT_ACCOUNT_NAME` and `SoulmatesView.qml` chart fallback. Friends and empty names show that username. Tests can keep the fixture; production fallback is `"Unknown"`.
+- ~~**ParseLab writes the live token on every keystroke**~~ — Debug no longer edits the token; Connect/Disconnect sync on load.
+- ~~**Hourly Start is allowed during a minigame**~~ — `startMacro` uses the same busy check as `$us` / minigame buttons.
+- ~~**`force_reconnect` clears `macro_active` and never puts it back**~~ — flag is restored when it was set before the reconnect.
+- ~~**Hardcoded `lukazade234` display fallback**~~ — soulmate rows get `account_name` from `owner`; missing name shows `"Unknown"`. The duplicate GUI profile still named Default is leftover config, not a display hack.
 - **`CLAIM_INTERVAL` is parsed and then ignored** — pipeline classifies “once per interval” rejections; `wait_for_claim` only accepts `CLAIM` / `MARRIAGE`, so the attempt times out, `claim_available` stays true, and the macro may retry into the same wall.
 - **Unknown reaction power is treated as infinite** — `can_afford_reaction` returns true when `power_percent is None`. After a skipped `$tu` or a partial restore, paid kakera fire until Mudae denies. `$us` stop-on-power does the opposite (returns false when unknown) and also assumes a chaos key when computing min cost, so it stops too late without one.
 

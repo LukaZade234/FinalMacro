@@ -136,12 +136,16 @@ class ChannelMonitor:
 
     async def force_reconnect(self) -> bool:
         """Close the gateway (if any) and open a fresh Discord connection."""
+        was_active = self.macro_active
         self._emit_status("Reconnecting to Discord…")
         try:
             await self.stop_background()
         except Exception:
             pass
+        self._clear_channel_state()
         ready = await self.start_background()
+        if was_active:
+            self.macro_active = True
         if ready:
             self._emit_status("Reconnected")
         else:

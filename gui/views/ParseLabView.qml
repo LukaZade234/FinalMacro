@@ -14,10 +14,24 @@ Item {
         color: Theme.bgDark
     }
 
+    function syncConnectionButtons() {
+        connectBtn.enabled = !App.connected
+        disconnectBtn.enabled = App.connected
+    }
+
     function modelValue(index, role) {
         if (index < 0 || index >= messageModel.count)
             return ""
         return messageModel.get(index)[role]
+    }
+
+    readonly property string activeAccountName: {
+        try {
+            var data = JSON.parse(App.accountsJson)
+            return data.active_account_name || ""
+        } catch (e) {
+            return ""
+        }
     }
 
     component ExpandingTextBox: TextEdit {
@@ -56,8 +70,7 @@ Item {
             connStatusLabel.text = text
         }
         function onConnectedChanged(connected) {
-            connectBtn.enabled = !connected
-            disconnectBtn.enabled = connected
+            parseRoot.syncConnectionButtons()
         }
     }
 
@@ -83,14 +96,16 @@ Item {
                 rowSpacing: 8
                 Layout.fillWidth: true
 
-                Label { text: "Token"; color: Theme.fgSecondary; font.pixelSize: 11 }
-                ThemedTextField {
-                    id: tokenField
+                Label { text: "Account"; color: Theme.fgSecondary; font.pixelSize: 11 }
+                Label {
                     Layout.columnSpan: 3
                     Layout.fillWidth: true
-                    placeholderText: "User token"
-                    echoMode: TextInput.Password
-                    onTextChanged: App.setToken(text)
+                    text: parseRoot.activeAccountName
+                        ? (parseRoot.activeAccountName + " — token is set on Accounts, not here")
+                        : "Select account on Run / Accounts"
+                    color: Theme.fgPrimary
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
                 }
 
                 Label { text: "Channel"; color: Theme.fgSecondary; font.pixelSize: 11 }
@@ -351,6 +366,6 @@ Item {
     }
 
     Component.onCompleted: {
-        tokenField.text = App.getToken()
+        parseRoot.syncConnectionButtons()
     }
 }

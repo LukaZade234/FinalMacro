@@ -140,3 +140,35 @@ def test_discord_reader_imports_transient_error_helper():
     from mudae import discord_reader
 
     assert discord_reader.is_transient_discord_error is not None
+
+
+def test_force_reconnect_restores_macro_active():
+    from mudae.discord_reader import ChannelMonitor
+
+    monitor = ChannelMonitor("token", 123)
+    monitor.macro_active = True
+    monitor.stop_background = AsyncMock()  # type: ignore[method-assign]
+    monitor.start_background = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    async def run() -> None:
+        ready = await monitor.force_reconnect()
+        assert ready is True
+        assert monitor.macro_active is True
+        assert monitor._pending_macro_command is None
+
+    asyncio.run(run())
+
+
+def test_force_reconnect_leaves_macro_inactive_when_it_was():
+    from mudae.discord_reader import ChannelMonitor
+
+    monitor = ChannelMonitor("token", 123)
+    monitor.macro_active = False
+    monitor.stop_background = AsyncMock()  # type: ignore[method-assign]
+    monitor.start_background = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    async def run() -> None:
+        await monitor.force_reconnect()
+        assert monitor.macro_active is False
+
+    asyncio.run(run())

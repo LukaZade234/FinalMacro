@@ -2243,6 +2243,14 @@ class AppBridge(QObject):
         if path is not None:
             activity.write(f"Session log saved: {path.name}")
 
+    def _minigames_busy(self) -> bool:
+        return bool(
+            self._oh_running
+            or self._oc_running
+            or self._oq_running
+            or self._minigames_running
+        )
+
     @Slot()
     def startMacro(self) -> None:
         if not self._loop or not self._engine:
@@ -2250,6 +2258,9 @@ class AppBridge(QObject):
             return
         if self._engine.is_running:
             self._set_status("Macro already running")
+            return
+        if self._minigames_busy():
+            self._set_status("Stop the minigame before starting the hourly macro")
             return
         self._persist()
         self._engine.update_config(self._macro_config)
@@ -2269,7 +2280,7 @@ class AppBridge(QObject):
         if self._engine.is_running:
             self._set_status("Macro already running")
             return
-        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
+        if self._minigames_busy():
             self._set_status("Stop the minigame before rolling $us")
             return
         self._persist()
@@ -2307,7 +2318,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oh")
             return
-        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
+        if self._minigames_busy():
             self._set_status("Stop the minigame before playing $oh")
             return
 
@@ -2349,7 +2360,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oc")
             return
-        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
+        if self._minigames_busy():
             self._set_status("Stop the minigame before playing $oc")
             return
 
@@ -2388,7 +2399,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing $oq")
             return
-        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
+        if self._minigames_busy():
             self._set_status("Stop the minigame before playing $oq")
             return
 
@@ -2427,7 +2438,7 @@ class AppBridge(QObject):
         if self._engine and self._engine.is_running:
             self._set_status("Stop the macro before playing minigames")
             return
-        if self._oh_running or self._oc_running or self._oq_running or self._minigames_running:
+        if self._minigames_busy():
             self._set_status("Stop the minigame before playing all")
             return
 

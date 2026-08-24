@@ -115,6 +115,52 @@ def test_events_for_client_newest_first(tmp_path, monkeypatch):
     assert rows[1]["account_inferred"] is True
 
 
+def test_legacy_soulmate_gets_account_from_owner(tmp_path, monkeypatch):
+    import mudae.soulmate_log as soulmate_log
+
+    monkeypatch.setattr(soulmate_log, "_LOG_PATH", tmp_path / "soulmate_log.json")
+    soulmate_log._events = [
+        {
+            "character_name": "Senzawa",
+            "owner": "lukazade234",
+            "time": "23:29:21",
+        }
+    ]
+    store = _FakeStore(
+        accounts=[
+            AccountProfile(id="dup", name="Default", type="Main"),
+            AccountProfile(id="real", name="lukazade234", type="Main"),
+        ],
+        active_account_id="real",
+    )
+    updated = soulmate_log.persist_legacy_account_ids(store)
+    assert updated == 1
+    assert soulmate_log._events[0]["account_id"] == "real"
+    assert soulmate_log._events[0]["account_name"] == "lukazade234"
+
+    rows = events_for_client(store)
+    assert rows[0]["account_id"] == "real"
+    assert rows[0]["account_name"] == "lukazade234"
+
+
+def test_backfill_account_name_from_owner_skips_named_rows():
+    import mudae.soulmate_log as soulmate_log
+
+    previous = soulmate_log._events
+    soulmate_log._events = [
+        {"owner": "lukazade234", "account_name": "kleinam0n"},
+        {"owner": "lukazade234"},
+        {"owner": "lukazade234", "account_name": "Default"},
+    ]
+    try:
+        assert soulmate_log._backfill_account_name_from_owner() is True
+        assert soulmate_log._events[0]["account_name"] == "kleinam0n"
+        assert soulmate_log._events[1]["account_name"] == "lukazade234"
+        assert soulmate_log._events[2]["account_name"] == "lukazade234"
+    finally:
+        soulmate_log._events = previous
+
+
 def _sample_snapshot(**overrides) -> MudaeMessageSnapshot:
     base = dict(
         message_id=1,

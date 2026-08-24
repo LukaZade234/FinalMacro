@@ -7,9 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from mudae.account_context import (
-    DEFAULT_ACCOUNT_NAME,
+    UNKNOWN_ACCOUNT_NAME,
     defaults_from_store,
-    main_account_defaults,
     resolve_log_account,
 )
 from mudae.types import MudaeMessageSnapshot
@@ -18,7 +17,6 @@ _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "soulmate_log.json
 _events: list[dict[str, Any]] = []
 _recording_account_id: str = ""
 _recording_account_name: str = ""
-_DEFAULT_ACCOUNT_NAME = DEFAULT_ACCOUNT_NAME
 
 
 def _load_disk_log() -> None:
@@ -31,6 +29,7 @@ def _load_disk_log() -> None:
         return
     if isinstance(raw, list):
         _events = [entry for entry in raw if isinstance(entry, dict)]
+    _backfill_account_name_from_owner()
 
 
 def _save_disk_log() -> None:
@@ -46,11 +45,65 @@ def set_recording_account(account_id: str, account_name: str) -> None:
     """Bind subsequent soulmate records to the running account."""
     global _recording_account_id, _recording_account_name
     _recording_account_id = str(account_id or "").strip()
-    _recording_account_name = str(account_name or _DEFAULT_ACCOUNT_NAME).strip() or _DEFAULT_ACCOUNT_NAME
+    _recording_account_name = str(account_name or "").strip()
 
 
 def clear_recording_account() -> None:
-    set_recording_account("", _DEFAULT_ACCOUNT_NAME)
+    set_recording_account("", "")
+
+
+def _placeholder_account_name(name: str) -> bool:
+    return str(name or "").strip().lower() in {"", "default"}
+
+
+def _backfill_account_name_from_owner() -> bool:
+    """Copy ``owner`` onto rows that never stored which app account rolled them.
+
+    Early soulmates were logged without ``account_id`` / ``account_name`` while
+    the GUI profile was still called Default. The Mudae owner is the roller.
+    """
+    changed = False
+    for entry in _events:
+        stored = str(entry.get("account_name") or "").strip()
+        if not _placeholder_account_name(stored):
+            continue
+        owner = str(entry.get("owner") or "").strip()
+        if not owner:
+            continue
+        entry["account_name"] = owner
+        changed = True
+    return changed
+
+
+def persist_legacy_account_ids(accounts_store: Any) -> int:
+    """Match owner / account_name to a stored profile and write ``account_id``."""
+    _main_id, _main_name, account_by_id = defaults_from_store(accounts_store)
+    by_name = {
+        str(getattr(acc, "name", "") or "").strip().lower(): acc
+        for acc in account_by_id.values()
+        if str(getattr(acc, "name", "") or "").strip()
+    }
+    updated = 0
+    for entry in _events:
+        stored_id = str(entry.get("account_id") or "").strip()
+        stored_name = str(entry.get("account_name") or "").strip()
+        owner = str(entry.get("owner") or "").strip()
+        name = stored_name if not _placeholder_account_name(stored_name) else owner
+        if not name:
+            continue
+        acc = by_name.get(name.lower())
+        if acc is None:
+            continue
+        want_id = str(acc.id)
+        want_name = str(acc.name)
+        if stored_id == want_id and stored_name == want_name:
+            continue
+        entry["account_id"] = want_id
+        entry["account_name"] = want_name
+        updated += 1
+    if updated:
+        _save_disk_log()
+    return updated
 
 
 def enrich_entry(
@@ -121,8 +174,12 @@ def record_new_soulmate(
 
     acc_id = str(account_id if account_id is not None else _recording_account_id).strip()
     acc_name = str(
-        account_name if account_name is not None else _recording_account_name or _DEFAULT_ACCOUNT_NAME
-    ).strip() or _DEFAULT_ACCOUNT_NAME
+        account_name
+        if account_name is not None
+        else _recording_account_name
+        or fields.get("owner")
+        or UNKNOWN_ACCOUNT_NAME
+    ).strip() or UNKNOWN_ACCOUNT_NAME
     entry = {
         "guild_id": snapshot.guild_id,
         "guild_name": snapshot.guild_name,
@@ -182,6 +239,7 @@ def get_soulmate_events() -> list[dict[str, Any]]:
 
 def events_for_client(accounts_store: Any) -> list[dict[str, Any]]:
     """Return soulmate rows enriched for the GUI (newest first)."""
+    persist_legacy_account_ids(accounts_store)
     main_id, main_name, account_by_id = defaults_from_store(accounts_store)
     enriched = [
         enrich_entry(

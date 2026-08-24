@@ -60,7 +60,7 @@ Item {
             var e = sourceEntries[i]
             var id = e.account_id || "unknown"
             counts[id] = (counts[id] || 0) + 1
-            labels[id] = e.account_name || "lukazade234"
+            labels[id] = e.account_name || "Unknown"
         }
         return toChartData(counts, labels)
     }
@@ -455,7 +455,7 @@ Item {
                                 }
                                 Label {
                                     Layout.preferredWidth: 110
-                                    text: modelData.account_name || "lukazade234"
+                                    text: modelData.account_name || "Unknown"
                                     color: modelData.account_inferred ? Theme.fgMuted : Theme.accentPrimary
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
