@@ -81,6 +81,7 @@ def test_parse_tu_rolls_reset_not_daily_reset():
     assert result.fields["rolls_reset_minutes"] == 44
     assert result.fields["rolls_left"] == 0
     assert result.fields["rolls_mk_bonus"] == 2
+    assert result.fields["daily_reset_minutes"] == 7 * 60 + 57
     assert "477" not in result.summary
 
 

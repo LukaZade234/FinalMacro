@@ -12,6 +12,7 @@ from macro.roll_context import RollContext
 from macro.roll_scheduler import (
     ROLLS_RESET_BUFFER_SEC,
     STOP_CHECK_SEC,
+    earliest_wake_seconds,
     next_wake_step,
     seconds_until_perk8_refill,
     seconds_until_rolls_reset,
@@ -95,6 +96,13 @@ def test_wake_step_never_overshoots_remaining():
     assert next_wake_step(0.25, wake_seconds=None) == 0.25
     assert next_wake_step(0.0, wake_seconds=None) == 0.0
     assert next_wake_step(-5.0, wake_seconds=None) == 0.0
+
+
+def test_earliest_wake_seconds_picks_the_soonest_hint():
+    combined = earliest_wake_seconds(lambda: 30.0, None, lambda: 5.0, lambda: None)
+    assert combined() == 5.0
+    empty = earliest_wake_seconds(None, lambda: None)
+    assert empty() is None
 
 
 def test_wake_step_shortens_for_imminent_perk8_refill():

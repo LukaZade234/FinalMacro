@@ -29,6 +29,8 @@ class MessageKind(str, Enum):
     KAKERA_BUTTONS = "kakera_buttons"
     OWNERSHIP_UPDATE = "ownership_update"
     SHOP = "shop"
+    P = "p"
+    DAILY = "daily"
     CHANNEL = "channel"
     UNKNOWN = "unknown"
 

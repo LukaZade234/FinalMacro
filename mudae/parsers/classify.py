@@ -12,6 +12,7 @@ from mudae.parsers.claim_interval import is_claim_interval_message
 from mudae.parsers.dk import is_dk_claim
 from mudae.parsers.reaction_power import is_kakera_react_denied
 from mudae.parsers.minigame_exhausted import is_minigame_exhausted_message
+from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
 from mudae.parsers.embed import (
@@ -82,6 +83,10 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.ROLL_LIMIT
     if is_minigame_exhausted_message(content):
         return MessageKind.MINIGAME_EXHAUSTED
+    if is_daily_cooldown_response(content):
+        return MessageKind.DAILY
+    if is_p_response(content):
+        return MessageKind.P
 
     if snapshot.embeds and is_character_embed(snapshot.embeds[0]):
         if has_kakera_buttons(snapshot):

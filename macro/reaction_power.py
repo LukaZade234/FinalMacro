@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-# Temporary default — per-account max will be configurable later.
+# Temporary default when ``$bonus`` has not been fetched for the run channel.
 DEFAULT_MAX_REACTION_POWER = 155.0
 REGEN_PERCENT_PER_3MIN = 1.0
 REGEN_INTERVAL_SEC = 180.0

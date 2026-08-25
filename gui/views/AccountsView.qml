@@ -14,20 +14,32 @@ Item {
     }
 
     property var accountData: ({ accounts: [] })
+    property var serverData: ({ servers: [] })
     property int selectedIndex: 0
     property bool showToken: false
+    property bool updating: false
+    property int dailyChannelIndex: 0
+    property var dailyLabels: ["Not set"]
 
     function reload() {
+        updating = true
         try {
             accountData = JSON.parse(App.accountsJson)
         } catch (e) {
             accountData = { accounts: [] }
         }
+        try {
+            serverData = JSON.parse(App.serversJson)
+        } catch (e) {
+            serverData = { servers: [] }
+        }
         if (selectedIndex >= (accountData.accounts || []).length)
             selectedIndex = Math.max(0, (accountData.accounts || []).length - 1)
         if (accountList)
             accountList.currentIndex = selectedIndex
+        dailyLabels = dailyChannelLabels()
         loadEditor()
+        Qt.callLater(function() { accountsRoot.updating = false })
     }
 
     function accounts() {
@@ -41,17 +53,49 @@ Item {
         return list[selectedIndex]
     }
 
+    function dailyChannelOptions() {
+        var options = [{ id: "", label: "Not set" }]
+        var servers = serverData.servers || []
+        for (var i = 0; i < servers.length; i++) {
+            var server = servers[i]
+            var channels = server.channels || []
+            for (var j = 0; j < channels.length; j++) {
+                var ch = channels[j]
+                options.push({
+                    id: ch.id,
+                    label: server.name + " · #" + ch.name
+                })
+            }
+        }
+        return options
+    }
+
+    function dailyChannelLabels() {
+        return dailyChannelOptions().map(function(opt) { return opt.label })
+    }
+
+    function indexForDailyChannel(channelId) {
+        var options = dailyChannelOptions()
+        for (var i = 0; i < options.length; i++) {
+            if (options[i].id === (channelId || ""))
+                return i
+        }
+        return 0
+    }
+
     function loadEditor() {
         var acc = currentAccount()
         if (!acc) {
             nameField.text = ""
             tokenField.text = ""
             typeCombo.currentIndex = 0
+            dailyChannelIndex = 0
             return
         }
         nameField.text = acc.name
         tokenField.text = acc.token
         typeCombo.currentIndex = acc.type === "Alt" ? 1 : 0
+        dailyChannelIndex = indexForDailyChannel(acc.daily_channel_id)
     }
 
     function saveCurrent() {
@@ -70,6 +114,9 @@ Item {
     Connections {
         target: App
         function onConfigChanged() {
+            accountsRoot.reload()
+        }
+        function onServersChanged() {
             accountsRoot.reload()
         }
     }
@@ -179,6 +226,29 @@ Item {
                         Layout.fillWidth: true
                         model: ["Main", "Alt"]
                     }
+
+                    Label {
+                        text: "$p / $daily channel"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                    }
+                    ThemedComboBox {
+                        id: dailyChannelCombo
+                        Layout.fillWidth: true
+                        model: accountsRoot.dailyLabels
+                        currentIndex: accountsRoot.dailyChannelIndex
+                        enabled: accountsRoot.currentAccount() !== null
+                        onActivated: function(index) {
+                            if (accountsRoot.updating)
+                                return
+                            var acc = accountsRoot.currentAccount()
+                            var options = accountsRoot.dailyChannelOptions()
+                            if (!acc || index < 0 || index >= options.length)
+                                return
+                            accountsRoot.dailyChannelIndex = index
+                            App.setAccountDailyChannel(acc.id, options[index].id)
+                        }
+                    }
                 }
 
                 Label {
@@ -220,6 +290,14 @@ Item {
                     textSize: 11
                     checked: accountsRoot.showToken
                     onToggled: accountsRoot.showToken = checked
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "$p and $daily are per account, not per server. Pick one channel to send both; leave unset to skip."
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
                 }
 
                 Label {

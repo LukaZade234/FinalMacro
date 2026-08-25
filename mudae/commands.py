@@ -127,6 +127,18 @@ def is_tu_response(content: str) -> bool:
     return has_rolls and has_claim
 
 
+def is_p_response(content: str) -> bool:
+    from mudae.parsers.p_daily import is_p_response as _is_p
+
+    return _is_p(content)
+
+
+def is_daily_response(content: str) -> bool:
+    from mudae.parsers.p_daily import is_daily_cooldown_response as _is_daily
+
+    return _is_daily(content)
+
+
 def is_roll_response(snapshot: MudaeMessageSnapshot) -> bool:
     from mudae.parsers.embed import is_character_embed
 
@@ -144,6 +156,8 @@ RESPONSE_DETECTORS: list[tuple[str, ResponseDetector]] = [
     ("us", is_us_response),
     ("ohu", is_ohu_response),
     ("ohu8", is_ohu8_response),
+    ("p", is_p_response),
+    ("daily", is_daily_response),
 ]
 
 

@@ -13,6 +13,7 @@ from macro.activity_log import ActivityLog
 from macro.connection_recovery import ConnectionRecovery
 from macro.roll_context import RollContext
 from macro.roll_scheduler import (
+    earliest_wake_seconds,
     seconds_until_rolls_reset,
     sleep_interruptible,
     wait_for_scheduled_wake,
@@ -94,6 +95,8 @@ class RollCycleEngine:
         notification_disconnect: Callable[[], Any] | None = None,
         notification_reconnect: Callable[[], Any] | None = None,
         account_id: str = "",
+        on_priority_pause: Callable[[], Any] | None = None,
+        priority_wake_hint: Callable[[], float | None] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -102,6 +105,8 @@ class RollCycleEngine:
         self._on_state = on_state
         self._on_keys = on_keys
         self._on_persist = on_persist
+        self._on_priority_pause = on_priority_pause
+        self._priority_wake_hint = priority_wake_hint
         self._daily_get = daily_resets_get
         self._daily_save = daily_resets_save
         self._channel_settings: dict[str, Any] = {}
@@ -325,6 +330,19 @@ class RollCycleEngine:
     async def _refresh_perk8_status(self, *, at_startup: bool = False) -> None:
         await self._perk8.refresh(at_startup=at_startup)
 
+    async def _run_priority_pause(self) -> None:
+        """Run account-global ``$p`` / ``$daily`` before rolls when they are due."""
+        cb = self._on_priority_pause
+        if cb is None:
+            return
+        result = cb()
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _on_scheduled_wake(self) -> None:
+        await self._run_priority_pause()
+        await self._perk8.maybe_refresh()
+
     async def _maybe_refresh_perk8_status(self) -> None:
         await self._perk8.maybe_refresh()
 
@@ -503,6 +521,7 @@ class RollCycleEngine:
                 return
 
             await self._refresh_perk8_status(at_startup=True)
+            await self._run_priority_pause()
 
             cmd = self._config.normalized_roll_command()
             roll_index = 0
@@ -525,6 +544,8 @@ class RollCycleEngine:
                     if not await self._restore_connection_for_notifications():
                         self._log("Notification mode: reconnect failed — stopping")
                         break
+
+                    await self._run_priority_pause()
 
                     if not tu_fresh:
                         if not await self.run_tu():
@@ -1147,6 +1168,8 @@ class RollCycleEngine:
             ):
                 break
 
+            await self._run_priority_pause()
+
             outcome = await self._perform_roll(
                 cmd,
                 start_index + done + 1,
@@ -1242,10 +1265,12 @@ class RollCycleEngine:
             self._log("$us mode: starting")
 
             await self._refresh_perk8_status(at_startup=True)
+            await self._run_priority_pause()
 
             transient_recoveries = 0
             while not self._stop.is_set():
                 try:
+                    await self._run_priority_pause()
                     if not skip_tu:
                         if not await self.run_tu():
                             self._log("$us mode: $tu failed — stopping")
@@ -1603,8 +1628,11 @@ class RollCycleEngine:
         return await wait_for_scheduled_wake(
             seconds,
             ctx=self._ctx,
-            wake_hint=self._perk8.seconds_until_refill,
-            on_wake=self._perk8.maybe_refresh,
+            wake_hint=earliest_wake_seconds(
+                self._perk8.seconds_until_refill,
+                self._priority_wake_hint,
+            ),
+            on_wake=self._on_scheduled_wake,
         )
 
     async def _wait_for_rolls_reset(self, margin: int) -> bool:
@@ -1618,7 +1646,8 @@ class RollCycleEngine:
             "(won't add $us rolls that would be wiped at reset)"
         )
         while not self._stop.is_set():
-            await asyncio.sleep(poll_sec)
+            if not await self._wait_for_scheduled_wake(poll_sec):
+                return False
             await self._maybe_refresh_perk8_status()
             if not await self.run_tu():
                 self._log("$us mode: $tu failed while waiting for rolls reset")
@@ -1711,6 +1740,7 @@ class RollCycleEngine:
         for _ in range(count):
             if self._stop.is_set():
                 break
+            await self._run_priority_pause()
             outcome = await self._perform_roll(
                 cmd,
                 start_index + done + 1,

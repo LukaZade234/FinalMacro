@@ -1,8 +1,8 @@
 """Display catalog for a stored ``$shop`` sheet.
 
 Perk 9 daily click cap is ``10 + extra_clicks`` (Mudae base 10, shop adds
-``+1`` per OP9 level, max ``+10`` → 20). Stored for later calculators; the
-macro still uses ``PERK9_CLICK_MAX_DEFAULT``.
+``+1`` per OP9 level, max ``+10`` → 20). The roll loop uses
+``channel.shop["perk9_click_max"]`` when ``$shop`` has been fetched.
 """
 
 from __future__ import annotations

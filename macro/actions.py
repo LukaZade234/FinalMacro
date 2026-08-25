@@ -70,6 +70,8 @@ def is_roll_parse_result(parsed: ParseResult, *, roll_command: str) -> bool:
         MessageKind.CLAIM,
         MessageKind.MARRIAGE,
         MessageKind.CLAIM_INTERVAL,
+        MessageKind.P,
+        MessageKind.DAILY,
     }:
         return False
     if parsed.kind in {

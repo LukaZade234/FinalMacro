@@ -154,14 +154,17 @@ class ChannelMonitor:
 
     async def switch_channel(self, channel_id: int) -> bool:
         """Point the monitor at another channel without dropping the gateway."""
+        was_active = self.macro_active
         self.channel_id = int(channel_id)
         self._clear_channel_state()
+        self.macro_active = was_active
         if self.is_connected:
             await self._emit_channel_status("Switched")
         return True
 
     async def reconnect(self, *, channel_id: int | None = None) -> bool:
         """Restart the gateway — used when the account token changes."""
+        was_active = self.macro_active
         if channel_id is not None:
             self.channel_id = int(channel_id)
         self._clear_channel_state()
@@ -170,6 +173,8 @@ class ChannelMonitor:
         except Exception:
             pass
         ready = await self.start_background()
+        if was_active:
+            self.macro_active = True
         if ready:
             await self._emit_channel_status("Reconnected")
         else:

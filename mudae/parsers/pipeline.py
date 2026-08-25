@@ -31,6 +31,7 @@ from mudae.parsers.dk import parse_dk
 from mudae.parsers.reaction_power import parse_kakera_react_denied, parse_ku
 from mudae.parsers.tu import parse_tu
 from mudae.parsers.us import parse_us
+from mudae.parsers.p_daily import parse_daily, parse_p
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
@@ -40,6 +41,8 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "us": parse_us,
     "ohu": parse_ohu,
     "ohu8": parse_ohu8,
+    "p": parse_p,
+    "daily": parse_daily,
 }
 _KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop"})
 
@@ -56,6 +59,8 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
     MessageKind.SHOP: "$shop",
+    MessageKind.P: "$p",
+    MessageKind.DAILY: "$daily",
 }
 
 
@@ -90,6 +95,16 @@ def _run_command_parser(
         if snapshot is not None:
             return parse_shop_snapshot(snapshot)
         return parse_shop(content)
+    if parser_id in {"p", "daily"}:
+        text = content
+        if snapshot is not None:
+            from mudae.parsers.classify import snapshot_text
+
+            visible = snapshot_text(snapshot)
+            if visible:
+                text = visible
+        parser = _COMMAND_PARSERS[parser_id]
+        return parser(text)
     parser = _COMMAND_PARSERS.get(parser_id)
     if parser is None:
         raise KeyError(parser_id)
@@ -169,6 +184,14 @@ def parse_mudae_message(
         return result
     if kind == MessageKind.TU:
         return parse_tu(snapshot.content)
+    if kind == MessageKind.P:
+        from mudae.parsers.classify import snapshot_text
+
+        return parse_p(snapshot_text(snapshot))
+    if kind == MessageKind.DAILY:
+        from mudae.parsers.classify import snapshot_text
+
+        return parse_daily(snapshot_text(snapshot))
     if kind == MessageKind.KAKERA_REACT_DENIED:
         return parse_kakera_react_denied(snapshot.content)
     if kind == MessageKind.DK_CLAIM:
@@ -259,6 +282,14 @@ def _parse_command_response(
             _store_settings_cache(snapshot, result)
         elif kind == MessageKind.TU:
             result = parse_tu(snapshot.content)
+        elif kind == MessageKind.P:
+            from mudae.parsers.classify import snapshot_text
+
+            result = parse_p(snapshot_text(snapshot))
+        elif kind == MessageKind.DAILY:
+            from mudae.parsers.classify import snapshot_text
+
+            result = parse_daily(snapshot_text(snapshot))
         elif kind == MessageKind.KAKERA_CLAIM:
             result = parse_kakera_claim(snapshot.content)
         elif kind == MessageKind.SPHERE_CLICK:

@@ -95,6 +95,10 @@ def parse_tu(content: str) -> ParseResult:
     if roll_reset is not None:
         fields["rolls_reset_minutes"] = roll_reset
 
+    daily_reset = _minutes_after_phrase(content, "next $daily reset")
+    if daily_reset is not None:
+        fields["daily_reset_minutes"] = daily_reset
+
     refill = parse_refill_minutes(content)
     if refill is not None:
         fields["perk8_refill_minutes"] = refill

@@ -18,6 +18,10 @@ class AccountProfile:
     token: str = ""
     type: str = "Main"
     enabled_channel_ids: list[str] = field(default_factory=list)
+    # Channel profile id used for account-global $p / $daily (empty = disabled).
+    daily_channel_id: str = ""
+    p_next_ready_at: str = ""
+    daily_next_ready_at: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AccountProfile:
@@ -28,6 +32,9 @@ class AccountProfile:
             token=str(data.get("token") or ""),
             type=str(data.get("type") or "Main"),
             enabled_channel_ids=[str(x) for x in enabled if x],
+            daily_channel_id=str(data.get("daily_channel_id") or ""),
+            p_next_ready_at=str(data.get("p_next_ready_at") or ""),
+            daily_next_ready_at=str(data.get("daily_next_ready_at") or ""),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -122,6 +129,9 @@ class AccountStore:
         token: str | None = None,
         account_type: str | None = None,
         enabled_channel_ids: list[str] | None = None,
+        daily_channel_id: str | None = None,
+        p_next_ready_at: str | None = None,
+        daily_next_ready_at: str | None = None,
     ) -> None:
         account = self.find_account(account_id)
         if not account:
@@ -134,3 +144,9 @@ class AccountStore:
             account.type = account_type.strip() or account.type
         if enabled_channel_ids is not None:
             account.enabled_channel_ids = list(enabled_channel_ids)
+        if daily_channel_id is not None:
+            account.daily_channel_id = daily_channel_id.strip()
+        if p_next_ready_at is not None:
+            account.p_next_ready_at = p_next_ready_at.strip()
+        if daily_next_ready_at is not None:
+            account.daily_next_ready_at = daily_next_ready_at.strip()

@@ -17,7 +17,8 @@ Discord channel  →  mudae/ (read, parse, send)
 
 `run.py` starts `gui/app.py`: load fonts, single-instance lock, expose
 `AppBridge` to QML as `App`, load `gui/Main.qml`. One window, one Discord
-connection at a time.
+connection at a time. `$p`/`$daily` for other accounts temporarily switch
+the token and restore the Run target.
 
 ---
 
@@ -77,6 +78,8 @@ changes.
 | `post_roll.py` / `kakera_reactor.py` / `sphere_reactor.py` | Apply those decisions |
 | `claim_window.py` | Final-hour test (claim reset == rolls reset) |
 | `rt_manager.py` / `dk_manager.py` / `reaction_power.py` | `$rt`, `$dk`, power bar |
+| `sheet_caps.py` | `$bonus` power max + `$shop` perk 9 cap on runtime state |
+| `account_dailies.py` / `account_daily_runtime.py` | Account-global `$p` / `$daily` timing and send |
 | `roll_scheduler.py` / `roll_stop.py` / `roll_interrupts.py` | Sleep, stop, wish-claim interrupt |
 | `us_stop.py` | `$us` stop options |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
@@ -153,7 +156,7 @@ All of this is one file: `data/settings.json` (never commit it).
 
 | Layer | Store | Role |
 |-------|--------|------|
-| Who | `accounts[]` | Token, name, enabled channels |
+| Who | `accounts[]` | Token, name, enabled channels, `$p`/`$daily` channel + cooldowns |
 | Where | `servers[]` / `channels[]` | Channel snowflakes, fetched `$settings` / `$bonus`, `daily_resets` |
 | How | `presets{}` | `MacroConfig` per preset id |
 | Binding | `targets[]` | `{ account_id, channel_profile_id, preset_id }` |

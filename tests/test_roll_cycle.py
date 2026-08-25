@@ -104,6 +104,25 @@ def _run_normal(engine: RollCycleEngine) -> None:
         asyncio.run(engine._run_cycle())
 
 
+def test_priority_pause_runs_before_tu_and_rolls():
+    calls: list[str] = []
+
+    async def pause() -> None:
+        calls.append("pause")
+
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(1, 0)],
+    )
+    engine, _state = _make_engine(actions)
+    engine._on_priority_pause = pause
+    _run_normal(engine)
+    assert calls, "expected $p/$daily priority pause before the roll loop"
+    assert calls[0] == "pause"
+    assert "tu" in [c for c, _ in actions.sent]
+    assert "wa" in [c for c, _ in actions.sent]
+
+
 def test_normal_macro_rolls_one_hour_then_stops_when_tu_exhausted():
     actions = _FakeActions(
         tu_script=[_tu(5, 30), _tu(0, 30)],

@@ -82,6 +82,22 @@ def next_wake_step(
     return step
 
 
+def earliest_wake_seconds(*hints: WakeHint | None) -> WakeHint:
+    """Combine wake hints; the soonest deadline wins. ``None`` hints are ignored."""
+
+    def combined() -> float | None:
+        values: list[float] = []
+        for hint in hints:
+            if hint is None:
+                continue
+            value = hint()
+            if value is not None:
+                values.append(value)
+        return min(values) if values else None
+
+    return combined
+
+
 async def sleep_interruptible(
     seconds: float,
     *,

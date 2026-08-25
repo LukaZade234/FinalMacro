@@ -228,6 +228,8 @@ class AppBridge(QObject):
         self._run_account_id: str = ""
         self._run_channel_profile_id: str = ""
         self._run_token: str = ""
+        self._account_daily_lock: asyncio.Lock | None = None
+        self._account_daily_runtime: Any = None
         self._session_started_at: datetime | None = None
         # Rebuilding the run summary walks the whole earning log, and the macro
         # notifies on every activity line, so the change signal is coalesced.
@@ -907,6 +909,12 @@ class AppBridge(QObject):
         self._persist()
 
     @Slot(str, str)
+    def setAccountDailyChannel(self, account_id: str, channel_profile_id: str) -> None:
+        self._accounts.update_account(account_id, daily_channel_id=channel_profile_id)
+        self._notify_config()
+        self._persist()
+
+    @Slot(str, str)
     def setAccountEnabledChannels(self, account_id: str, channel_ids_json: str) -> None:
         try:
             raw = json.loads(channel_ids_json) if channel_ids_json else []
@@ -1548,6 +1556,7 @@ class AppBridge(QObject):
         from macro.perk9_daily import sync_perk9_clicks_from_log
 
         sync_perk9_clicks_from_log(self._macro_state)
+        self._apply_sheet_caps_to_run_state(resolved.channel_profile_id)
 
         channel_profile = self._profiles.find_channel_by_profile_id(
             resolved.channel_profile_id
@@ -1626,10 +1635,10 @@ class AppBridge(QObject):
         state.perk9_clicks_today = 0
         state.perk9_clicks_day = ""
 
-        from macro.perk9_daily import PERK9_CLICK_MAX_DEFAULT, sync_perk9_clicks_from_log
+        from macro.perk9_daily import sync_perk9_clicks_from_log
 
-        state.perk9_click_max = PERK9_CLICK_MAX_DEFAULT
         sync_perk9_clicks_from_log(state)
+        self._apply_sheet_caps_to_run_state(self._run_channel_profile_id)
 
     def _load_persisted_runtime_state(
         self,
@@ -1650,6 +1659,7 @@ class AppBridge(QObject):
             settings=settings,
         )
         if result.applied:
+            self._apply_sheet_caps_to_run_state(channel_profile_id)
             self._append_activity_log(
                 f"Restored saved $tu state — {result.message}"
             )
@@ -1855,6 +1865,10 @@ class AppBridge(QObject):
         from mudae.chaos_capture import note_parsed as note_chaos_parsed
 
         note_chaos_parsed(snapshot, parsed)
+        if parsed.kind == MessageKind.TU:
+            minutes = parsed.fields.get("daily_reset_minutes")
+            if minutes is not None:
+                self._sync_daily_from_tu(int(minutes))
         profile_kind = profile_kind_from_parse(parsed)
         if profile_kind:
             payload = json.dumps(
@@ -2134,6 +2148,8 @@ class AppBridge(QObject):
         )
         self._notify_config()
         self._persist()
+        if str(data.get("kind") or "") in {"bonus", "shop"}:
+            self._apply_sheet_caps_if_discord_channel(int(data["discord_channel_id"]))
 
     async def _notification_disconnect(self) -> bool:
         """Drop the Discord gateway between hourly sessions (notification mode)."""
@@ -2212,6 +2228,8 @@ class AppBridge(QObject):
             on_parsed=self._on_parsed,
         )
         self._actions = DiscordActions(self._monitor)
+        from macro.account_dailies import seconds_until_due
+
         self._engine = RollCycleEngine(
             self._actions,
             self._macro_config,
@@ -2225,6 +2243,8 @@ class AppBridge(QObject):
             notification_disconnect=self._notification_disconnect,
             notification_reconnect=self._notification_reconnect,
             account_id=resolved.account_id,
+            on_priority_pause=lambda: self._run_account_dailies(from_engine=True),
+            priority_wake_hint=lambda: seconds_until_due(self._accounts.accounts),
         )
         if channel_settings is not None:
             self._engine.update_run_target(
@@ -2235,23 +2255,48 @@ class AppBridge(QObject):
             )
 
         async def runner() -> None:
-            ready = await self._monitor.start_background()
-            if ready:
-                self._macro_state.own_usernames = self._monitor.get_own_usernames()
-                own_id = self._monitor.get_own_user_id()
-                self._macro_state.own_user_ids = [own_id] if own_id is not None else []
-                self._on_connected(True)
-                self._on_macro_state()
-            else:
-                self._on_status("Connection timed out")
+            from macro.account_daily_runtime import AccountDailyRuntime
+
+            self._account_daily_lock = asyncio.Lock()
+            self._account_daily_runtime = AccountDailyRuntime(
+                switch_to=self._switch_monitor_for_dailies,
+                send_command=self._send_daily_command,
+                wait_for_tick=self._wait_daily_tick,
+                wait_for=self._actions.wait_for,
+                sleep=asyncio.sleep,
+                log=self._append_activity_log,
+                persist_account=self._persist_account_daily_fields,
+            )
+            daily_task = asyncio.create_task(
+                self._account_daily_loop(),
+                name="account-dailies",
+            )
+            try:
+                ready = await self._monitor.start_background()
+                if ready:
+                    self._macro_state.own_usernames = self._monitor.get_own_usernames()
+                    own_id = self._monitor.get_own_user_id()
+                    self._macro_state.own_user_ids = [own_id] if own_id is not None else []
+                    self._on_connected(True)
+                    self._on_macro_state()
+                else:
+                    self._on_status("Connection timed out")
+                    self._on_connected(False)
+                await self._stop_event.wait()
+                if self._engine:
+                    self._engine.save_runtime_state()
+                if self._engine and self._engine.is_running:
+                    self._engine.stop()
+                await self._monitor.stop_background()
                 self._on_connected(False)
-            await self._stop_event.wait()
-            if self._engine:
-                self._engine.save_runtime_state()
-            if self._engine and self._engine.is_running:
-                self._engine.stop()
-            await self._monitor.stop_background()
-            self._on_connected(False)
+            finally:
+                daily_task.cancel()
+                try:
+                    await daily_task
+                except asyncio.CancelledError:
+                    pass
+                self._account_daily_runtime = None
+                self._account_daily_lock = None
 
         try:
             loop.run_until_complete(runner())
@@ -2335,6 +2380,7 @@ class AppBridge(QObject):
                 resolved.account_id,
                 resolved.channel_profile_id,
             )
+        self._apply_sheet_caps_to_run_state(resolved.channel_profile_id)
         self._set_connecting(True)
         self._set_status("Connecting…")
         self._thread = threading.Thread(
@@ -2444,6 +2490,197 @@ class AppBridge(QObject):
             or self._oq_running
             or self._minigames_running
         )
+
+    def _apply_sheet_caps_to_run_state(self, channel_profile_id: str = "") -> None:
+        from macro.sheet_caps import apply_sheet_caps
+
+        profile_id = channel_profile_id or self._run_channel_profile_id
+        found = (
+            self._profiles.find_channel_by_profile_id(profile_id) if profile_id else None
+        )
+        bonus = found[1].bonus if found else {}
+        shop = found[1].shop if found else {}
+        apply_sheet_caps(self._macro_state, bonus=bonus, shop=shop)
+
+    def _apply_sheet_caps_if_discord_channel(self, discord_channel_id: int) -> None:
+        if not self._run_channel_profile_id:
+            return
+        found = self._profiles.find_channel_by_profile_id(self._run_channel_profile_id)
+        if not found:
+            return
+        try:
+            stored = int(str(found[1].channel_id or "").strip() or "0")
+        except ValueError:
+            return
+        if stored != int(discord_channel_id):
+            return
+        self._apply_sheet_caps_to_run_state(self._run_channel_profile_id)
+        self._notify_macro()
+
+    def _sync_daily_from_tu(self, minutes: int) -> None:
+        from macro.account_dailies import iso_ready, ready_after_minutes
+
+        if not self._run_account_id:
+            return
+        ready = ready_after_minutes(int(minutes))
+        self._accounts.update_account(
+            self._run_account_id,
+            daily_next_ready_at=iso_ready(ready),
+        )
+        self._request_persist()
+
+    def _persist_account_daily_fields(self, account_id: str, fields: dict[str, str]) -> None:
+        kwargs: dict[str, str] = {}
+        if "p_next_ready_at" in fields:
+            kwargs["p_next_ready_at"] = fields["p_next_ready_at"]
+        if "daily_next_ready_at" in fields:
+            kwargs["daily_next_ready_at"] = fields["daily_next_ready_at"]
+        if not kwargs:
+            return
+        self._accounts.update_account(account_id, **kwargs)
+        self._request_persist()
+
+    async def _wait_daily_tick(self, message_id: int, timeout: float) -> bool:
+        if not self._actions:
+            return False
+        return await self._actions.wait_for_mudae_tick(message_id, timeout=timeout)
+
+    async def _send_daily_command(self, command: str) -> int | None:
+        if self._engine:
+            return await self._engine._send_command_with_reconnect(
+                command,
+                label=f"${command}",
+            )
+        if not self._actions:
+            return None
+        return await self._actions.send_command(
+            command,
+            prefix=self._macro_config.prefix,
+        )
+
+    async def _switch_monitor_for_dailies(self, token: str, discord_channel_id: int) -> bool:
+        monitor = self._monitor
+        if not monitor:
+            return False
+        if self._actions:
+            self._actions.drain_queue()
+        token = token.strip()
+        current_token = str(getattr(monitor, "token", "") or "").strip()
+        token_changed = token != current_token
+        same_channel = int(monitor.channel_id) == int(discord_channel_id)
+        if not token_changed and same_channel and monitor.is_connected:
+            return True
+        try:
+            if token_changed:
+                monitor.token = token
+                ready = await monitor.reconnect(channel_id=int(discord_channel_id))
+            elif monitor.is_connected:
+                ready = await monitor.switch_channel(int(discord_channel_id))
+            else:
+                ready = await monitor.reconnect(channel_id=int(discord_channel_id))
+        except Exception as exc:
+            self._append_activity_log(f"$p/$daily: switch error ({exc})")
+            reconnect = getattr(monitor, "force_reconnect", None)
+            if reconnect is not None:
+                try:
+                    await reconnect()
+                except Exception:
+                    pass
+            return False
+        if self._actions:
+            self._actions.drain_queue()
+        if ready:
+            self._macro_state.own_usernames = monitor.get_own_usernames()
+            own_id = monitor.get_own_user_id()
+            self._macro_state.own_user_ids = [own_id] if own_id is not None else []
+            self._on_connected(True)
+        return bool(ready)
+
+    def _home_discord_channel_id(self) -> int | None:
+        found = self._profiles.find_channel_by_profile_id(self._run_channel_profile_id)
+        if found and found[1].channel_id:
+            try:
+                return int(found[1].channel_id)
+            except ValueError:
+                return None
+        if self._monitor:
+            return int(self._monitor.channel_id)
+        return None
+
+    async def _run_account_dailies(self, *, from_engine: bool = False) -> None:
+        if not self._monitor or not self._actions or not self._account_daily_runtime:
+            return
+        if self._minigames_busy() or self._settings_apply_running:
+            return
+        if not from_engine and self._engine and self._engine.is_running:
+            return
+        lock = self._account_daily_lock
+        if lock is None:
+            return
+        from macro.account_dailies import plans_due
+
+        async with lock:
+            plans = plans_due(
+                self._accounts.accounts,
+                prefer_account_id=self._run_account_id,
+            )
+            if not plans:
+                return
+            was_disconnected = not self._monitor.is_connected
+            if was_disconnected:
+                if not await self._notification_reconnect():
+                    self._append_activity_log("$p/$daily: reconnect failed")
+                    return
+            home_channel = self._home_discord_channel_id()
+            home_token = self._run_token or str(getattr(self._monitor, "token", "") or "")
+            if home_channel is None or not home_token.strip():
+                return
+
+            def discord_id_for(plan: Any) -> int | None:
+                pair = self._profiles.find_channel_by_profile_id(plan.channel_profile_id)
+                if not pair or not pair[1].channel_id:
+                    return None
+                try:
+                    return int(pair[1].channel_id)
+                except ValueError:
+                    return None
+
+            await self._account_daily_runtime.run_plans(
+                plans,
+                home_token=home_token,
+                home_channel_id=home_channel,
+                discord_channel_id_for=discord_id_for,
+            )
+            if self._monitor:
+                self._macro_state.own_usernames = self._monitor.get_own_usernames()
+                own_id = self._monitor.get_own_user_id()
+                self._macro_state.own_user_ids = [own_id] if own_id is not None else []
+            if (
+                was_disconnected
+                and self._engine
+                and self._engine.is_running
+                and self._macro_config.notification_mode
+            ):
+                await self._notification_disconnect()
+
+    async def _account_daily_loop(self) -> None:
+        from macro.account_dailies import seconds_until_due
+
+        while True:
+            try:
+                await self._run_account_dailies(from_engine=False)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._append_activity_log(f"$p/$daily: {exc}")
+            delay = seconds_until_due(self._accounts.accounts)
+            if delay is None:
+                sleep_for = 30.0
+            elif delay <= 0:
+                sleep_for = 5.0
+            else:
+                sleep_for = min(delay, 30.0)
+            await asyncio.sleep(sleep_for)
 
     @Slot()
     def startMacro(self) -> None:

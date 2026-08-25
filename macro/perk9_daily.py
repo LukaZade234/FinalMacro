@@ -7,7 +7,7 @@ from typing import Any
 from mudae.constants import SPHERE_ROLL_FREE_EMOJIS
 from mudae.sphere_log import get_sphere_events, normalize_source
 
-# Until ``$bonus`` / ``$ohu9`` parsing lands, assume the default daily cap.
+# Default daily cap when ``$shop`` has not been fetched (10 base + 10 OP9).
 PERK9_CLICK_MAX_DEFAULT = 20
 
 

@@ -56,6 +56,7 @@ until the pool is empty or a stop rule fires. Delay between rolls is at least
 | Reaction power % | Kakera click budget |
 | `$rt` ready / next | Extra claim token |
 | `$dk` stock / next | Daily kakera power top-up |
+| `$daily` reset | Minutes until the account-global `$daily` (not the hourly rolls reset) |
 | Perk 8 refill | When daily perk-8 clicks come back |
 
 **Macro:** almost every session starts with `$tu`. Claim timing, `$us`
@@ -125,7 +126,9 @@ server bonuses).
 **Reaction power:** seeded from `$tu` / `$ku`. Base click costs 30% of the
 bar. A **chaos key** on the character halves the cost; **perk 8** halves it
 again. Power regenerates 1% every 3 minutes. `$dk` tops the bar back up
-(limited stock).
+(limited stock). The bar's maximum is `$bonus.kakera_max_power` on the run
+channel (`macro/sheet_caps.py`); **155** is the fallback before `$bonus` is
+fetched.
 
 **Macro:** `KakeraReactionRules` filters by color, optional chaos-key /
 perk-8 / min-spheres gates, a low-power override list, and perk-8 daily
@@ -254,9 +257,8 @@ counts, sphere stock) are not generalized yet — see `docs/TODO.md`.
 Perk 9 adds **sphere react buttons** on characters you have rolled today.
 Each click consumes one slot from a daily budget (shown on `$ohu9` as
 ``6/20 buttons clicked`` in the shared minigame header). The macro tracks
-this as **clicks used / 20** on the Run page until a later slice wires the
-real cap (`10 + SP9` from `$shop` `perk9_extra_clicks`; `$shop` is parsed,
-not wired).
+this as **clicks used / cap** on the Run page. The cap is
+`10 + perk9_extra_clicks` from the run channel's `$shop` (fallback **20**).
 
 - Query with **`$ohu9`** — same layout as `$ohu8` / `$ohu`: minigame
   counts, refill timer, ``buttons clicked``, megasphere stock line, then
@@ -310,20 +312,20 @@ The GUI fetches `$settings`, `$bonus`, and `$shop` onto a channel profile
 `bonus_catalog.py` / `shop_catalog.py`). Frozen dumps:
 `tests/mudae_sheet_fixtures.py`.
 
-**Storage is trusted. Decisions are not yet.** Field-by-field parse tests
+**Storage is trusted. Most decisions are not yet.** Field-by-field parse tests
 cover every `SETTINGS_FIELD_KEYS` value, the `$bonus` meaning keys
 (including part 2: power cap, twice-sphere chance, rolls/hour), and `$shop`
-OP1–OP10 (perk 9 extra clicks + SP%). The macro still does not change
-claim / kakera / roll behaviour from these fields.
+OP1–OP10 (perk 9 extra clicks + SP%). Claim / kakera / roll behaviour still
+does not read those fields.
 `RollCycleEngine.apply_settings_fields` still only copies `settimer`.
-`DEFAULT_MAX_REACTION_POWER = 155` and `PERK9_CLICK_MAX_DEFAULT = 20` stay
-hardcoded until a later slice wires `kakera_max_power` / perk 9.
+Reaction-power max (`kakera_max_power`) and the perk 9 click cap
+(`perk9_click_max`) **are** applied from the run channel's stored sheets.
 
 ### `$bonus` meaning keys needed later
 
 | Key | Type | Typical source tag | Later use |
 | --- | --- | --- | --- |
-| `kakera_max_power` | int | `$kt` | Replace hardcoded reaction-power cap |
+| `kakera_max_power` | int | `$kt` | Reaction-power cap (wired) |
 | `power_cost_per_kakera_button` | % | — | Kakera react budget |
 | `additional_spheres` | int | clicked + premium | Perk 9 EV flat SP |
 | `sphere_double_chance_pct` | % | `$kt` | Perk 9 EV double chance |
@@ -347,7 +349,7 @@ do not send `$shoprefund`.
 | Key | Type | Later use |
 | --- | --- | --- |
 | `perk9_extra_clicks` | int | Daily cap `10 + extra` (max 20) |
-| `perk9_click_max` | int | Replace `PERK9_CLICK_MAX_DEFAULT` |
+| `perk9_click_max` | int | Daily cap `10 + extra` (wired) |
 | `perk9_sphere_value_pct` | % | p9calc `shop9_bonus` (10% per OP9 level) |
 | `perk2_megasphere_rewards` | int | Megasphere planner |
 | `perks` | dict | Full OP1–OP10 current/next values |
@@ -371,6 +373,30 @@ List: `DIRECT_TOGGLE_FIELDS` in `mudae/settings_commands.py`.
 `$togglerolls` is **not** a toggle. It only prints help for the three
 independent rank-on-roll flags above.
 
+---
+
+## `$p` and `$daily` (account-global)
+
+Neither command is per server. Sending `$p` or `$daily` on any channel
+consumes the cooldown for that Discord account everywhere, so each account
+picks **one** designated channel on the Accounts tab.
+
+| Command | Cooldown | Success | Retry copy |
+| --- | --- | --- | --- |
+| `$daily` | 20 hours from the successful send | Mudae **tick** on the user message | `Next $daily reset in 20h 00 min.` |
+| `$p` | Fixed 2-hour slots from UTC midnight (00:00, 02:00, …) | Pokemon grid / `You won` — results are not stored | `Remaining time before your next $p: 1h 41 min.` |
+
+**Macro:** `macro/account_dailies.py` (timing) and
+`macro/account_daily_runtime.py` (switch / send / restore). While connected,
+due commands go out automatically, **before rolls**. The monitor switches to
+the designated channel (reconnect + retries if the gateway drops), then
+restores the Run target. Several accounts with a channel set are handled
+one after another (still one Discord connection). `$tu`'s
+`Next $daily reset` line updates the stored cooldown so a mid-cooldown
+connect does not resend.
+
+---
+
 `$bonus` capture is read-only (`$bonus` once). Do not iterate `($kt)` /
 `($kl)` as live commands.
 
@@ -390,4 +416,5 @@ only `$settings` + `$bonus` text.
   one Discord session — see Phase D in `ARCHITECTURE.md`).
 - Playing `$ot`.
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`
-  (parsers are trusted for storage; those decisions are a later slice).
+  (parsers are trusted for storage; power max and perk 9 cap are the
+  exceptions already wired).

@@ -39,6 +39,22 @@ def test_switch_channel_updates_id_and_clears_cached_state():
     assert "Switched" in emit.call_args.args[0]
 
 
+def test_switch_channel_keeps_macro_active():
+    monitor = ChannelMonitor(token="token", channel_id=111)
+    monitor.macro_active = True
+    monitor._connected = True
+    monitor._client = SimpleNamespace(user=SimpleNamespace(name="Tester"))
+
+    async def fake_label() -> str:
+        return "#mudae (222)"
+
+    with patch.object(monitor, "_resolve_channel_label", new=fake_label):
+        with patch.object(monitor, "_emit_status"):
+            asyncio.run(monitor.switch_channel(222))
+
+    assert monitor.macro_active is True
+
+
 def test_engine_update_run_target_rebinds_daily_store():
     store: dict[str, dict] = {"a": {"perk8": {}}, "b": {"perk8": {}}}
     engine = RollCycleEngine(
