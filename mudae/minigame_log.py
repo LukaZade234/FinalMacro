@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from macro.minigame_board import spawn_cell_emojis
 from mudae.account_context import defaults_from_store, resolve_log_account
 from mudae.clock import utc_date_key
 from mudae.constants import sphere_base_sp
@@ -168,6 +169,7 @@ def record_minigame_session(
         "clicks_paid": int(session.get("clicks_paid") or 0),
         "clicks_budget": int(session.get("clicks_budget") or 0),
         "oc_bonus": int(session.get("oc_bonus") or 0),
+        "oc_spawn": int(session.get("oc_spawn") or 0),
         "oq_bonus": int(session.get("oq_bonus") or 0),
         "ot_bonus": int(session.get("ot_bonus") or 0),
         "spheres_bonus": int(session.get("spheres_bonus") or 0),
@@ -288,12 +290,11 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
         bucket["ot_bonus"] += ot_grant
         oq_grants += oq_grant
         ot_grants += ot_grant
-        for raw in entry.get("board") or []:
-            emoji = str(raw or "").strip()
-            if emoji in {"", "spU"}:
-                continue
-            if emoji == "sp":
-                emoji = "spR"
+        for emoji in spawn_cell_emojis(
+            list(entry.get("board") or []),
+            game=game,
+            clicks=list(entry.get("clicks") or []),
+        ):
             spawn_counts[emoji] = spawn_counts.get(emoji, 0) + 1
             revealed += 1
         for click in entry.get("clicks") or []:

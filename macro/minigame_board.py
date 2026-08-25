@@ -63,6 +63,57 @@ def board_is_complete(board: list[str]) -> bool:
     )
 
 
+# Post-game $oh reveal fills every non-$oc cell. A mid-game snapshot only
+# has the clicked cells coloured, so leftover ``spU`` there are still unknown.
+_OH_FINAL_REVEAL_COLOURED_MIN = 20
+
+
+def oh_hidden_cells_are_oc(
+    board: list[str],
+    clicks: list[dict[str, Any]] | None = None,
+) -> bool:
+    """True when leftover ``spU`` on a finished ``$oh`` board are ``$oc`` uses.
+
+    After Mudae’s final reveal, every remaining hidden emoji is an ``$oc``
+    token (clicked or not). Face-down cells during play stay ``spU`` too, so
+    only treat them as ``$oc`` once the board is clearly fully revealed.
+    """
+    cells = [normalize_sphere_emoji(cell) for cell in board[:GRID_CELLS]]
+    if len(cells) < GRID_CELLS:
+        return False
+    hidden = sum(1 for cell in cells if cell in HIDDEN_EMOJIS)
+    coloured = GRID_CELLS - hidden
+    if coloured >= _OH_FINAL_REVEAL_COLOURED_MIN:
+        return True
+    n_clicks = len(clicks or [])
+    return n_clicks > 0 and coloured > n_clicks
+
+
+def spawn_cell_emojis(
+    board: list[str],
+    *,
+    game: str,
+    clicks: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Emoji ids that count toward minigame spawn rates.
+
+    Unrevealed ``spU`` is skipped. On a fully revealed ``$oh`` board, leftover
+    ``spU`` are ``$oc`` tokens and are included.
+    """
+    cells = [normalize_sphere_emoji(cell) for cell in board[:GRID_CELLS]]
+    count_hidden = str(game or "").strip().lower() == "oh" and oh_hidden_cells_are_oc(
+        cells, clicks
+    )
+    out: list[str] = []
+    for emoji in cells:
+        if emoji in HIDDEN_EMOJIS:
+            if count_hidden and emoji == "spU":
+                out.append("spU")
+            continue
+        out.append("spR" if emoji == "sp" else emoji)
+    return out
+
+
 def normalize_sphere_emoji(emoji: str | None) -> str:
     key = str(emoji or "").strip()
     if key in _OC_LETTER_TO_EMOJI:
@@ -215,8 +266,14 @@ def build_session(
         index = int(cell)
         if 0 <= index < GRID_CELLS:
             normalized_board[index] = emoji
+    game_key = str(game).strip().lower()
+    oc_spawn = 0
+    if game_key == "oh" and oh_hidden_cells_are_oc(normalized_board, clicks):
+        oc_spawn = sum(
+            1 for cell in normalized_board[:GRID_CELLS] if cell == "spU"
+        )
     return {
-        "game": str(game).strip().lower(),
+        "game": game_key,
         "clicks": list(clicks),
         "board": normalized_board[:GRID_CELLS],
         "won": any(click_is_win(click) for click in clicks),
@@ -224,6 +281,7 @@ def build_session(
         "clicks_paid": int(clicks_paid),
         "clicks_budget": int(clicks_budget),
         "oc_bonus": grants,
+        "oc_spawn": oc_spawn,
         "oq_bonus": int(oq_bonus),
         "ot_bonus": int(ot_bonus),
         "spheres_bonus": int(spheres_bonus),

@@ -165,6 +165,59 @@ def test_hidden_oh_click_grants_oc_not_sp():
     assert clicked == {"spU": 1}
     assert stats["totals"]["oc_grants"] == 1
     assert stats["spawn"] == []
+    assert session["oc_spawn"] == 0
+
+
+def test_oh_final_reveal_counts_leftover_hidden_as_oc_spawn():
+    board = ["spB"] * 24 + ["spU"]
+    session = build_session(
+        "oh",
+        [make_click(0, "spB", paid=True)],
+        board,
+        clicks_paid=5,
+        clicks_budget=5,
+        reason="done",
+    )
+    assert session["oc_spawn"] == 1
+    assert session["oc_bonus"] == 0
+    stats = build_stats([session])
+    spawn = {row["emoji"]: row["count"] for row in stats["spawn"]}
+    assert spawn["spB"] == 24
+    assert spawn["spU"] == 1
+    assert spawn["spU"] / sum(spawn.values()) == 1 / 25
+    labels = {row["emoji"]: row["label"] for row in stats["spawn"]}
+    assert labels["spU"] == "Hidden ($oc)"
+
+
+def test_oh_midgame_hidden_is_not_oc_spawn():
+    session = build_session(
+        "oh",
+        [make_click(0, "spB", paid=True)],
+        ["spB"] + ["spU"] * 24,
+        clicks_paid=1,
+        clicks_budget=5,
+        reason="done",
+    )
+    assert session["oc_spawn"] == 0
+    stats = build_stats([session])
+    spawn = {row["emoji"]: row["count"] for row in stats["spawn"]}
+    assert spawn == {"spB": 1}
+
+
+def test_oq_leftover_hidden_is_not_oc_spawn():
+    board = ["spB"] * 24 + ["spU"]
+    session = build_session(
+        "oq",
+        [make_click(0, "spB", paid=True)],
+        board,
+        clicks_paid=1,
+        clicks_budget=7,
+        reason="done",
+    )
+    assert session.get("oc_spawn", 0) == 0
+    stats = build_stats([session])
+    spawn = {row["emoji"]: row["count"] for row in stats["spawn"]}
+    assert spawn == {"spB": 24}
 
 
 def test_oh_perk10_grants_on_session():

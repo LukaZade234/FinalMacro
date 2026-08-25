@@ -40,6 +40,7 @@ def fast_macro_timers(request: pytest.FixtureRequest, monkeypatch: pytest.Monkey
     monkeypatch.setattr("macro.roll_cycle._COMMAND_SETTLE_SEC", 0.0)
     monkeypatch.setattr("macro.roll_cycle._PERK6_POST_SETTLE_SEC", 0.0)
     monkeypatch.setattr("macro.roll_cycle._US_ADD_SETTLE_SEC", 0.0)
+    monkeypatch.setattr("macro.kakera_reactor._CHAOS_FOLLOWUP_WAIT_SEC", 0.0)
 
     monkeypatch.setattr("macro.roll_cycle.asyncio.sleep", _instant_sleep)
     monkeypatch.setattr("macro.kakera_reactor.asyncio.sleep", _instant_sleep)

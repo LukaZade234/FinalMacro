@@ -39,6 +39,7 @@ KEY_TYPE_LABELS: dict[str, str] = {
 SOURCE_LABELS: dict[str, str] = {
     "roll": "Roll",
     "perk6_spawn": "Perk 6 spawn",
+    "chaos": "Chaos kakera",
 }
 
 
@@ -307,6 +308,38 @@ def record_roll_key_events(
         )
 
     return created
+
+
+def record_chaos_omega(
+    snapshot: MudaeMessageSnapshot,
+    *,
+    amount: int,
+    character_name: str = "",
+    account_id: str | None = None,
+    account_name: str | None = None,
+    now: dt.datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Log omega keys granted on a chaos-kakera claim (not a roll embed)."""
+    gain = max(0, int(amount))
+    if gain <= 0:
+        return []
+    already_logged = _logged_types_for_message(snapshot.message_id)
+    if "omega" in already_logged:
+        return []
+    name = str(character_name or "").strip() or "Chaos kakera"
+    return [
+        _append_event(
+            snapshot,
+            character_name=name,
+            key_type="omega",
+            amount=gain,
+            source="chaos",
+            level_after=None,
+            account_id=account_id,
+            account_name=account_name,
+            now=now,
+        )
+    ]
 
 
 def enrich_entry(

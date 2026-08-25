@@ -1,4 +1,4 @@
-"""Raw chaos-kakera follow-up capture (no outcome parser yet)."""
+"""Raw chaos-kakera follow-up capture (parser in ``mudae.parsers.chaos``)."""
 
 from __future__ import annotations
 

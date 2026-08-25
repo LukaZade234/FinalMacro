@@ -76,6 +76,7 @@ changes.
 | `config.py` | `MacroConfig` + claim / kakera / sphere / `$us` rule blocks |
 | `rule_eval.py` | Pure decisions (claim / kakera / sphere) from parsed fields |
 | `post_roll.py` / `kakera_reactor.py` / `sphere_reactor.py` | Apply those decisions |
+| `chaos_followup.py` | Extra hourly rolls + discounted chaos-kakera power cost |
 | `claim_window.py` | Final-hour test (claim reset == rolls reset) |
 | `rt_manager.py` / `dk_manager.py` / `reaction_power.py` | `$rt`, `$dk`, power bar |
 | `sheet_caps.py` | `$bonus` power max + `$shop` perk 9 cap on runtime state |
@@ -108,7 +109,7 @@ changes.
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere) |
 | `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets) |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
-| `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, …) |
+| `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, `chaos`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |

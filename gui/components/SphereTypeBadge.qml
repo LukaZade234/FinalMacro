@@ -8,6 +8,7 @@ Item {
     id: root
     property string sphereId: ""
     property bool showLabel: false
+    property string tooltip: ""
 
     readonly property string iconSource: SphereAssets.iconUrl(sphereId)
     readonly property bool hasIcon: iconSource !== ""
@@ -17,7 +18,7 @@ Item {
 
     ToolTip {
         visible: badgeMouse.containsMouse && (sphereId !== "" && sphereId !== undefined)
-        text: SphereAssets.label(sphereId)
+        text: root.tooltip !== "" ? root.tooltip : SphereAssets.label(sphereId)
         delay: 400
     }
 

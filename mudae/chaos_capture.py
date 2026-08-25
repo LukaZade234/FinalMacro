@@ -1,13 +1,9 @@
 """Raw capture of Mudae messages after a chaos kakera click.
 
-Chaos can grant bonus spheres, extra ``$oh`` / ``$oc`` / ``$oq``, +5/10/15
-rolls, ``$kl 1`` / ``$kl 10``, a 50% react-power refund, a self-only character
-with 1–4 free kakera buttons, or a wish spawn. Those cases are not parsed yet.
-
-Until they are documented, every Mudae message after a confirmed ``kakeraC``
-click is stored until the next *commanded* roll (the reply to a ``$wa`` / ``$wg``
-we sent) **or** a few seconds of silence — last roll of the hour has no next
-``$wa``, so silence is what closes the window and writes ``data/chaos_log.json``.
+Follow-up text is parsed in ``mudae.parsers.chaos`` (extra rolls, minigames,
+kakeraloots, power discount, omega keys, free kakera, wish spawn). This
+module still stores the raw window in ``data/chaos_log.json`` until the next
+commanded roll or a few seconds of silence, so unknown lines stay documented.
 """
 
 from __future__ import annotations

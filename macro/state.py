@@ -22,6 +22,7 @@ class MacroPhase(str, Enum):
 class AccountState:
     rolls_left: int | None = None
     rolls_us_bonus: int | None = None  # stacked rolls added via $us, usable now
+    chaos_rolls_left: int = 0  # +N this hour from chaos; footer often omits them
     us_stacked: float | None = None  # full stacked pool from bare $us
     claim_available: bool | None = None
     claim_cooldown_minutes: int | None = None

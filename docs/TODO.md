@@ -16,7 +16,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 4. ~~**Reaction power max on the account page** — `kakera_max_power` is parsed from `$bonus`; still not wired (hardcoded `155`).~~ Wired from the run channel's `$bonus` (`macro/sheet_caps.py`).
 5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
 6. ~~**`$p` / `$daily`** — send at the right time; parsers exist.~~ Account-global; designated channel on the Accounts tab; priority over rolls.
-7. **Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.
+7. ~~**Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.~~ Parser in `mudae/parsers/chaos.py`; extra rolls are spent this hour, free kakera / wish follow-ups are acted on, power discount applied on spend, omega keys logged. `$kl` / stored minigames are logged only.
 8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
 9. ~~**Save power for perk 8** / **`$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain / schedule on the preset (`us_keep_draining`, local window, roll cap). Run page is only the Roll `$us` button.
 10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
@@ -40,7 +40,7 @@ Highest first. What makes an overnight run correct and complete.
 5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played), perk 9 static filter.
 6. **Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`. Overnight sessions mis-attribute `$tu` and can collide with a minigame.
 7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
-8. **Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).
+8. ~~**Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).~~ Parser + follow-up in `KakeraReactor` / `chaos_followup.py`; raw windows still go to `data/chaos_log.json`.
 9. **More SP from games we already play** — `$oh` DP / `$oc` lookahead. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase).
 10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker.
 11. **`$dl` switch**, shell Run parity.
@@ -60,7 +60,8 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - ~~`$oq` MIXED hunt.~~ Replay harness in `macro/oq_replay.py` (`scripts/oq_bakeoff.py`). Opening is Colblitz `(1,1)` (index 6). Finding 3 purples auto-reveals the 4th as a clickable red — we claim it, we do not search hidden cells. Two-purple hunt uses expectimax. Full replay MIXED **95.6% red / 344.8 avg** (Colblitz 95.4% / 342.7).
 - ~~Timezones.~~ Mudae dailies / `date_key` / stats “today” are UTC (`mudae/clock.py`, `gui/clock.js`). In-app live feed stays local time (Classic `ActivityLogPanel` + Haul `RunModel.timeOf`).
 - ~~Sphere tracking audit~~ — colour on `sphere_click`, `$oc` granted from `$oh` (not SP), no double-count vs perk 10 / kakera / perk 9; Statistics “today” verified. First `$oh` invested-sphere line is **perk 10** (`$oq` / `$ot` / flat SP) — SP source `perk10`, extra `$oq`/`$ot` on the `$oh` minigame session. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
-- ~~Chaos parser in the same key/sphere pass.~~ Capture first: every Mudae message after a `kakeraC` click until the next commanded roll **or 8s of silence** goes to `data/chaos_log.json` (`kind: unparsed`). File is written on the first follow-up (not only when the window closes). Silence covers the last roll of an hour, when no `$wa` follows. Parser later.
+- ~~Chaos parser in the same key/sphere pass.~~ Capture: every Mudae message after a `kakeraC` click until the next commanded roll **or 8s of silence** goes to `data/chaos_log.json`. Parser + acting is the next bullet.
+- ~~**Chaos parser wired**~~ — `mudae/parsers/chaos.py` on the `+$k` body (`+N rolls this hour`, stored `$oh`/`$oc`/`$oq`/`$ot`, `$kl`, `N%` power discount, omega `$ok`, owned free kakera, wish spawn). Shop 5 `(Shop 5) +1 $ot stored!` is separate (any kakera react). Extra rolls are added to `rolls_left` and spent before hourly refill. Free kakera clicked at 0 power; wish uses `claim_on_wish_ping` + `$rt` when that toggle is on. Discount applies when spending tracked power, not as a pre-click guess.
 - ~~Reaction-power max is parsed (`kakera_max_power`) but not wired.~~ `kakera_max_power` from `$bonus` and `perk9_click_max` from `$shop` are applied to the run-channel state.
 
 **Wave 2 — two foundations (do not skip)**
@@ -101,7 +102,7 @@ Optional / when asked: `$ov` parser. Skip unless someone wants them: disablelist
   SP%, megasphere rewards). Components V2 capture + parse-and-store on the
   channel profile (`App.fetchShop`). `perk9_click_max` drives the daily click
   cap. p9calc / spcalc still wait. Do not send `$shoprefund`.
-- **Chaos parser** — chaos-kakera outcomes are too varied to parse up front (bonus spheres, extra `$oh`/`$oc`/`$oq`, +5/10/15 rolls, `$kl 1`/`$kl 10`, 50% react-power refund, self-only character with 1–4 free kakera, wish spawn). Raw windows: `data/chaos_log.json` from `kakeraC` click until the next commanded roll or 8s of silence (last roll of the hour). Parser comes after those cases are documented.
+- ~~**Chaos parser**~~ — `mudae/parsers/chaos.py` + `macro/chaos_followup.py`. Extra hourly rolls are spent (not left for `$tu` / refill). Free kakera / wish spawns are clicked / claimed. `$kl` and stored minigames are logged only. Raw windows still go to `data/chaos_log.json`.
 - **Optional `$ov` parser** — parse when we need it; do not send it unless asked.
 - **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, perk 10 invested-sphere bonuses (`$oq` / `$ot` / flat SP on the first `$oh` of the day), and perk 9. `$oh` hidden clicks that show ``spU`` in chat now grant ``$oc`` (play-all spends them like bonus `$oq`). While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
 - ~~**`$p` / `$daily`**~~ — account-global; one designated channel per account (Accounts tab); auto-send when ready, before rolls; sequential if several accounts have a channel set.

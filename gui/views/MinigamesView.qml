@@ -91,6 +91,45 @@ Item {
         return SphereAssets.label(emoji) || emoji
     }
 
+    function boardCountsHiddenAsOc(entry) {
+        if (!entry || entry.game !== "oh")
+            return false
+        var board = entry.board || []
+        if (board.length < 25)
+            return false
+        var hidden = 0
+        for (var i = 0; i < 25; i++) {
+            var cell = String(board[i] || "").trim()
+            if (!cell || cell === "spU")
+                hidden += 1
+        }
+        var coloured = 25 - hidden
+        if (coloured >= 20)
+            return true
+        var clicks = (entry.clicks || []).length
+        return clicks > 0 && coloured > clicks
+    }
+
+    function cellTooltip(entry, index) {
+        var emoji = "spU"
+        if (entry && entry.board && entry.board[index])
+            emoji = String(entry.board[index] || "spU").trim() || "spU"
+        if (emoji === "sp")
+            emoji = "spR"
+        if (emoji !== "spU")
+            return SphereAssets.label(emoji)
+        if (entry && entry.game === "oh") {
+            if (boardCountsHiddenAsOc(entry))
+                return "Hidden ($oc)"
+            var clicks = entry.clicks || []
+            for (var c = 0; c < clicks.length; c++) {
+                if (clicks[c].cell === index && clicks[c].oc_bonus)
+                    return "Hidden ($oc)"
+            }
+        }
+        return SphereAssets.label("spU")
+    }
+
     function filteredEntries() {
         return entries().filter(function(entry) {
             if (accountFilter !== "all" && entry.account_id !== accountFilter)
@@ -240,13 +279,20 @@ Item {
         var counts = {}
         var total = 0
         for (var i = 0; i < list.length; i++) {
-            var board = list[i].board || []
-            for (var c = 0; c < board.length; c++) {
+            var entry = list[i]
+            var board = entry.board || []
+            var countHiddenOc = boardCountsHiddenAsOc(entry)
+            var limit = Math.min(board.length, 25)
+            for (var c = 0; c < limit; c++) {
                 var emoji = String(board[c] || "").trim()
-                if (!emoji || emoji === "spU")
+                if (!emoji)
                     continue
-                if (emoji === "sp")
+                if (emoji === "spU") {
+                    if (!countHiddenOc)
+                        continue
+                } else if (emoji === "sp") {
                     emoji = "spR"
+                }
                 counts[emoji] = (counts[emoji] || 0) + 1
                 total += 1
             }
@@ -293,7 +339,7 @@ Item {
         if (gameFilter === "all")
             return "Win rate is $oc / $oq only. Pick a game to see spawn and click rates for that type."
         if (gameFilter === "oh")
-            return "Hidden $oh clicks that resolve as Hidden grant $oc. Perk 10 on the first $oh of the day can grant extra $oq, $ot, and flat SP. Light and dark keep their own identity."
+            return "After the final $oh reveal, leftover hidden orbs are $oc uses and count in spawn rate. Clicking one during play grants $oc. Perk 10 on the first $oh of the day can grant extra $oq, $ot, and flat SP. Light and dark keep their own identity."
         if (hasWinCondition(gameFilter))
             return "Win means we clicked red or rainbow. Value is base SP, not the chat total."
         return "This game has no red/rainbow win. Value is base SP, not the chat total."
@@ -639,6 +685,10 @@ Item {
                                             return "spU"
                                         return entry.board[index] || "spU"
                                     }
+                                    tooltip: {
+                                        var entry = selectedEntry()
+                                        return minigamesRoot.cellTooltip(entry, index)
+                                    }
                                 }
                             }
                         }
@@ -678,7 +728,13 @@ Item {
                                         font.pixelSize: 11
                                         Layout.preferredWidth: 20
                                     }
-                                    SphereTypeBadge { sphereId: modelData.emoji || "" }
+                                    SphereTypeBadge {
+                                        sphereId: modelData.emoji || ""
+                                        tooltip: (
+                                            (selectedEntry() && selectedEntry().game === "oh" && modelData.emoji === "spU")
+                                            || modelData.oc_bonus
+                                        ) ? "Hidden ($oc)" : ""
+                                    }
                                     Repeater {
                                         model: modelData.resolved || []
                                         delegate: SphereTypeBadge {

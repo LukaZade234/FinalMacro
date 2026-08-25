@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from mudae.constants import KAKERA_INFO
+from mudae.parsers.chaos import chaos_summary_bits, parse_chaos_rewards
 from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
@@ -111,9 +112,15 @@ def parse_kakera_claim(content: str) -> ParseResult:
     if not claimed_by:
         warnings.append("Could not extract username from kakera line")
 
+    chaos = parse_chaos_rewards(content)
+    if chaos.has_extras():
+        fields.update(chaos.to_fields())
+
     summary = f"Kakera claim · {kakera_type or 'kakera'} · +{amount} · {claimed_by or '?'}"
     if spheres is not None:
         summary += f" · +{spheres} sp"
+    for bit in chaos_summary_bits(chaos):
+        summary += f" · {bit}"
     return ParseResult(
         kind=MessageKind.KAKERA_CLAIM,
         summary=summary,

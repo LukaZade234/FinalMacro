@@ -135,6 +135,16 @@ budget mode. Purple is the default bypass for both the chaos-key gate and
 the perk-8 budget (it is free). `$us` rolls can use a narrower color list.
 Implemented in `macro/rule_eval.py` and `macro/kakera_reactor.py`.
 
+**Chaos kakera (`kakeraC`) extras:** the `+$k` body can add `+N rolls this
+hour` (spend them now; they die at the hourly reset), store `$oh`/`$oc`/`$oq`/`$ot`
+(logged, not played), spawn `$kl` (logged), grant `N% kakera power discount`
+(applied when subtracting tracked power after the click), `+N` omega keys
+(`$ok`, key log source `chaos`), spawn an owned character with free kakera
+buttons (click all, cost 0), or spawn a wish (claim with wish-ping rules,
+`$rt` if `auto_use_rt` is on). `(Shop 5) +1 $ot stored!` can appear on any
+kakera react and is not a chaos minigame. Raw windows still go to
+`data/chaos_log.json`.
+
 ---
 
 ## Spheres and `$oh`

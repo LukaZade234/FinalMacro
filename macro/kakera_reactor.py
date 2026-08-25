@@ -8,15 +8,22 @@ Tracks reaction power locally after each confirmed Mudae response.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from macro.actions import DiscordActions, is_kakera_outcome_message, normalize_kakera_outcome
+from macro.chaos_followup import (
+    apply_chaos_hourly_rolls,
+    discounted_reaction_cost,
+    is_chaos_followup_embed,
+)
 from macro.config import KakeraReactionRules, MacroConfig
 from macro.dk_manager import apply_dk_response, has_dk_available
 from macro.perk8_daily import perk8_budget_applies
 from macro.perk8_power import dk_allowed_for_state
+from macro.post_roll import PostRollHandler, RollRecord
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
@@ -25,6 +32,7 @@ from macro.reaction_power import (
     sync_reaction_power_from_denial,
 )
 from macro.rule_eval import (
+    ButtonChoice,
     _has_chaos_key,
     passes_kakera_reaction,
     perk8_budget_bypass_types,
@@ -32,8 +40,9 @@ from macro.rule_eval import (
     perk8_mode_from_state,
 )
 from macro.state import AccountState
+from mudae.buttons import is_claim_button, is_kakera_button
 from mudae.chaos_capture import arm_idle_watch, begin_window, bind_notify, close_open_window
-from mudae.types import MessageKind, ParseResult
+from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _CHAOS_EMOJI = "kakeraC"
 
@@ -49,6 +58,7 @@ _KAKERA_OUTCOME_RETRY_TIMEOUT_SEC = 6.0
 _KAKERA_CLICK_SETTLE_SEC = 0.35
 _KAKERA_BETWEEN_CLICKS_SEC = 0.5
 _MAX_KAKERA_CLICK_ATTEMPTS = 2
+_CHAOS_FOLLOWUP_WAIT_SEC = 6.0
 
 
 @dataclass
@@ -60,7 +70,13 @@ class KakeraReactor:
     on_perk8_exhausted: Callable[[], None] | None = None
     on_click_progress: Callable[[], None] | None = None
     on_state: Callable[[], None] | None = None
+    on_keys: Callable[[], None] | None = None
     debug_log: Callable[[str], None] | None = None
+
+    def __post_init__(self) -> None:
+        self._last_outcome_snapshot: MudaeMessageSnapshot | None = None
+        self._last_kakera_outcome: ParseResult | None = None
+        self._react_character: str = ""
 
     async def react(
         self,
@@ -74,6 +90,7 @@ class KakeraReactor:
         rules = rules if rules is not None else self.config.kakera_reaction
         self._drain_stale_kakera_outcomes()
         character = fields.get("character_name") or "?"
+        self._react_character = character
         decision = await self._resolve_decision(
             fields, rules, message_id, character, roll_index
         )
@@ -221,6 +238,7 @@ class KakeraReactor:
         roll_index: int,
         rules: KakeraReactionRules,
         perk8: bool = False,
+        handle_spawns: bool = True,
     ) -> bool:
         chaos = (choice.emoji or "") == _CHAOS_EMOJI
         if chaos:
@@ -326,19 +344,37 @@ class KakeraReactor:
                             )
                             continue
                     return False
-                if not spend_reaction_power(self.state, cost):
+                paid = float(cost)
+                if chaos and outcome.kind == MessageKind.KAKERA_CLAIM:
+                    paid = discounted_reaction_cost(
+                        cost, outcome.fields.get("chaos_power_discount_pct")
+                    )
+                    if paid + 1e-9 < float(cost):
+                        pct = outcome.fields.get("chaos_power_discount_pct")
+                        self.log(
+                            f"chaos: {pct:g}% power discount · "
+                            f"spent {paid:g}% (was {cost:g}%)"
+                        )
+                if not spend_reaction_power(self.state, paid):
                     self.log(
                         f"kakera claim {character} but power tracker rejected "
-                        f"{cost:g}% spend"
+                        f"{paid:g}% spend"
                     )
                     return False
                 self._notify_state()
                 confirmed = True
+                if outcome.kind == MessageKind.KAKERA_CLAIM:
+                    self._apply_chaos_claim_rewards(outcome)
                 if chaos:
                     arm_idle_watch()
                     self._debug(
                         f"chaos capture: watching follow-ups after {character}"
                     )
+                    if handle_spawns:
+                        await self._handle_chaos_spawns(
+                            clicked_message_id=message_id,
+                            outcome=outcome,
+                        )
                 return True
         finally:
             if chaos and not confirmed:
@@ -471,19 +507,227 @@ class KakeraReactor:
             queued = collect(is_kakera_outcome_message)
             if queued:
                 snapshot, parsed = queued[0]
-                return self._normalize_kakera_outcome(snapshot, parsed)
+                return self._remember_kakera_outcome(snapshot, parsed)
         result = await self.actions.wait_for(
             is_kakera_outcome_message,
             timeout=timeout,
         )
         if result is not None:
-            return self._normalize_kakera_outcome(result[0], result[1])
+            return self._remember_kakera_outcome(result[0], result[1])
         if collect is not None:
             queued = collect(is_kakera_outcome_message)
             if queued:
                 snapshot, parsed = queued[0]
-                return self._normalize_kakera_outcome(snapshot, parsed)
+                return self._remember_kakera_outcome(snapshot, parsed)
         return None
+
+    def _remember_kakera_outcome(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+    ) -> ParseResult:
+        normalized = self._normalize_kakera_outcome(snapshot, parsed)
+        self._last_outcome_snapshot = snapshot
+        self._last_kakera_outcome = normalized
+        return normalized
+
+    def _apply_chaos_claim_rewards(self, parsed: ParseResult) -> None:
+        fields = parsed.fields or {}
+        extra = int(fields.get("chaos_rolls_this_hour") or 0)
+        if extra:
+            total = apply_chaos_hourly_rolls(self.state, extra)
+            self.log(f"chaos: +{extra} rolls this hour · {total} spendable")
+            self._notify_state()
+        minigames = fields.get("chaos_minigames") or {}
+        if minigames:
+            bits = ", ".join(
+                f"+{count} ${name}" for name, count in sorted(minigames.items())
+            )
+            self.log(f"chaos: stored minigame uses ({bits}) — not played")
+        loots = int(fields.get("chaos_kakeraloots") or 0)
+        if loots:
+            extra_bits: list[str] = []
+            stacked = fields.get("chaos_kakeraloot_stacked")
+            if stacked is not None:
+                extra_bits.append(f"+{stacked:g} stacked")
+            ka = fields.get("chaos_kakeraloot_kakera")
+            if ka is not None:
+                extra_bits.append(f"+{ka} kakera")
+            protect = fields.get("chaos_wish_protect_levels")
+            if protect is not None:
+                extra_bits.append(f"+{protect} wish protect")
+            note = f" ({', '.join(extra_bits)})" if extra_bits else ""
+            self.log(f"chaos: {loots} kakeraloot(s){note} — not played")
+        if int(fields.get("shop_perk5_ot") or 0):
+            self.log("perk 5: +1 $ot stored")
+        omega = int(fields.get("chaos_omega_keys") or 0)
+        if omega:
+            self._record_chaos_omega(omega)
+        unparsed = fields.get("chaos_unparsed") or []
+        if unparsed:
+            self._debug(f"chaos unparsed: {unparsed[0]}")
+
+    def _record_chaos_omega(self, amount: int) -> None:
+        from mudae.key_log import record_chaos_omega
+
+        snapshot = self._last_outcome_snapshot
+        if snapshot is None:
+            return
+        created = record_chaos_omega(
+            snapshot,
+            amount=amount,
+            character_name=self._react_character or "Chaos kakera",
+        )
+        if created:
+            self.log(f"chaos: +{amount} omega key(s) logged")
+            if self.on_keys:
+                self.on_keys()
+
+    async def _handle_chaos_spawns(
+        self,
+        *,
+        clicked_message_id: int,
+        outcome: ParseResult,
+    ) -> None:
+        fields = outcome.fields or {}
+        want_free = int(fields.get("chaos_free_kakera") or 0) > 0
+        want_wish = bool(fields.get("chaos_wish_spawn"))
+        seen: list[tuple[MudaeMessageSnapshot, ParseResult]] = []
+        collect = getattr(self.actions, "collect_queued", None)
+
+        def _match(snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> bool:
+            return is_chaos_followup_embed(snapshot, parsed, clicked_message_id)
+
+        if collect is not None:
+            seen.extend(collect(_match))
+        if (want_free or want_wish) and not seen:
+            deadline = time.monotonic() + _CHAOS_FOLLOWUP_WAIT_SEC
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                result = await self.actions.wait_for(
+                    _match,
+                    timeout=min(0.4, remaining),
+                )
+                if result is not None:
+                    seen.append(result)
+                    break
+            if collect is not None:
+                seen.extend(collect(_match))
+        handled: set[int] = set()
+        for snapshot, parsed in seen:
+            if snapshot.message_id in handled:
+                continue
+            handled.add(snapshot.message_id)
+            await self._act_on_chaos_spawn(
+                snapshot,
+                parsed,
+                want_free=want_free,
+                want_wish=want_wish,
+            )
+
+    async def _act_on_chaos_spawn(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+        *,
+        want_free: bool,
+        want_wish: bool,
+    ) -> None:
+        fields = dict(parsed.fields)
+        buttons = list(snapshot.buttons or fields.get("buttons") or [])
+        kakera = [
+            btn
+            for btn in buttons
+            if isinstance(btn, dict)
+            and is_kakera_button(btn)
+            and not btn.get("disabled")
+        ]
+        claimable = bool(fields.get("can_claim")) or any(
+            is_claim_button(btn) and not btn.get("disabled")
+            for btn in buttons
+            if isinstance(btn, dict)
+        )
+        wished = bool(fields.get("wished_by")) or want_wish
+        if wished and claimable:
+            await self._claim_chaos_wish(snapshot, fields)
+            return
+        if kakera and (want_free or not claimable):
+            name = str(fields.get("character_name") or "?")
+            self.log(f"chaos: free kakera on {name} — clicking {len(kakera)}")
+            await self._click_free_kakera(
+                snapshot.message_id, kakera, character=name
+            )
+
+    async def _click_free_kakera(
+        self,
+        message_id: int,
+        buttons: list[dict[str, Any]],
+        *,
+        character: str,
+    ) -> None:
+        for index, btn in enumerate(buttons):
+            custom_id = str(btn.get("custom_id") or "")
+            if not custom_id:
+                continue
+            raw_emoji = btn.get("emoji") or ""
+            if isinstance(raw_emoji, dict):
+                emoji = str(raw_emoji.get("name") or "")
+            else:
+                emoji = str(raw_emoji)
+            choice = ButtonChoice(
+                custom_id=custom_id,
+                message_id=message_id,
+                kind="kakera",
+                emoji=emoji,
+            )
+            await self._click_with_power_recovery(
+                message_id=message_id,
+                choice=choice,
+                cost=0.0,
+                character=character,
+                roll_index=0,
+                rules=self.config.kakera_reaction,
+                perk8=False,
+                handle_spawns=False,
+            )
+            if index + 1 < len(buttons):
+                await asyncio.sleep(_KAKERA_BETWEEN_CLICKS_SEC)
+
+    async def _claim_chaos_wish(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        fields: dict[str, Any],
+    ) -> None:
+        rules = self.config.character_claim
+        if not rules.claim_on_wish_ping:
+            self.log("chaos wish spawn — wish claim off, skipped")
+            return
+        claim_fields = dict(fields)
+        if not claim_fields.get("wished_by") and self.state.own_user_ids:
+            claim_fields["wished_by"] = list(self.state.own_user_ids)
+        if not claim_fields.get("can_claim"):
+            buttons = claim_fields.get("buttons") or snapshot.buttons or []
+            claim_fields["can_claim"] = any(
+                is_claim_button(btn) and not btn.get("disabled")
+                for btn in buttons
+                if isinstance(btn, dict)
+            )
+        record = RollRecord(
+            message_id=snapshot.message_id,
+            character_name=claim_fields.get("character_name"),
+            fields=claim_fields,
+        )
+        handler = PostRollHandler(
+            self.actions, self.config, self.state, log=self.log
+        )
+        await handler.claim_record(
+            record,
+            reason="chaos wish spawn",
+            allow_rt=True,
+        )
+        self._notify_state()
 
     def _notify_state(self) -> None:
         if self.on_state:
