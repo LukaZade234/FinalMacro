@@ -13,7 +13,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 1. ~~**Empty states** — copy.~~ `gui/emptyStates.js`: disconnected vs nothing recorded vs filters.
 2. ~~**Compile leftover parser regexes** — mechanical.~~ Module-level `_…_RE` in `tu`, `roll`, `settings`, `claim`, `kakera`, `bonus`, `utils`, etc.
 3. **Humanized delays** — jitter existing sleeps.
-4. **Reaction power max on the account page** — the cap is on `$bonus`; wait for the wave 2 audit instead of a hardcoded `155`.
+4. **Reaction power max on the account page** — `kakera_max_power` is parsed from `$bonus`; still not wired (hardcoded `155`).
 5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
 6. **`$p` / `$daily`** — send at the right time; parsers exist.
 7. **Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.
@@ -23,8 +23,8 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
 13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — tables no longer parse the full log; shared filter state across tabs and a Qt list model can wait.
-14. **Perk 9 threshold** / **`$bw` advisory** — easy arithmetic, blocked on bonus + data.
-15. **`$ot` Phase 2** / **`$settings` / `$bonus` audit** / **full daily autonomy** / **Phase D** — real projects.
+14. **Perk 9 threshold** / **`$bw` advisory** — arithmetic on stored `$bonus` fields (`sphere_double_chance_pct`, `additional_spheres`, `rolls_per_hour["penalties"]["bw"]`); still not wired.
+15. **`$ot` Phase 2** / **use parsed `$settings`/`$bonus` in decisions** / **full daily autonomy** / **Phase D** — real projects.
 16. Last: split `bridge.py`, achievements, GUI polish.
 
 ---
@@ -33,7 +33,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 
 Highest first. What makes an overnight run correct and complete.
 
-1. **`$settings` / `$bonus` audit** — nothing server-driven is trusted until this lands (claim-via-emoji, perk 9 DP, `$bw`, any rule from parsed settings).
+1. **Use parsed `$settings` / `$bonus` in decisions** — parse-and-store is done; claim-via-emoji, perk 9 DP, `$bw`, and any rule from those fields still wait.
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
 3. ~~**Sphere tracking + EventLog / shared stats**~~ — EventLog + daily cube + paged stats tables. Totals/charts no longer walk every event in QML.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
@@ -61,11 +61,11 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 - ~~Timezones.~~ Mudae dailies / `date_key` / stats “today” are UTC (`mudae/clock.py`, `gui/clock.js`). In-app live feed stays local time (Classic `ActivityLogPanel` + Haul `RunModel.timeOf`).
 - ~~Sphere tracking audit~~ — colour on `sphere_click`, `$oc` granted from `$oh` (not SP), no double-count vs perk 10 / kakera / perk 9; Statistics “today” verified. First `$oh` invested-sphere line is **perk 10** (`$oq` / `$ot` / flat SP) — SP source `perk10`, extra `$oq`/`$ot` on the `$oh` minigame session. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
 - ~~Chaos parser in the same key/sphere pass.~~ Capture first: every Mudae message after a `kakeraC` click until the next commanded roll **or 8s of silence** goes to `data/chaos_log.json` (`kind: unparsed`). File is written on the first follow-up (not only when the window closes). Silence covers the last roll of an hour, when no `$wa` follows. Parser later.
-- ~~Empty states~~ — disconnected / nothing recorded / filters (`gui/emptyStates.js`). Reaction-power max waits on `$bonus`.
+- ~~Empty states~~ — disconnected / nothing recorded / filters (`gui/emptyStates.js`). Reaction-power max is parsed (`kakera_max_power`) but not wired.
 
 **Wave 2 — two foundations (do not skip)**
 
-- `$settings` / `$bonus` audit. Unblocks perk 9 DP, `$bw`, claim-via-emoji, and any rule driven by the server. Do not change claim / kakera / roll behaviour until this is done.
+- ~~`$settings` / `$bonus` parse audit~~ — fixtures + meaning catalog + field-by-field tests; capture skips the 16 direct toggles; `$bonus` is read-only (source tags are not sent). Storage trusted; **do not** change claim / kakera / roll behaviour until a later slice wires the fields. Unblocks perk 9 DP / `$bw` / claim-via-emoji *work*, not those behaviours yet.
 - ~~One `EventLog` + JSONL (`data/events.jsonl`; one-time import of the old JSON arrays, which stay on disk).~~
 - ~~Daily cube + paged Statistics (`stats_index`; `App.statsQuery`).~~ Cards/charts sum daily cells; tables load 80 rows at a time. Shared filter state across Kakera/Spheres/Keys/Soulmates and a `QAbstractListModel` can wait.
 
@@ -96,14 +96,17 @@ Optional / when asked: `$ov` parser. Skip unless someone wants them: disablelist
 
 ## Parsers and server rules
 
-- **`$settings` / `$bonus` audit** — capture `$bonus` the same way as `$settings`; fix both parsers field-by-field (`docs/archive/MUDAE_SETTINGS_COMMANDS.md`); then use parsed fields in macro decisions. 16 commands are **direct toggles** (bare send flips the live server) — capture tooling must skip or auto-revert them. Claim-via-emoji stays blocked until this lands.
-- **`$shop` parser** — Mudae's sphere/perk upgrade sheet (megasphere odds, OP9 income, upgrade costs). Needed for a future `$bonus`-driven perk 9 cap and for any spcalc-style planner; capture verbatim like `$settings` / `$bonus`.
+- ~~**`$settings` / `$bonus` parse audit**~~ — parsers trusted for storage (`tests/mudae_sheet_fixtures.py`, `mudae/parsers/bonus_catalog.py`). Capture tool skips or reverts the 16 direct toggles; `$bonus` dump is read-only. **Follow-ups (not done):** claim-via-emoji, driving `CharacterClaimRules` / kakera / sphere reacts from settings, replacing `DEFAULT_MAX_REACTION_POWER = 155` / `PERK9_CLICK_MAX_DEFAULT = 20`.
+- ~~**`$shop` parser**~~ — ouroperk sheet (OP1–OP10, perk 9 extra clicks +
+  SP%, megasphere rewards). Components V2 capture + parse-and-store on the
+  channel profile (`App.fetchShop`). **Not wired:** `PERK9_CLICK_MAX_DEFAULT`
+  / p9calc / spcalc still wait. Do not send `$shoprefund`.
 - **Chaos parser** — chaos-kakera outcomes are too varied to parse up front (bonus spheres, extra `$oh`/`$oc`/`$oq`, +5/10/15 rolls, `$kl 1`/`$kl 10`, 50% react-power refund, self-only character with 1–4 free kakera, wish spawn). Raw windows: `data/chaos_log.json` from `kakeraC` click until the next commanded roll or 8s of silence (last roll of the hour). Parser comes after those cases are documented.
 - **Optional `$ov` parser** — parse when we need it; do not send it unless asked.
 - **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, perk 10 invested-sphere bonuses (`$oq` / `$ot` / flat SP on the first `$oh` of the day), and perk 9. `$oh` hidden clicks that show ``spU`` in chat now grant ``$oc`` (play-all spends them like bonus `$oq`). While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
 - **`$p` / `$daily`** — send and record the daily poke / `$daily` at the right time.
 
-Do not change per-server claim / kakera / roll rules until the settings audit (steps above) is done.
+Do not change per-server claim / kakera / roll rules until a slice *uses* the parsed settings / bonus fields (parse-and-store is done; wiring is not).
 
 ---
 
@@ -136,7 +139,7 @@ Do the shared model first; the copy-paste and most of the slowness go away with 
 - ~~**`filteredEntries()` walked the full log in QML**~~ — tables bind to `payload.recent`.
 - **Wave 2 EventLog (storage):** one `data/events.jsonl` for kakera / spheres / keys / soulmates. Existing `data/*_log.json` arrays are imported once and left on disk.
 - ~~**Timezones** — log `date_key` is UTC; QML “today” / week / month use local `Date`.~~ `mudae/clock.py` + `gui/clock.js`: UTC for `date_key` / stats “today”; live feed local.
-- **Reaction power max is hardcoded `155`** — `DEFAULT_MAX_REACTION_POWER` / `AccountState.power_max_percent`. The real cap is on `$bonus`; wait for that audit. Efficiency math is wrong when it is stale.
+- **Reaction power max is hardcoded `155`** — `DEFAULT_MAX_REACTION_POWER` / `AccountState.power_max_percent`. `$bonus` now stores `kakera_max_power`; wiring is a follow-up. Efficiency math is wrong when the hardcoded cap is stale.
 - ~~**Empty states**~~ — disconnected vs nothing recorded vs filters (`gui/emptyStates.js`).
 - **Session row on Statistics** — one line per connect/disconnect with kakera + spheres + keys + claims. Today each log is filtered alone (`gui/run_summary.py` already does a session haul on Run).
 - **Daily report** — end-of-day kakera / sphere breakdown for invest / perk-8 planning.
@@ -229,13 +232,13 @@ The guide is a fair transcription of their published “How it works” pages. S
 
 ### Calculators — new features, not solver ports
 
-- **Perk 9 click/skip DP — medium, highest daily value of the calculators.** [p9calc](https://colblitz.com/mudae/p9calc): `EV(colour) = (base × (1 + double) + flat) × (1 + SP9×0.10)`, daily cap `10 + SP9`, then `V(rolls left, clicks left)` so the threshold **falls** as the day runs out. We have a static `SphereReactionRules.types_allowed` and no remaining-budget awareness. **Action:** after the `$bonus` audit, compute the threshold table and use it in `passes_sphere_reaction` (click if `EV ≥ V[r-1][c] − V[r-1][c-1]`). Seed frequencies from our `sphere_click` log; label them provisional until the sample is large. A standalone “how many OP9 chars to skip teal” page is optional — the live advisor is the part that belongs in this app.
+- **Perk 9 click/skip DP — medium, highest daily value of the calculators.** [p9calc](https://colblitz.com/mudae/p9calc): `EV(colour) = (base × (1 + double) + flat) × (1 + SP9×0.10)`, daily cap `10 + SP9`, then `V(rolls left, clicks left)` so the threshold **falls** as the day runs out. We have a static `SphereReactionRules.types_allowed` and no remaining-budget awareness. **Action:** `$bonus` now stores `sphere_double_chance_pct` and `additional_spheres`; compute the threshold table and use it in `passes_sphere_reaction` (click if `EV ≥ V[r-1][c] − V[r-1][c-1]`). Seed frequencies from our `sphere_click` log; label them provisional until the sample is large. A standalone “how many OP9 chars to skip teal” page is optional — the live advisor is the part that belongs in this app.
 
-- **`$bw` / key EV — medium, advisory only.** [bwcalc](https://colblitz.com/mudae/bwcalc): sweep `$bw` for keys/hour (wishlist / starwish / per-character). Formulas are published; **absolute** keys/hr are community guesses — the *peak* is what to trust. **Action:** a Settings/Utilities paste of `$bonus` + `$wlsz+z!` after the bonus audit and the app-only wishlist. Never auto-send `$bw`. Depends on those two items.
+- **`$bw` / key EV — medium, advisory only.** [bwcalc](https://colblitz.com/mudae/bwcalc): sweep `$bw` for keys/hour (wishlist / starwish / per-character). Formulas are published; **absolute** keys/hr are community guesses — the *peak* is what to trust. **Action:** a Settings/Utilities paste of `$bonus` + `$wlsz+z!` (rolls/hour + `$bw` penalty are already parsed) after the app-only wishlist. Never auto-send `$bw`.
 
 - **Disablelist optimizer — skip for now.** [dlcalc](https://colblitz.com/mudae/dlcalc) is set-cover + pool caps. The ILP is a day; the **bundle↔character dump** is the real product and goes stale. Keep the one-click `$dl`/`$adl`/`$wl` switch. Revisit only if we ingest a refreshable dump ([MudaeDB](https://github.com/LilJamJam/MudaeDB) / [DL-Builds](https://github.com/PRCSakura/Mudae-DL-Builds)).
 
-- **Sphere upgrade planner (`spcalc`) — skip.** [spcalc](https://colblitz.com/mudae/spcalc) is the heaviest tool (OP9/OP5/OP8/OP10/SP2/SP5/SP10 income + discounted upgrade order). Needs `$shop` and `$mmsz=z!` parsers we do not have. Users can keep using the site. If we ever want it, it is a multi-day transcription, not a macro feature.
+- **Sphere upgrade planner (`spcalc`) — skip.** [spcalc](https://colblitz.com/mudae/spcalc) is the heaviest tool (OP9/OP5/OP8/OP10/SP2/SP5/SP10 income + discounted upgrade order). `$shop` is parsed; `$mmsz=z!` is not. Users can keep using the site. If we ever want it, it is a multi-day transcription, not a macro feature.
 
 ### Skip entirely
 
@@ -244,6 +247,6 @@ The guide is a fair transcription of their published “How it works” pages. S
 - **Heatmaps / click-history / harvest explainer** — web-solver chrome. Our log line (`format_solver_stats`) is enough.
 - **Their hosted stats tables** — games *their* bot saw, not ours.
 
-Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5). Do not start perk 9 or `$bw` before the `$bonus` audit.
+Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5). Perk 9 / `$bw` can use stored `$bonus` fields; do not start them as a parser project.
 
 Public Python references if a port stalls: [Svessinn/Mudae](https://github.com/Svessinn/Mudae) (all four games + sims), [GAP22/oq-solver](https://github.com/GAP22/oq-solver), [mudae-sphere-solver](https://github.com/ShrimpandGGrits/mudae-sphere-solver). Colblitz itself is server-side — no client JS to read.

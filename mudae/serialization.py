@@ -8,7 +8,25 @@ import discord
 
 from mudae.buttons import classify_button_kind
 from mudae.constants import BOT_NAME, MUDAE_BOT_IDS
+from mudae.message_text import flatten_component_text
 from mudae.types import MudaeMessageSnapshot
+
+
+def _install_raw_component_capture() -> None:
+    """Keep Components V2 payloads that discord.py-self 2.1 otherwise drops."""
+    original = discord.Message._handle_components
+    if getattr(original, "_finalmacro_keeps_raw", False):
+        return
+
+    def _keep_raw(self: discord.Message, data: Any) -> None:
+        self._raw_components = data or []
+        original(self, data)
+
+    _keep_raw._finalmacro_keeps_raw = True  # type: ignore[attr-defined]
+    discord.Message._handle_components = _keep_raw  # type: ignore[method-assign]
+
+
+_install_raw_component_capture()
 
 
 def _embed_to_dict(embed: discord.Embed) -> dict[str, Any]:
@@ -66,6 +84,11 @@ def snapshot_from_message(
     author_id = author.id if author else 0
     author_name = getattr(author, "display_name", None) or getattr(author, "name", "?") or "?"
     mudae = is_mudae_message(message)
+    raw_components = list(getattr(message, "_raw_components", None) or [])
+    component_text = flatten_component_text(raw_components)
+    content = (message.content or "").strip()
+    if component_text and component_text not in content:
+        content = f"{content}\n{component_text}".strip() if content else component_text
     return MudaeMessageSnapshot(
         message_id=message.id,
         channel_id=message.channel.id,
@@ -75,11 +98,12 @@ def snapshot_from_message(
         author_id=author_id,
         author_name=author_name,
         is_mudae=mudae,
-        content=message.content or "",
+        content=content,
         embeds=[_embed_to_dict(e) for e in message.embeds],
         buttons=_components_to_buttons(message),
         created_at=message.created_at.strftime("%H:%M:%S"),
         edited=edited,
+        components=raw_components,
     )
 
 

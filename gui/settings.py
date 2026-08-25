@@ -12,7 +12,7 @@ Typical top-level keys:
 - ``mudae_settings_presets`` / ``default_mudae_settings_preset_id`` — Mudae
   server ``$settings`` templates (Servers → Settings presets tab)
 - ``servers`` / ``active_server_id`` / ``active_channel_id`` — server profiles;
-  each channel may store fetched ``settings`` and ``bonus`` snapshots
+  each channel may store fetched ``settings``, ``bonus``, and ``shop`` snapshots
 - ``targets`` — per (account, channel) run bindings
 """
 

@@ -9,6 +9,12 @@ from mudae.parsers.pipeline import format_entry_for_gui, parse_message, parse_mu
 from mudae.parsers.settings import parse_settings
 from mudae.parsers.tu import parse_tu
 from mudae.types import MessageKind, MudaeMessageSnapshot
+from tests.mudae_sheet_fixtures import (
+    BONUS_REPLY_PART1,
+    BONUS_REPLY_PART2,
+    SETTINGS_GM1_PLAIN,
+    SETTINGS_REPLY,
+)
 
 MUDAE_ALT_ID = 432610292342587392
 TU_REPLY = (
@@ -825,85 +831,6 @@ def test_parse_tu_reply_via_command_context():
     assert "rolls_left" in gui["parsedFields"]
 
 
-SETTINGS_REPLY = (
-    "\U0001f6e0\ufe0f __**Server Settings**__ \U0001f6e0\ufe0f\n"
-    "\U0001f31f\U0001f31f\U0001f31f Server Premium 3 \U0001f31f\U0001f31f\U0001f31f\n\n"
-    "\u00b7 Prefix: **$** ($prefix)\n"
-    "\u00b7 Lang: **en** ($lang)\n"
-    "\u00b7 Claim reset: every **60** min. ($setclaim)\n"
-    "\u00b7 Exact minute of the reset: xx:**00** ($setinterval)\n"
-    "\u00b7 Reset shifted: by +**0** min. ($shifthour)\n"
-    "\u00b7 Rolls per hour: **21** ($setrolls)\n"
-    "\u00b7 Time before the claim reaction expires: **45** sec. ($settimer)\n"
-    "\u00b7 Spawn rarity multiplier for already claimed characters: **10** ($setrare)\n"
-    "\u00b7 % kakera bonus: **+100** ($setkakerabonus)\n"
-    "\u00b7 % sphere bonus: **+100** ($setspherebonus)\n"
-    "\u00b7 Game mode: **2** ($gamemode)\n"
-    "\u00b7 $servlimroul = 7,000 $wa, 7,000 $ha, 5,000 $wg, 5,000 $hg\n"
-    "\u00b7 This channel instance: **1** ($channelinstance)\n"
-    "\u00b7 Slash commands: enabled ($toggleslash)\n\n"
-    "\u00b7 Ranking: enabled ($toggleclaimrank/$togglelikerank)\n"
-    "\u00b7 Ranks displayed during rolls: claims and likes ($togglerolls)\n"
-    "\u00b7 NSFW series: enabled ($togglensfw)\n"
-    "\u00b7 Disturbing imagery series: enabled ($toggledisturbing)\n"
-    "\u00b7 Child characters: enabled ($togglechildtag)\n"
-    "\u00b7 Rolls sniping: 0 ($togglesnipe)\n"
-    "\u00b7 Kakera sniping: 0 ($togglekakerasnipe)\n"
-    "\u00b7 Limit of characters per collection: **12,000** ($haremlimit)\n"
-    "\u00b7 $haremcopy/$kakeracopy/$soulcopy limit: ****disabled**** ($removecopylimit)\n"
-    "\u00b7 Claim buttons: ****for all your rolls**** ($togglebutton)\n"
-    "\u00b7 Custom buttons: no ($claimreact)\n"
-    "\u00b7 Kakera buttons more recognizable: no ($kakerabutton switchset)\n"
-    "\u00b7 Sphere buttons more recognizable: no ($spherebutton switchset)\n\n"
-    "\u00b7 Kakera trading: enabled ($togglekakeratrade)\n"
-    "\u00b7 Kakera calculation: claim and like ranks (and number of claimed characters) "
-    "($togglekakeraclaim/$togglekakeralike)\n"
-    "\u00b7 Kakera value displayed during rolls: enabled ($togglekakerarolls)\n"
-    "\u00b7 $kakeraloots & $ouroperks wishprotect: enabled ($togglewishprotect)\n"
-    "\u00b7 $ouroshop freewish: enabled ($togglewishfree)\n"
-    "\u00b7 Spheres trading: enabled ($togglespheretrade)"
-)
-
-
-SETTINGS_GM1_PLAIN = (
-    "\U0001f6e0\ufe0f Server Settings \U0001f6e0\ufe0f\n"
-    "\U0001f31f\U0001f31f\U0001f31f Server Premium 3 \U0001f31f\U0001f31f\U0001f31f\n\n"
-    "\u00b7 Prefix: $ ($prefix)\n"
-    "\u00b7 Lang: en ($lang)\n"
-    "\u00b7 Claim reset: every 60 min. ($setclaim)\n"
-    "\u00b7 Exact minute of the reset: xx:00 ($setinterval)\n"
-    "\u00b7 Reset shifted: by +0 min. ($shifthour)\n"
-    "\u00b7 Rolls per hour: 21 ($setrolls)\n"
-    "\u00b7 Time before the claim reaction expires: 45 sec. ($settimer)\n"
-    "\u00b7 Spawn rarity multiplier for already claimed characters: 10 ($setrare)\n"
-    "\u00b7 % kakera bonus: +100 ($setkakerabonus)\n"
-    "\u00b7 % sphere bonus: +100 ($setspherebonus)\n"
-    "\u00b7 Game mode: 1 ($gamemode)\n"
-    "\u00b7 This channel instance: 1 ($channelinstance)\n"
-    "\u00b7 Slash commands: enabled ($toggleslash)\n\n"
-    "\u00b7 Ranking: enabled ($toggleclaimrank/$togglelikerank)\n"
-    "\u00b7 Ranks displayed during rolls: claims and likes ($togglerolls)\n"
-    "\u00b7 NSFW series: enabled ($togglensfw)\n"
-    "\u00b7 Disturbing imagery series: enabled ($toggledisturbing)\n"
-    "\u00b7 Child characters: enabled ($togglechildtag)\n"
-    "\u00b7 Rolls sniping: 0 ($togglesnipe)\n"
-    "\u00b7 Kakera sniping: 0 ($togglekakerasnipe)\n"
-    "\u00b7 Limit of characters per collection: 12,000 ($haremlimit)\n"
-    "\u00b7 $haremcopy/$kakeracopy/$soulcopy limit: disabled ($removecopylimit)\n"
-    "\u00b7 Claim buttons: for all your rolls ($togglebutton)\n"
-    "\u00b7 Custom buttons: no ($claimreact)\n"
-    "\u00b7 Kakera buttons more recognizable: no ($kakerabutton switchset)\n"
-    "\u00b7 Sphere buttons more recognizable: no ($spherebutton switchset)\n\n"
-    "\u00b7 Kakera trading: enabled ($togglekakeratrade)\n"
-    "\u00b7 Kakera calculation: claim and like ranks (and number of claimed characters) "
-    "($togglekakeraclaim/$togglekakeralike)\n"
-    "\u00b7 Kakera value displayed during rolls: enabled ($togglekakerarolls)\n"
-    "\u00b7 $kakeraloots & $ouroperks wishprotect: enabled ($togglewishprotect)\n"
-    "\u00b7 $ouroshop freewish: enabled ($togglewishfree)\n"
-    "\u00b7 Spheres trading: enabled ($togglespheretrade)"
-)
-
-
 def test_parse_settings_gamemode1_plain():
     result = parse_settings(SETTINGS_GM1_PLAIN)
     assert detect_command_from_response(SETTINGS_GM1_PLAIN) == "settings"
@@ -947,6 +874,11 @@ def test_parse_settings_full():
     assert result.fields["haremlimit"] == 12000
     assert result.fields["togglesnipe"] == {"mode": 0, "seconds": None}
     assert result.fields["togglekakerasnipe"] == {"mode": 0, "seconds": None}
+    assert result.fields["togglekakeraclaim"] is True
+    assert result.fields["togglekakeralike"] is True
+    assert result.fields["togglekakerarolls"] is True
+    assert result.fields["kakerabutton"] is False
+    assert result.fields["spherebutton"] is False
     assert result.fields["togglespheretrade"] is True
 
 
@@ -997,9 +929,9 @@ def test_bonus_uses_cached_settings_after_command_response():
     )
     result = parse_message(snapshot, reply_to_command="bonus", reply_part=1, reply_parts=2)
     assert result.fields.get("cached_settings") is True
-    assert result.fields["rolls_per_hour"] == 30
-    assert result.fields["bk"] == 22
-    assert result.fields["bw"] == 60
+    assert result.fields["rolls_per_hour"]["net"] == 30
+    assert result.fields["rolls_per_hour"]["penalties"]["bk"] == 22
+    assert result.fields["rolls_per_hour"]["penalties"]["bw"] == 60
 
 
 def test_parse_settings_via_command_context():
@@ -1025,21 +957,6 @@ def test_parse_settings_via_command_context():
     assert "setrolls" in gui["parsedFields"]
 
 
-BONUS_REPLY_PART1 = (
-    "<:morekakera:633217512057864192> \u00b7 Additional bonus for kakera buttons: **+47%** ($bk)\n"
-    "<:morekakera:633217512057864192> \u00b7 Additional bonus for kakera buttons on starwishes: **+52%** ($sw)\n"
-    "<:kakeraL:815961697918779422> \u00b7 Random kakera per light kakera: **10-11** (7 $kt)\n"
-    "<:kakeraR:605112980295647242> \u00b7 Additional kakera on the final value of red and rainbow: **750** ($kt)\n"
-    "<:kakeraC:1441097472587075758> \u00b7 Additional kakera on the initial value of chaos: **825** ($kt)\n"
-    "<:bku:1163913181920497755> \u00b7 Chance to complete + reset $bku on $sw: **+236%** ($kl) (this interval: 15.38%)\n"
-    "<:chaoskey:690110264166842421> \u00b7 Chance to get an additional key: **+45%** ($kt)\n"
-    "<:sp:1437140700604137554> \u00b7 Additional sphere sources: claims = **34**, $dk = **34**, Bronze IV = **24**, $rolls = **14** ($kt)\n"
-    "<:sp:1437140700604137554> \u00b7 Additional spheres: **+14** (spheres clicked + premium)\n"
-    "<:sp:1437140700604137554> \u00b7 $oh daily bonus: **+2,552** spheres, **134.5%** to get 1 $oq ($op) and **3%** $ot ($shop)\n"
-    "<:spM:1473308463441379428> \u00b7 Megaspheres: **15** rewards and **12**% chance to be free ($shop)"
-)
-
-
 def test_parse_rolls_per_hour_bonus_line():
     from mudae.channel_cache import remember_settings
 
@@ -1049,24 +966,23 @@ def test_parse_rolls_per_hour_bonus_line():
         "-60 ($bw) -22 ($bk)"
     )
     result = parse_bonus(f"· {line}", channel_id=99)
-    assert result.fields["bw"] == 60
-    assert result.fields["bk"] == 22
-    assert result.fields["rolls_per_hour"] == 30
-    assert result.fields["setrolls_base"] == 21
-    assert result.fields["rolls_per_hour_bonus_sum"] == 91
+    rolls = result.fields["rolls_per_hour"]
+    assert rolls["penalties"]["bw"] == 60
+    assert rolls["penalties"]["bk"] == 22
+    assert rolls["net"] == 30
+    assert rolls["base"] == 21
+    assert rolls["bonus"] == 91
 
 
 def test_parse_bonus_lines():
-    result = parse_bonus(BONUS_REPLY_PART1, part=1, parts=2)
-    assert result.fields["line_count"] == 11
+    from mudae.channel_cache import remember_settings
+
+    remember_settings(88, {"setrolls": 21})
+    result = parse_bonus(BONUS_REPLY_PART1, part=1, parts=2, channel_id=88)
+    assert result.fields["line_count"] == 17
     assert result.fields["part"] == 1
-    assert result.fields["bk"] == 47
-    assert result.fields["sw"] == 52
-    assert result.fields["kl"] == 236
-    assert result.fields["additional_sphere_sources_claims"] == 34
-    assert result.fields["additional_sphere_sources_dk"] == 34
-    assert result.fields["additional_sphere_sources_bronze_iv"] == 24
-    assert result.fields["additional_sphere_sources_rolls"] == 14
+    assert result.fields["kakera_max_power"] == 175
+    assert result.fields["wish_spawn_bonus_pct"] == 650
     assert "entries" not in result.fields
     assert "by_command" not in result.fields
 
@@ -1081,7 +997,7 @@ def test_parse_bonus_two_messages():
         author_id=MUDAE_ALT_ID,
         author_name="Mudae",
         is_mudae=True,
-        content=BONUS_REPLY_PART1,
+        content=BONUS_REPLY_PART2,
         embeds=[],
         buttons=[],
         created_at="12:00:10",
@@ -1090,7 +1006,7 @@ def test_parse_bonus_two_messages():
     r2 = parse_message(snapshot, reply_to_command="bonus", reply_part=2, reply_parts=2)
     assert r1.fields["response_label"] == "$bonus response (1/2)"
     assert r2.fields["response_label"] == "$bonus response (2/2)"
-    assert r1.fields["bk"] == 47
+    assert r1.fields["kakera_button_bonus_pct"] == 65
 
 
 def test_user_command_message_label():

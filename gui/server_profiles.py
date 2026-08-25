@@ -6,6 +6,8 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from mudae.parsers.bonus import merge_bonus_fields
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex[:12]
@@ -20,8 +22,10 @@ class ChannelProfile:
     guild_name: str | None = None
     settings: dict[str, Any] = field(default_factory=dict)
     bonus: dict[str, Any] = field(default_factory=dict)
+    shop: dict[str, Any] = field(default_factory=dict)
     settings_summary: str = ""
     bonus_summary: str = ""
+    shop_summary: str = ""
     daily_resets: dict[str, Any] = field(default_factory=dict)
     # ``daily_resets`` is keyed by account id; each value holds per-account
     # daily/cooldown blobs (e.g. ``perk8``). See ``macro.daily_store``.
@@ -36,8 +40,10 @@ class ChannelProfile:
             guild_name=str(data["guild_name"]) if data.get("guild_name") is not None else None,
             settings=dict(data.get("settings") or {}),
             bonus=dict(data.get("bonus") or {}),
+            shop=dict(data.get("shop") or {}),
             settings_summary=str(data.get("settings_summary") or ""),
             bonus_summary=str(data.get("bonus_summary") or ""),
+            shop_summary=str(data.get("shop_summary") or ""),
             daily_resets=dict(data.get("daily_resets") or {}),
         )
 
@@ -294,8 +300,10 @@ class ServerProfileStore:
             if summary:
                 channel.settings_summary = summary
         elif kind == "bonus":
-            merged = dict(channel.bonus)
-            merged.update(fields)
-            channel.bonus = merged
+            channel.bonus = merge_bonus_fields(channel.bonus, fields)
             if summary:
                 channel.bonus_summary = summary
+        elif kind == "shop":
+            channel.shop = dict(fields)
+            if summary:
+                channel.shop_summary = summary

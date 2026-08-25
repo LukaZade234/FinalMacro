@@ -57,6 +57,21 @@ DIRECT_TOGGLE_FIELDS: frozenset[str] = frozenset({
     "togglespheretrade",
 })
 
+# ``$togglerolls`` only prints help for the rank-on-roll flags; it does not flip.
+HELP_ONLY_SETTINGS_FIELDS: frozenset[str] = frozenset({"togglerolls"})
+
+
+def capture_help_action(field: str, *, include_toggles: bool = False) -> str:
+    """How the live ``$settings`` help-capture tool should treat ``field``.
+
+    Direct toggles flip the server on a bare send. Default is skip. Pass
+    ``include_toggles=True`` only when the tool will immediately send again
+    to revert. ``$togglerolls`` is help-only and is always safe to send.
+    """
+    if field in DIRECT_TOGGLE_FIELDS:
+        return "send_and_revert" if include_toggles else "skip"
+    return "send"
+
 FIELD_GROUPS: dict[str, str] = {
     "setclaim": "rolls",
     "setinterval": "rolls",

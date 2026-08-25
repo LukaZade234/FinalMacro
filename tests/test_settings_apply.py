@@ -11,7 +11,7 @@ from mudae.settings_commands import (
     diff_settings,
     validate_preset_for_premium,
 )
-from tests.test_parsers import SETTINGS_REPLY
+from tests.mudae_sheet_fixtures import SETTINGS_REPLY
 
 
 def _key_server_fields() -> dict:

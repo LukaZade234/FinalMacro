@@ -345,7 +345,7 @@ Item {
 
                         GroupBox {
                             visible: detailCol.hasSelection
-                            title: "Raw embeds / buttons"
+                            title: "Raw embeds / buttons / components"
                             Layout.fillWidth: true
                             label: Label { text: parent.title; color: Theme.fgSecondary; font.pixelSize: 11 }
                             background: Rectangle { color: Theme.inputBg; border.color: Theme.border; radius: 6 }
@@ -355,6 +355,8 @@ Item {
                                 text: parseRoot.modelValue(detailCol.idx, "rawEmbeds")
                                       + "\n\n--- buttons ---\n\n"
                                       + parseRoot.modelValue(detailCol.idx, "rawButtons")
+                                      + "\n\n--- components ---\n\n"
+                                      + parseRoot.modelValue(detailCol.idx, "rawComponents")
                                 font.pixelSize: 10
                                 minHeight: 80
                             }

@@ -171,11 +171,15 @@ def parse_settings(content: str) -> ParseResult:
 
     parsed_lines = 0
     for match in _BULLET_RE.finditer(content):
-        row = _parse_bullet_line(match.group(1))
+        line = match.group(1).strip()
+        row = _parse_bullet_line(line)
         if not row:
+            warnings.append(f"Unparsed settings line: {line[:120]}")
             continue
         parsed_lines += 1
         for key, value in row.items():
+            if key not in SETTINGS_FIELD_KEYS:
+                warnings.append(f"Unknown settings command {key!r}")
             if key not in fields:
                 fields[key] = value
                 continue

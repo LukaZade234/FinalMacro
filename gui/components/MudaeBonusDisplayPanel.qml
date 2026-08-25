@@ -16,7 +16,7 @@ Item {
             return
         }
         try {
-            displayData = JSON.parse(App.formatChannelSettingsDisplayJson(channelProfileId))
+            displayData = JSON.parse(App.formatChannelBonusDisplayJson(channelProfileId))
         } catch (e) {
             displayData = { sections: [], field_count: 0 }
         }
@@ -43,7 +43,7 @@ Item {
             Label {
                 visible: !channelProfileId
                 Layout.fillWidth: true
-                text: "Select a channel to view parsed $settings."
+                text: "Select a channel to view parsed $bonus."
                 color: Theme.fgMuted
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap
@@ -52,7 +52,7 @@ Item {
             Label {
                 visible: channelProfileId && displayData.field_count === 0
                 Layout.fillWidth: true
-                text: "No $settings yet — set this channel on Run, connect, then Fetch $settings."
+                text: "No $bonus yet — set this channel on Run, connect, then Fetch $bonus (fetch $settings first for rolls/h)."
                 color: Theme.fgMuted
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap
@@ -63,6 +63,14 @@ Item {
                 delegate: ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 6
+                    visible: {
+                        var rows = modelData.rows || []
+                        for (var i = 0; i < rows.length; i++) {
+                            if (rows[i].has_value)
+                                return true
+                        }
+                        return false
+                    }
 
                     Label {
                         Layout.fillWidth: true
@@ -79,6 +87,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 10
                             Layout.preferredHeight: 30
+                            visible: modelData.has_value
 
                             Rectangle {
                                 Layout.preferredWidth: 4
@@ -115,7 +124,7 @@ Item {
                                 font.weight: Font.Medium
                                 horizontalAlignment: Text.AlignRight
                                 elide: Text.ElideLeft
-                                Layout.maximumWidth: Math.max(120, displayScroll.availableWidth * 0.35)
+                                Layout.maximumWidth: Math.max(120, displayScroll.availableWidth * 0.42)
                             }
                         }
                     }

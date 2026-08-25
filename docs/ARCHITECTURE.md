@@ -100,7 +100,8 @@ changes.
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP** |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere) |
-| `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `ohu8`, …) |
+| `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
+| `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
@@ -122,7 +123,7 @@ under test (`test_roll_cycle.py`, `test_parsers.py`, …).
 |--------|------|
 | `ui_preview.py` | Offscreen grab of a shell + page to a PNG |
 | `build_fonts.py` | Static Space Grotesk weights from the variable font |
-| `document_settings_commands.py` | Live `$settings` command capture (see archive + TODO) |
+| `document_settings_commands.py` | Live `$settings` + read-only `$bonus` capture; skips 16 direct toggles unless `--include-toggles` (send+revert) |
 | `oq_bakeoff.py` | Replay MIXED vs entropy on every `$oq` world |
 
 ---
@@ -244,4 +245,5 @@ Original write-up: `docs/archive/MULTI_ACCOUNT.md`.
 `data/` is gitignored. Friends get a clone without tokens. The `$settings`
 verbatim capture (`docs/archive/MUDAE_SETTINGS_COMMANDS.md` and
 `data/settings_commands_capture.json`) stays local — it is a parsing aid,
-not a shipping doc.
+not a shipping doc. Sanitized dumps used by tests live in
+`tests/mudae_sheet_fixtures.py`.

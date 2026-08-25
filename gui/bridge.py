@@ -46,7 +46,9 @@ from macro.oq_game import OqSphereGame
 from macro.minigames import PlayAllMinigames
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
+from mudae.parsers.bonus_catalog import fields_to_bonus_display_dict
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
+from mudae.parsers.shop_catalog import fields_to_shop_display_dict
 from mudae.parsers.settings_normalize import normalize_settings_fields
 from mudae.settings_commands import (
     ESSENTIAL_APPLY_FIELDS,
@@ -103,16 +105,20 @@ def profile_kind_from_parse(parsed: ParseResult) -> str | None:
         return "settings"
     if parsed.kind == MessageKind.BONUS:
         return "bonus"
+    if parsed.kind == MessageKind.SHOP:
+        return "shop"
     if parsed.kind != MessageKind.COMMAND_RESPONSE:
         return None
     parser_cmd = str(parsed.fields.get("parser_command") or "").lower().lstrip("$")
-    if parser_cmd in {"settings", "bonus"}:
+    if parser_cmd in {"settings", "bonus", "shop"}:
         return parser_cmd
     label = str(parsed.fields.get("response_label") or "").lower()
     if "settings" in label:
         return "settings"
     if "bonus" in label:
         return "bonus"
+    if "shop" in label:
+        return "shop"
     if parsed.fields.get("setrolls") is not None and parsed.fields.get("gamemode") is not None:
         return "settings"
     return None
@@ -2761,6 +2767,22 @@ class AppBridge(QObject):
         return json.dumps(fields_to_display_dict(settings))
 
     @Slot(str, result=str)
+    def formatChannelBonusDisplayJson(self, channel_profile_id: str) -> str:
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        if found is None:
+            return json.dumps({"sections": [], "field_count": 0})
+        _server, channel = found
+        return json.dumps(fields_to_bonus_display_dict(dict(channel.bonus or {})))
+
+    @Slot(str, result=str)
+    def formatChannelShopDisplayJson(self, channel_profile_id: str) -> str:
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        if found is None:
+            return json.dumps({"sections": [], "field_count": 0})
+        _server, channel = found
+        return json.dumps(fields_to_shop_display_dict(dict(channel.shop or {})))
+
+    @Slot(str, result=str)
     def getMudaeSettingsPresetEditorJson(self, preset_id: str) -> str:
         preset = self._mudae_settings_presets.find(preset_id)
         if preset is None:
@@ -2975,6 +2997,10 @@ class AppBridge(QObject):
     @Slot()
     def fetchBonus(self) -> None:
         self._send_mudae_command("bonus")
+
+    @Slot()
+    def fetchShop(self) -> None:
+        self._send_mudae_command("shop")
 
     def _send_mudae_command(self, command: str) -> None:
         if not self._loop or not self._monitor:

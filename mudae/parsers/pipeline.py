@@ -17,6 +17,7 @@ from mudae.parsers.kakera import parse_kakera_claim
 from mudae.parsers.claim import parse_claim
 from mudae.parsers.marriage import parse_marriage
 from mudae.parsers.settings import parse_settings
+from mudae.parsers.shop import parse_shop, parse_shop_snapshot
 from mudae.parsers.sphere import parse_sphere_click
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
@@ -40,7 +41,7 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "ohu": parse_ohu,
     "ohu8": parse_ohu8,
 }
-_KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll"})
+_KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop"})
 
 # GUI kind column — human-readable names for non-command message types.
 _KIND_DISPLAY: dict[MessageKind, str] = {
@@ -54,6 +55,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.MINIGAME_EXHAUSTED: "minigame exhausted",
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
+    MessageKind.SHOP: "$shop",
 }
 
 
@@ -84,6 +86,10 @@ def _run_command_parser(
             parts=parts,
             channel_id=channel_id,
         )
+    if parser_id == "shop":
+        if snapshot is not None:
+            return parse_shop_snapshot(snapshot)
+        return parse_shop(content)
     parser = _COMMAND_PARSERS.get(parser_id)
     if parser is None:
         raise KeyError(parser_id)
@@ -155,6 +161,8 @@ def parse_mudae_message(
             parts=max(reply_parts, 2),
             channel_id=snapshot.channel_id,
         )
+    if kind == MessageKind.SHOP:
+        return parse_shop_snapshot(snapshot)
     if kind == MessageKind.SETTINGS:
         result = parse_settings(snapshot.content)
         _store_settings_cache(snapshot, result)
@@ -244,6 +252,8 @@ def _parse_command_response(
                 parts=resolved.parts,
                 channel_id=snapshot.channel_id,
             )
+        elif kind == MessageKind.SHOP:
+            result = parse_shop_snapshot(snapshot)
         elif kind == MessageKind.SETTINGS:
             result = parse_settings(snapshot.content)
             _store_settings_cache(snapshot, result)
@@ -367,6 +377,9 @@ def format_entry_for_gui(
         "rawContent": snapshot.content or "(no plain text)",
         "rawEmbeds": json.dumps(snapshot.embeds, indent=2) if snapshot.embeds else "(none)",
         "rawButtons": json.dumps(snapshot.buttons, indent=2) if snapshot.buttons else "(none)",
+        "rawComponents": (
+            json.dumps(snapshot.components, indent=2) if snapshot.components else "(none)"
+        ),
         "parsedFields": json.dumps(parsed.fields, indent=2, default=str),
         "warnings": "\n".join(parsed.warnings) if parsed.warnings else "(none)",
     }

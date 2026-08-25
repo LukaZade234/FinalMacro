@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 
 from mudae.buttons import is_claim_button, is_kakera_button
-from mudae.commands import is_bonus_response, is_settings_response, is_tu_response
+from mudae.commands import is_bonus_response, is_settings_response, is_shop_response, is_tu_response
+from mudae.message_text import snapshot_visible_text
 from mudae.parsers.claim import is_custom_claim, is_marriage_claim
 from mudae.parsers.claim_interval import is_claim_interval_message
 from mudae.parsers.dk import is_dk_claim
@@ -22,16 +23,8 @@ from mudae.types import MessageKind, MudaeMessageSnapshot
 
 
 def snapshot_text(snapshot: MudaeMessageSnapshot) -> str:
-    """All visible Mudae text on a message (content + embed fields)."""
-    parts = [snapshot.content or ""]
-    for embed in snapshot.embeds or []:
-        if not isinstance(embed, dict):
-            continue
-        for key in ("description", "title", "footer", "author"):
-            value = embed.get(key) or ""
-            if value:
-                parts.append(str(value))
-    return "\n".join(parts)
+    """All visible Mudae text on a message (content + embeds + Components V2)."""
+    return snapshot_visible_text(snapshot)
 
 
 def is_kakera_claim(content: str) -> bool:
@@ -51,7 +44,7 @@ def has_claim_buttons(snapshot: MudaeMessageSnapshot) -> bool:
 
 
 def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
-    content = snapshot.content or ""
+    content = snapshot_text(snapshot)
 
     if snapshot.edited and snapshot.embeds:
         embed = snapshot.embeds[0]
@@ -67,6 +60,8 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.BONUS
     if is_settings_response(content):
         return MessageKind.SETTINGS
+    if is_shop_response(content):
+        return MessageKind.SHOP
     if is_tu_response(content):
         return MessageKind.TU
     if is_kakera_react_denied(content):

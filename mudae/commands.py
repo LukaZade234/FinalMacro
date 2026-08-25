@@ -88,6 +88,12 @@ def is_bonus_response(content: str) -> bool:
     )
 
 
+def is_shop_response(content: str) -> bool:
+    from mudae.parsers.shop import is_shop_response as _is_shop
+
+    return _is_shop(content)
+
+
 def is_us_response(content: str) -> bool:
     if not content:
         return False
@@ -132,6 +138,7 @@ def is_roll_response(snapshot: MudaeMessageSnapshot) -> bool:
 RESPONSE_DETECTORS: list[tuple[str, ResponseDetector]] = [
     ("bonus", is_bonus_response),
     ("settings", is_settings_response),
+    ("shop", is_shop_response),
     ("tu", is_tu_response),
     ("ku", is_ku_response),
     ("us", is_us_response),
@@ -159,10 +166,12 @@ def detect_command_from_snapshot(
     *,
     user_input: str | None = None,
 ) -> str | None:
-    """Guess command from embed shape when a user $command was sent."""
+    """Guess command from embed/component shape when a user $command was sent."""
+    from mudae.message_text import snapshot_visible_text
+
     if user_input and is_roll_response(snapshot):
         return "roll"
-    return detect_command_from_response(snapshot.content or "")
+    return detect_command_from_response(snapshot_visible_text(snapshot))
 
 
 @dataclass(frozen=True)

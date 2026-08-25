@@ -28,6 +28,7 @@ class MessageKind(str, Enum):
     CLAIM_BUTTONS = "claim_buttons"
     KAKERA_BUTTONS = "kakera_buttons"
     OWNERSHIP_UPDATE = "ownership_update"
+    SHOP = "shop"
     CHANNEL = "channel"
     UNKNOWN = "unknown"
 
@@ -47,6 +48,7 @@ class MudaeMessageSnapshot:
     buttons: list[dict[str, Any]]
     created_at: str
     edited: bool = False
+    components: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

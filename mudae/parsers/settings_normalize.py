@@ -64,6 +64,22 @@ def parse_togglebutton(raw: Any) -> int | None:
     return None
 
 
+def parse_kakera_calc_flag(raw: Any) -> bool | None:
+    """``$togglekakeraclaim`` / ``$togglekakeralike`` print a mode sentence, not yes/no."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    lower = str(raw).lower().strip()
+    if lower in {"enabled", "yes", "true"}:
+        return True
+    if lower in {"disabled", "no", "false"}:
+        return False
+    if "claim" in lower or "like" in lower or "rank" in lower:
+        return True
+    return None
+
+
 def parse_togglerolls_display(raw: Any) -> tuple[bool | None, bool | None]:
     """Return ``(claim_rolls_display, like_rolls_display)`` from the aggregate label."""
     if raw is None:
@@ -71,7 +87,7 @@ def parse_togglerolls_display(raw: Any) -> tuple[bool | None, bool | None]:
     if isinstance(raw, bool):
         return raw, raw
     lower = str(raw).lower().strip()
-    if lower in {"none", "no ranks"}:
+    if lower in {"none", "no", "no ranks", "disabled"}:
         return False, False
     if "like ranks only" in lower:
         return False, True
@@ -141,6 +157,11 @@ def normalize_settings_fields(fields: dict[str, Any]) -> dict[str, Any]:
         "togglelikerolls",
     ):
         val = out.get(bool_key)
+        if bool_key in {"togglekakeraclaim", "togglekakeralike"}:
+            parsed_flag = parse_kakera_calc_flag(val)
+            if parsed_flag is not None:
+                out[bool_key] = parsed_flag
+            continue
         if isinstance(val, str):
             lower = val.lower()
             if lower in {"enabled", "yes", "true"}:

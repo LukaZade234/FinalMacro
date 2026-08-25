@@ -69,8 +69,8 @@ time (`macro/reaction_power.py`).
 
 Claiming a character uses the claim **button** on the roll embed (💍 / 💖 /
 similar). Some servers hide buttons and require an emoji reaction instead.
-The macro only supports **button claims**. Claim-via-emoji is deliberately
-not implemented until the `$settings` audit is done (`docs/TODO.md`).
+The macro only supports **button claims**. Claim-via-emoji (`$togglebutton` off /
+`$claimreact`) stays unimplemented until a later slice *uses* parsed `$settings`.
 
 You get one claim slot per claim interval (`$setclaim`, often 60–180 minutes).
 `$rt` (reset claim) is a separate token that grants an extra claim; it has
@@ -254,8 +254,9 @@ counts, sphere stock) are not generalized yet — see `docs/TODO.md`.
 Perk 9 adds **sphere react buttons** on characters you have rolled today.
 Each click consumes one slot from a daily budget (shown on `$ohu9` as
 ``6/20 buttons clicked`` in the shared minigame header). The macro tracks
-this as **clicks used / 20** on the Run page until `$bonus` parsing gives
-the real cap (`10 + SP9`).
+this as **clicks used / 20** on the Run page until a later slice wires the
+real cap (`10 + SP9` from `$shop` `perk9_extra_clicks`; `$shop` is parsed,
+not wired).
 
 - Query with **`$ohu9`** — same layout as `$ohu8` / `$ohu`: minigame
   counts, refill timer, ``buttons clicked``, megasphere stock line, then
@@ -293,21 +294,73 @@ Older lines omit `$ot`: `+2 $oq and +5,344 :sp: from your invested spheres!`
 
 ## `$settings` and `$bonus`
 
-`$settings` is the server's rule sheet: prefix, claim/roll timers, sniping,
-whether claim/kakera/sphere buttons are “recognizable”, game mode, etc.
-`$bonus` is a second sheet of bonuses.
+`$settings` is the server's **rule sheet**: prefix, claim/roll timers, sniping,
+whether claim/kakera/sphere buttons are “recognizable”, game mode, etc. Each
+bullet is `label: value ($command)`. Sending `$command` (with args, or
+sometimes bare) changes the live server.
 
-The GUI can fetch both onto a channel profile. Parsers live in
-`mudae/parsers/settings.py` and `bonus.py`. They are **not fully trusted
-yet** — field-by-field audit is still open (`docs/TODO.md`). Until that
-lands, the macro does not change claim/kakera/roll behavior from parsed
-settings.
+`$bonus` is a **description sheet**, not a list of commands to send. Lines
+say *where a bonus comes from* (`$kt`, `$kl`, `$op`, `$shop`, premium,
+spheres clicked). Those suffixes are source tags. Sending them does not
+edit the sheet.
 
-**Dangerous commands:** 16 `$settings`-adjacent commands are **direct
-toggles**. Sending them with no argument flips the live server setting
-(no help text, no confirm). During the capture pass each flip was
-immediately sent again to revert. Any script that iterates `$settings`
-commands must skip these or revert them:
+The GUI fetches `$settings`, `$bonus`, and `$shop` onto a channel profile
+(`App.fetchSettings` / `fetchBonus` / `fetchShop`). Parsers:
+`mudae/parsers/settings.py`, `bonus.py`, `shop.py` (catalog in
+`bonus_catalog.py` / `shop_catalog.py`). Frozen dumps:
+`tests/mudae_sheet_fixtures.py`.
+
+**Storage is trusted. Decisions are not yet.** Field-by-field parse tests
+cover every `SETTINGS_FIELD_KEYS` value, the `$bonus` meaning keys
+(including part 2: power cap, twice-sphere chance, rolls/hour), and `$shop`
+OP1–OP10 (perk 9 extra clicks + SP%). The macro still does not change
+claim / kakera / roll behaviour from these fields.
+`RollCycleEngine.apply_settings_fields` still only copies `settimer`.
+`DEFAULT_MAX_REACTION_POWER = 155` and `PERK9_CLICK_MAX_DEFAULT = 20` stay
+hardcoded until a later slice wires `kakera_max_power` / perk 9.
+
+### `$bonus` meaning keys needed later
+
+| Key | Type | Typical source tag | Later use |
+| --- | --- | --- | --- |
+| `kakera_max_power` | int | `$kt` | Replace hardcoded reaction-power cap |
+| `power_cost_per_kakera_button` | % | — | Kakera react budget |
+| `additional_spheres` | int | clicked + premium | Perk 9 EV flat SP |
+| `sphere_double_chance_pct` | % | `$kt` | Perk 9 EV double chance |
+| `rolls_per_hour` | dict | `$k`/`$kl`/`$kt`/premium | `net`, `sources`, `penalties.bw` / `penalties.bk` |
+
+One `$bonus` bullet is one field. Multi-number lines (`rolls_per_hour`, `oh_daily`, `megaspheres`, `random_kakera`) stay as a single dict instead of flattened keys. Identity is the meaning key, not the suffix — `$bk` on kakera-buttons is not the `$bk` rolls/hour penalty.
+
+### `$shop`
+
+`$shop` is the **ouroperk upgrade sheet** for the connected account (not
+server-wide). Discord sends it as Components V2 (Container / TextDisplay /
+Thumbnail): empty `content`, empty classic embeds. discord.py-self 2.1
+drops those component types, so `mudae/serialization.py` keeps the raw
+payload and flattens every `content` field before parsing.
+
+Ten perks, levels 0–10 (`[MAX]` = 10). Continuation lines without a level
+tag belong to the previous perk (OP6 omega-key chance, OP9 sphere-value %).
+Stored on the channel profile like `$bonus` (`App.fetchShop`). Read-only —
+do not send `$shoprefund`.
+
+| Key | Type | Later use |
+| --- | --- | --- |
+| `perk9_extra_clicks` | int | Daily cap `10 + extra` (max 20) |
+| `perk9_click_max` | int | Replace `PERK9_CLICK_MAX_DEFAULT` |
+| `perk9_sphere_value_pct` | % | p9calc `shop9_bonus` (10% per OP9 level) |
+| `perk2_megasphere_rewards` | int | Megasphere planner |
+| `perks` | dict | Full OP1–OP10 current/next values |
+
+`$oh` / megasphere *values* on `$bonus` stay on `oh_daily` / `megaspheres`.
+
+Unknown `$settings` / `$bonus` / `$shop` bullets become warnings (not silent drops).
+
+**Dangerous `$settings` commands:** 16 are **direct toggles**. A bare send
+flips the live server (no help text, no confirm). Capture tooling
+(`scripts/document_settings_commands.py`) skips them unless
+`--include-toggles`, which sends then immediately sends again to revert.
+List: `DIRECT_TOGGLE_FIELDS` in `mudae/settings_commands.py`.
 
 `$toggleslash`, `$toggleclaimrank`, `$togglelikerank`, `$toggleclaimrolls`,
 `$togglelikerolls`, `$togglensfw`, `$toggledisturbing`, `$togglechildtag`,
@@ -318,8 +371,13 @@ commands must skip these or revert them:
 `$togglerolls` is **not** a toggle. It only prints help for the three
 independent rank-on-roll flags above.
 
-The verbatim capture is `docs/archive/MUDAE_SETTINGS_COMMANDS.md` (gitignored)
-and `data/settings_commands_capture.json`.
+`$bonus` capture is read-only (`$bonus` once). Do not iterate `($kt)` /
+`($kl)` as live commands.
+
+The verbatim `$settings` command-help capture is
+`docs/archive/MUDAE_SETTINGS_COMMANDS.md` (gitignored) and
+`data/settings_commands_capture.json`. Re-run with `--skip-help` to dump
+only `$settings` + `$bonus` text.
 
 ---
 
@@ -331,4 +389,5 @@ and `data/settings_commands_capture.json`.
 - Multi-account concurrent connections (config supports it; runtime is
   one Discord session — see Phase D in `ARCHITECTURE.md`).
 - Playing `$ot`.
-- Driving decisions from a fully audited `$settings` / `$bonus` parse.
+- Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`
+  (parsers are trusted for storage; those decisions are a later slice).

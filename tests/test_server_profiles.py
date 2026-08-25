@@ -57,3 +57,37 @@ def test_command_response_settings_maps_to_profile() -> None:
     fields = profile_fields_from_parse(parsed, "settings")
     assert fields["setrolls"] == 10
     assert "command" not in fields
+
+
+def test_command_response_shop_maps_to_profile() -> None:
+    parsed = ParseResult(
+        kind=MessageKind.COMMAND_RESPONSE,
+        summary="$shop · 10 perks",
+        fields={
+            "command": "shop",
+            "response_label": "$shop response",
+            "perk9_click_max": 15,
+            "perk9_extra_clicks": 5,
+        },
+    )
+    assert profile_kind_from_parse(parsed) == "shop"
+    fields = profile_fields_from_parse(parsed, "shop")
+    assert fields["perk9_click_max"] == 15
+    assert "command" not in fields
+    assert "response_label" not in fields
+
+
+def test_apply_shop_updates_channel() -> None:
+    store = ServerProfileStore()
+    sid = store.add_server("Test Guild")
+    cid = store.add_channel(sid, "mudae", "999")
+    store.apply_parsed(
+        999,
+        kind="shop",
+        fields={"perk9_click_max": 15, "spheres": 55613},
+        summary="$shop · perk 9 +5",
+    )
+    ch = store.find_channel(sid, cid)
+    assert ch is not None
+    assert ch.shop["perk9_click_max"] == 15
+    assert ch.shop_summary == "$shop · perk 9 +5"

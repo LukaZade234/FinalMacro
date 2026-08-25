@@ -22,7 +22,6 @@ Item {
     property bool _syncing: false
     property bool pendingSelectLastServer: false
     property string pendingChannelSelectId: ""
-    property string bonusPreviewText: "No channel selected."
     property var mudaePresetData: ({ presets: [], default_preset_id: "" })
 
     function refreshMudaePresetData() {
@@ -97,22 +96,6 @@ Item {
         return s.id === serverData.active_server_id && c.id === serverData.active_channel_id
     }
 
-    function buildBonusPreview(ch) {
-        if (!ch)
-            return "No channel selected."
-        var keys = Object.keys(ch.bonus || {})
-        if (keys.length === 0)
-            return "No $bonus yet — run Fetch $bonus while connected (fetch $settings first for full rolls/h math)."
-        var body = JSON.stringify(ch.bonus, null, 2)
-        if (ch.bonus_summary)
-            return ch.bonus_summary + "\n\n" + body
-        return body
-    }
-
-    function updatePreviewText() {
-        bonusPreviewText = buildBonusPreview(currentChannel())
-    }
-
     function clampServerIndex() {
         var list = servers()
         if (list.length === 0) {
@@ -183,7 +166,6 @@ Item {
         updateListCounts()
         applyListIndices()
         _syncing = false
-        updatePreviewText()
     }
 
     function syncFromActiveRunTarget() {
@@ -212,7 +194,6 @@ Item {
         updateListCounts()
         applyListIndices()
         _syncing = false
-        updatePreviewText()
     }
 
     function onServerSelectionChanged() {
@@ -225,7 +206,6 @@ Item {
             updateListCounts()
             applyListIndices()
             _syncing = false
-            updatePreviewText()
             return
         }
         selectedServerIndex = serverList.currentIndex
@@ -233,14 +213,12 @@ Item {
         updateListCounts()
         applyListIndices()
         _syncing = false
-        updatePreviewText()
     }
 
     function onChannelSelectionChanged() {
         if (_syncing)
             return
         selectedChannelIndex = channelList.currentIndex
-        updatePreviewText()
     }
 
     Connections {
@@ -289,9 +267,9 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredHeight: Math.max(240, Math.floor(serversRoot.height * 0.45))
-                        Layout.minimumHeight: 220
+                        Layout.preferredHeight: 250
+                        Layout.maximumHeight: 280
+                        Layout.minimumHeight: 200
                         spacing: 12
 
                         PanelCard {
@@ -490,6 +468,11 @@ Item {
                                         onClicked: App.fetchBonus()
                                     }
                                     ThemedButton {
+                                        text: "Fetch $shop"
+                                        enabled: App.connected && serversRoot.isActiveRunChannel()
+                                        onClicked: App.fetchShop()
+                                    }
+                                    ThemedButton {
                                         text: "Remove channel"
                                         danger: true
                                         enabled: currentChannel() !== null
@@ -519,13 +502,14 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Layout.minimumHeight: 180
+                        Layout.minimumHeight: 280
                         spacing: 12
 
                         PanelCard {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.minimumWidth: 200
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 220
                             title: "$settings (parsed)"
                             titleSize: 13
                             fillContentVertically: true
@@ -540,27 +524,32 @@ Item {
                         PanelCard {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.minimumWidth: 160
-                            title: "$bonus"
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 220
+                            title: "$bonus (parsed)"
                             titleSize: 13
                             fillContentVertically: true
 
-                            ScrollView {
-                                id: bonusScroll
+                            MudaeBonusDisplayPanel {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                clip: true
-                                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                                TextArea {
-                                    width: bonusScroll.availableWidth
-                                    readOnly: true
-                                    wrapMode: TextArea.Wrap
-                                    font.family: "Consolas, monospace"
-                                    font.pixelSize: 10
-                                    color: Theme.fgSecondary
-                                    text: serversRoot.bonusPreviewText
-                                    background: Rectangle { color: "transparent" }
-                                }
+                                channelProfileId: serversRoot.currentChannelProfileId()
+                            }
+                        }
+
+                        PanelCard {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 220
+                            title: "$shop (parsed)"
+                            titleSize: 13
+                            fillContentVertically: true
+
+                            MudaeShopDisplayPanel {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                channelProfileId: serversRoot.currentChannelProfileId()
                             }
                         }
                     }
