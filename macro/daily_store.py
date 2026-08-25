@@ -18,10 +18,17 @@ from typing import Any
 from macro.minigame_daily import MINIGAME_DAILY_KEY
 from macro.perk8_daily import PERK8_DAILY_KEY
 from macro.perk9_daily import PERK9_DAILY_KEY
+from macro.us_schedule import US_SCHEDULE_KEY
 
 # Keys that belong inside an account slice, not at the channel root.
 _ACCOUNT_SLICE_KEYS = frozenset(
-    {PERK8_DAILY_KEY, PERK9_DAILY_KEY, MINIGAME_DAILY_KEY, "macro_runtime"}
+    {
+        PERK8_DAILY_KEY,
+        PERK9_DAILY_KEY,
+        MINIGAME_DAILY_KEY,
+        "macro_runtime",
+        US_SCHEDULE_KEY,
+    }
 )
 
 

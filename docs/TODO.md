@@ -18,7 +18,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 6. ~~**`$p` / `$daily`** — send at the right time; parsers exist.~~ Account-global; designated channel on the Accounts tab; priority over rolls.
 7. **Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.
 8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
-9. **Save power for perk 8** / **`$us` scheduling** — rules on top of engines that already run.
+9. ~~**Save power for perk 8** / **`$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain / schedule on the preset (`us_keep_draining`, local window, roll cap). Run page is only the Roll `$us` button.
 10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
 11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
@@ -37,10 +37,10 @@ Highest first. What makes an overnight run correct and complete.
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
 3. ~~**Sphere tracking + EventLog / shared stats**~~ — EventLog + daily cube + paged stats tables. Totals/charts no longer walk every event in QML.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
-5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played), perk 9 static filter, perk 8 power not saved for refill.
+5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played), perk 9 static filter.
 6. **Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`. Overnight sessions mis-attribute `$tu` and can collide with a minigame.
 7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
-8. **Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`), `$us` on a clock.
+8. **Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).
 9. **More SP from games we already play** — `$oh` DP / `$oc` lookahead. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase).
 10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker.
 11. **`$dl` switch**, shell Run parity.
@@ -71,10 +71,10 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 **Wave 3 — close the daily loop on one account**
 
-- ~~`$p` / `$daily`~~ — designated per-account channel; auto-send on cooldown with roll priority. Remaining: perk 8 power save, `$us` clock.
+- ~~`$p` / `$daily`~~ — designated per-account channel; auto-send on cooldown with roll priority.
 - ~~Extend `daily_resets` (already used for perk 8) to `$oh` / `$oc` / `$oq` / `$ot` and sphere stock~~ — `macro/minigame_daily.py` + `macro/perk9_daily.py`; play-all / hourly skip minigames until UTC refill. Perk 9 / megasphere counts persist for the Run tab; the reactor does not skip — Mudae stops spawning those buttons.
-- `$dl` / `$adl` / `$wl` one-click if you want a GUI win in the same stretch.
-- Shared Run action gating (pending + minigame flags) on Haul / Console / Boxed. `$us` stop options only exist on Classic today.
+- ~~**Perk 8 power / `$dk` reserve**~~ — optional on the perk-8 budget panel (`perk_8_power_save`). Off = old click/`$dk` rules. On = pay remaining perk-8 first (they expire at UTC midnight); after 40/40 still take chaos kakera and hold `$dk` unless a new use is back by midnight. Usual `$dk` cooldown is **20h**.
+- ~~**`$us` control**~~ — preset drain policy + optional **local** time window (`us_schedule_*`, not UTC). Manual / keep-draining / power stop / session roll cap live on Presets → `$us`. **Roll `$us`** starts immediately (ignores the window). The window is an automatic drain while connected, like `$p` / `$daily`; leftover `$us` stays on the stack at end time. Hourly waiting for a refill yields to the window, then resumes.
 
 **Wave 4 — spend the daily budget better**
 
@@ -112,11 +112,11 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 
 ## Daily loop and scheduling
 
-- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill. `$p`/`$daily` send on a designated channel; perk 8 / minigame skip live in `daily_resets`. Remaining: perk 8 power save, `$us` clock.
-- **Save power for perk 8 refresh** — stop paid kakera reacts near the daily refill so the bar is full when perk 8 comes back. Purple stays free.
+- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill. `$p`/`$daily` send on a designated channel; perk 8 / minigame skip live in `daily_resets`; `$us` keep-draining can pause/resume on the preset.
+- ~~**Save power for perk 8 refresh**~~ — `macro/perk8_power.py` keeps bar + `$dk` payable for today's remaining perk-8 clicks (horizon `min(N hours, time until UTC midnight)`, default 4h). Today beats tomorrow: unused clicks die at reset. After 40/40, chaos kakera still click; `$dk` on those only if a replacement is back by midnight (typical cooldown **20h**). Purple stays free.
 - **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click.
 - **`$ot` solver** — play `$ot` (parsed in `$ohu`, not played). Method notes in **Colblitz tools** below.
-- **`$us` scheduling** — start / stop `$us` on a clock (not only a manual button), including the reset-margin so a reset does not wipe the stack.
+- ~~**`$us` control**~~ — drain / optional local schedule on the preset; session roll cap and window end are hard stops. Power stop is a separate toggle. Reset-margin already exists (`us_reset_margin_minutes`).
 - ~~**Humanized delays** — jitter command / click timing so the session is less metronomic.~~ Opt-in roll jitter in preset Rolls settings.
 
 ---
@@ -184,7 +184,7 @@ Pass over the running app after the rankings above. Items already listed earlier
 
 Classic Run (`RunView` + `MacroControlBar`) and Haul/Console/Boxed (`RunModel` + `*RunPage`) are two products:
 
-- `$us` stop-on-power / stop-after-N only on Classic.
+- ~~`$us` stop-on-power / stop-after-N only on Classic.~~ Drain / schedule policy on the preset (Presets → `$us`); Run page is the start button only.
 - ~~Update banner only on Classic; tray text says “see the Run tab”.~~ Compact notice above every layout (`UpdateNotice` in `ShellSwitcher`); changelog + Update live on Settings. Tray points at Settings.
 - Session haul / last claim / perk 8·9 chips only on the new shells; Classic never reads `runSummaryJson`.
 - `RunModel.dkNextMinutes` and `TargetModel.warning` are computed and not shown.

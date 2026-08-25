@@ -146,6 +146,55 @@ ColumnLayout {
                     onPatch("kakera_reaction", "perk_8_budget_bypass_types", ids)
                 }
             }
+
+            ThemedCheckBox {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                text: "Smart power and $dk saving"
+                checked: rules.kakera_reaction
+                    ? rules.kakera_reaction.perk_8_power_save !== false
+                    : true
+                onToggled: onPatch("kakera_reaction", "perk_8_power_save", checked)
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                text: "Off keeps the old click and $dk rules. On keeps a full perk-8 dump payable in the first N hours after UTC midnight (the daily reset). Today's leftover clicks still expire at midnight, so they always get power and $dk first. After 40/40, normal kakera still click; $dk on those only if a new use is back by midnight. Purple stays free."
+                color: Theme.fgMuted
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_power_save !== false
+                Label {
+                    text: "Hours after daily reset"
+                    color: Theme.fgSecondary
+                    font.pixelSize: 11
+                }
+                ThemedSpinBox {
+                    from: 1
+                    to: 12
+                    value: (rules.kakera_reaction && rules.kakera_reaction.perk_8_power_window_hours)
+                        ? Math.round(rules.kakera_reaction.perk_8_power_window_hours)
+                        : 4
+                    onValueModified: onPatch("kakera_reaction", "perk_8_power_window_hours", value)
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_power_save !== false
+                text: "How long after midnight a 40-click perk-8 dump should still be payable. Not a stop time — slow perk-8 keeps rolling until 40/40 or reset."
+                color: Theme.fgMuted
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
         }
     }
 

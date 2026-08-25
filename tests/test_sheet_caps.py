@@ -32,6 +32,23 @@ def test_apply_sheet_caps_clamps_current_power():
     assert state.power_max_percent == 150.0
     assert state.power_percent == 150.0
     assert state.perk9_click_max == 12
+    assert state.kakera_base_cost == 30.0
+    assert state.dk_cooldown_minutes == 20 * 60
+
+
+def test_apply_sheet_caps_reads_bonus_cost_and_dk_cooldown():
+    state = SimpleNamespace(power_percent=100.0, power_max_percent=155.0, perk9_click_max=20)
+    apply_sheet_caps(
+        state,
+        bonus={
+            "kakera_max_power": 130,
+            "power_cost_per_kakera_button": 30,
+            "dk_cooldown": "10h",
+        },
+    )
+    assert state.power_max_percent == 130.0
+    assert state.kakera_base_cost == 30.0
+    assert state.dk_cooldown_minutes == 10 * 60
 
 
 def test_rolls_max_from_sheets_prefers_bonus_net_over_setrolls():

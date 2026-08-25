@@ -16,6 +16,7 @@ from macro.actions import DiscordActions, is_kakera_outcome_message, normalize_k
 from macro.config import KakeraReactionRules, MacroConfig
 from macro.dk_manager import apply_dk_response, has_dk_available
 from macro.perk8_daily import perk8_budget_applies
+from macro.perk8_power import dk_allowed_for_state
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
@@ -130,6 +131,7 @@ class KakeraReactor:
                 character=character,
                 roll_index=roll_index,
                 rules=rules,
+                perk8=has_perk_8,
             )
             if clicked:
                 clicks += 1
@@ -191,11 +193,15 @@ class KakeraReactor:
             and rules.auto_use_dk
             and "insufficient reaction power" in decision.reason
             and has_dk_available(self.state)
+            and dk_allowed_for_state(
+                self.state, rules, perk8=bool(fields.get("perk_8"))
+            )
         ):
             if await self._try_use_dk(
                 character,
                 roll_index=roll_index,
                 reason="insufficient power before click",
+                perk8=bool(fields.get("perk_8")),
             ):
                 decision = passes_kakera_reaction(
                     fields,
@@ -214,6 +220,7 @@ class KakeraReactor:
         character: str,
         roll_index: int,
         rules: KakeraReactionRules,
+        perk8: bool = False,
     ) -> bool:
         chaos = (choice.emoji or "") == _CHAOS_EMOJI
         if chaos:
@@ -228,6 +235,7 @@ class KakeraReactor:
                         rules.auto_use_dk
                         and has_dk_available(self.state)
                         and dk_attempts < _MAX_DK_ATTEMPTS_PER_CLICK
+                        and dk_allowed_for_state(self.state, rules, perk8=perk8)
                     ):
                         dk_attempts += 1
                         if await self._try_use_dk(
@@ -235,6 +243,7 @@ class KakeraReactor:
                             attempt=dk_attempts,
                             roll_index=roll_index,
                             reason="insufficient tracked power",
+                            perk8=perk8,
                         ):
                             self.log(
                                 f"kakera: retrying {character} after $dk "
@@ -301,6 +310,7 @@ class KakeraReactor:
                         rules.auto_use_dk
                         and has_dk_available(self.state)
                         and dk_attempts < _MAX_DK_ATTEMPTS_PER_CLICK
+                        and dk_allowed_for_state(self.state, rules, perk8=perk8)
                     ):
                         dk_attempts += 1
                         if await self._try_use_dk(
@@ -308,6 +318,7 @@ class KakeraReactor:
                             attempt=dk_attempts,
                             roll_index=roll_index,
                             reason=f"denied · wait {cooldown}m",
+                            perk8=perk8,
                         ):
                             self.log(
                                 f"kakera: retrying {character} after $dk refill "
@@ -340,11 +351,17 @@ class KakeraReactor:
         attempt: int = 1,
         roll_index: int = 0,
         reason: str = "low power",
+        perk8: bool = False,
     ) -> bool:
         rules = self.config.kakera_reaction
         if not rules.auto_use_dk or not has_dk_available(self.state):
             if rules.auto_use_dk:
                 self.log(f"$dk: none available — cannot refill for {character}")
+            return False
+        if not dk_allowed_for_state(self.state, rules, perk8=perk8):
+            self._debug(
+                f"$dk: held for perk-8 reserve — not using for {character}"
+            )
             return False
 
         stock_before = int(self.state.dk_stock or 0)

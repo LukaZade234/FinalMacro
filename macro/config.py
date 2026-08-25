@@ -58,6 +58,20 @@ def _coerce_str_list(value: Any) -> list[str]:
     return []
 
 
+def _coerce_hhmm(value: Any, default: str) -> str:
+    from macro.us_schedule import normalize_hhmm
+
+    return normalize_hhmm(value, default)
+
+
+def _coerce_power_window_hours(value: Any) -> float:
+    from macro.perk8_power import clamp_power_window_hours
+
+    if value is None or value == "":
+        return 4.0
+    return clamp_power_window_hours(value)
+
+
 @dataclass
 class CharacterClaimRules:
     """When to claim a character on a roll.
@@ -130,6 +144,10 @@ class KakeraReactionRules:
     # Color filter for perk-8 characters while budget mode is on (empty = any).
     perk_8_types_allowed: list[str] = field(default_factory=list)
     auto_use_dk: bool = False
+    # Optional reserve: bar + $dk so remaining perk-8 clicks could be paid in N hours.
+    # Off = old click / $dk rules. On = today-first (unused perk-8 expires at midnight).
+    perk_8_power_save: bool = True
+    perk_8_power_window_hours: float = 4.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> KakeraReactionRules:
@@ -155,6 +173,10 @@ class KakeraReactionRules:
             ),
             perk_8_types_allowed=_coerce_str_list(data.get("perk_8_types_allowed")),
             auto_use_dk=bool(data.get("auto_use_dk", False)),
+            perk_8_power_save=bool(data.get("perk_8_power_save", True)),
+            perk_8_power_window_hours=_coerce_power_window_hours(
+                data.get("perk_8_power_window_hours")
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -170,6 +192,8 @@ class KakeraReactionRules:
             "perk_8_budget_bypass_types": list(self.perk_8_budget_bypass_types),
             "perk_8_types_allowed": list(self.perk_8_types_allowed),
             "auto_use_dk": self.auto_use_dk,
+            "perk_8_power_save": self.perk_8_power_save,
+            "perk_8_power_window_hours": self.perk_8_power_window_hours,
         }
 
 
@@ -257,6 +281,16 @@ class MacroConfig:
     us_add_delay_sec: float = 5.0
     # Seconds to wait after a roll timeout before resuming $us mode.
     us_roll_timeout_retry_sec: float = 5.0
+    # Keep draining: pause on power (when that stop is on) and already on
+    # reset margin instead of quitting, then resume when kakera is payable.
+    # A session roll cap and a local schedule window end are hard stops.
+    us_keep_draining: bool = False
+    us_stop_on_power_exhausted: bool = False
+    us_stop_after_rolls_enabled: bool = False
+    us_stop_after_rolls: int = 100
+    us_schedule_enabled: bool = False
+    us_schedule_start: str = "04:00"
+    us_schedule_end: str = "06:00"
     # When enabled, the hourly macro disconnects between roll sessions so mobile
     # Discord notifications are not suppressed. Does not affect $us or minigames.
     notification_mode: bool = False
@@ -306,6 +340,8 @@ class MacroConfig:
                 perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
                 perk_8_types_allowed=list(base.perk_8_types_allowed),
                 auto_use_dk=base.auto_use_dk,
+                perk_8_power_save=base.perk_8_power_save,
+                perk_8_power_window_hours=base.perk_8_power_window_hours,
             )
         return KakeraReactionRules(
             enabled=base.enabled,
@@ -319,6 +355,8 @@ class MacroConfig:
             perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
             perk_8_types_allowed=list(base.perk_8_types_allowed),
             auto_use_dk=base.auto_use_dk,
+            perk_8_power_save=base.perk_8_power_save,
+            perk_8_power_window_hours=base.perk_8_power_window_hours,
         )
 
     def roll_delay(self) -> float:
@@ -387,6 +425,15 @@ class MacroConfig:
             us_read_before_add_delay_sec=float(data.get("us_read_before_add_delay_sec", 2.0)),
             us_add_delay_sec=float(data.get("us_add_delay_sec", 5.0)),
             us_roll_timeout_retry_sec=float(data.get("us_roll_timeout_retry_sec", 5.0)),
+            us_keep_draining=bool(data.get("us_keep_draining", False)),
+            us_stop_on_power_exhausted=bool(data.get("us_stop_on_power_exhausted", False)),
+            us_stop_after_rolls_enabled=bool(
+                data.get("us_stop_after_rolls_enabled", False)
+            ),
+            us_stop_after_rolls=max(1, int(data.get("us_stop_after_rolls", 100) or 100)),
+            us_schedule_enabled=bool(data.get("us_schedule_enabled", False)),
+            us_schedule_start=_coerce_hhmm(data.get("us_schedule_start"), "04:00"),
+            us_schedule_end=_coerce_hhmm(data.get("us_schedule_end"), "06:00"),
             notification_mode=bool(data.get("notification_mode", False)),
             us_roll_kakera=us_roll_kakera,
             character_claim=character_claim,
@@ -407,6 +454,13 @@ class MacroConfig:
             "us_read_before_add_delay_sec": self.us_read_before_add_delay_sec,
             "us_add_delay_sec": self.us_add_delay_sec,
             "us_roll_timeout_retry_sec": self.us_roll_timeout_retry_sec,
+            "us_keep_draining": self.us_keep_draining,
+            "us_stop_on_power_exhausted": self.us_stop_on_power_exhausted,
+            "us_stop_after_rolls_enabled": self.us_stop_after_rolls_enabled,
+            "us_stop_after_rolls": max(1, int(self.us_stop_after_rolls)),
+            "us_schedule_enabled": self.us_schedule_enabled,
+            "us_schedule_start": _coerce_hhmm(self.us_schedule_start, "04:00"),
+            "us_schedule_end": _coerce_hhmm(self.us_schedule_end, "06:00"),
             "notification_mode": self.notification_mode,
             "us_roll_kakera": self.us_roll_kakera.to_dict(),
             "character_claim": self.character_claim.to_dict(),

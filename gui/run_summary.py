@@ -101,7 +101,10 @@ def _claims_from_activity(activity_log: list[Any]) -> tuple[int, dict[str, str] 
 def build_run_summary(
     state: Any,
     session_started_at: dt.datetime | None,
+    *,
+    kakera_rules: Any = None,
 ) -> dict[str, Any]:
+    from macro.perk8_power import power_save_status
     from mudae.kakera_log import get_kakera_events
     from mudae.key_log import get_key_events
     from mudae.sphere_log import get_sphere_events
@@ -147,4 +150,5 @@ def build_run_summary(
             "perk9_spheres": int(getattr(state, "perk9_clicks_today", 0) or 0),
         },
         "last_claim": last_claim,
+        "power_save": power_save_status(state, kakera_rules),
     }

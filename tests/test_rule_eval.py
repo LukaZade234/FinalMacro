@@ -63,6 +63,8 @@ def test_round_trip_preserves_all_blocks():
     assert restored.kakera_reaction.low_power.below_percent == 25
     assert restored.kakera_reaction.low_power.types_allowed == ["kakeraR"]
     assert restored.kakera_reaction.perk_8_budget_mode is True
+    assert restored.kakera_reaction.perk_8_power_save is True
+    assert restored.kakera_reaction.perk_8_power_window_hours == 4.0
     assert restored.kakera_reaction.perk_8_budget_bypass_types == ["kakeraP"]
     assert restored.kakera_reaction.require_chaos_key_bypass_types == ["kakeraP"]
     assert restored.sphere_reaction.types_allowed == ["spY", "spB"]

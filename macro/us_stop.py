@@ -1,13 +1,18 @@
-"""Runtime stop conditions for ``$us`` roll mode."""
+"""Runtime stop / pause conditions for ``$us`` roll mode."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-from macro.config import KakeraReactionRules
+from macro.config import KakeraReactionRules, MacroConfig
 from macro.dk_manager import has_dk_available
 from macro.perk8_daily import perk8_budget_applies
+from macro.perk8_power import (
+    dk_allowed_for_state,
+    power_save_enabled,
+    remaining_perk8_clicks,
+)
 from macro.reaction_power import (
     KAKERA_FREE_REACT_EMOJIS,
     can_afford_reaction,
@@ -15,32 +20,96 @@ from macro.reaction_power import (
     refresh_reaction_power,
 )
 from macro.rule_eval import perk8_click_budget, perk8_mode_from_state
+from macro.us_schedule import normalize_hhmm
+
+
+_POWER_EXHAUSTED_PREFIX = "reaction power exhausted"
+
+
+def _clamp_stop_after_rolls(value: Any, default: int = 100) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
 class UsModeStopOptions:
     """User-selected limits applied when starting ``$us`` roll mode."""
 
+    keep_draining: bool = False
     stop_on_power_exhausted: bool = False
     stop_after_rolls_enabled: bool = False
     stop_after_rolls: int = 100
+    schedule_enabled: bool = False
+    schedule_start: str = "04:00"
+    schedule_end: str = "06:00"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> UsModeStopOptions:
         if not data:
             return cls()
         return cls(
+            keep_draining=bool(data.get("keep_draining", False)),
             stop_on_power_exhausted=bool(data.get("stop_on_power_exhausted", False)),
             stop_after_rolls_enabled=bool(data.get("stop_after_rolls_enabled", False)),
-            stop_after_rolls=max(1, int(data.get("stop_after_rolls", 100))),
+            stop_after_rolls=_clamp_stop_after_rolls(data.get("stop_after_rolls", 100)),
+            schedule_enabled=bool(data.get("schedule_enabled", False)),
+            schedule_start=normalize_hhmm(data.get("schedule_start"), "04:00"),
+            schedule_end=normalize_hhmm(data.get("schedule_end"), "06:00"),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "keep_draining": self.keep_draining,
             "stop_on_power_exhausted": self.stop_on_power_exhausted,
             "stop_after_rolls_enabled": self.stop_after_rolls_enabled,
             "stop_after_rolls": max(1, int(self.stop_after_rolls)),
+            "schedule_enabled": self.schedule_enabled,
+            "schedule_start": normalize_hhmm(self.schedule_start, "04:00"),
+            "schedule_end": normalize_hhmm(self.schedule_end, "06:00"),
         }
+
+
+def us_stop_from_config(
+    config: MacroConfig,
+    *,
+    apply_schedule: bool = True,
+) -> UsModeStopOptions:
+    """Build session options from the preset ``$us`` drain policy.
+
+    ``apply_schedule=False`` is the Run-page Roll ``$us`` button: same stops,
+    but the local window is ignored so a later schedule does not delay it.
+    """
+    return UsModeStopOptions(
+        keep_draining=bool(config.us_keep_draining),
+        stop_on_power_exhausted=bool(config.us_stop_on_power_exhausted),
+        stop_after_rolls_enabled=bool(config.us_stop_after_rolls_enabled),
+        stop_after_rolls=max(1, int(config.us_stop_after_rolls)),
+        schedule_enabled=bool(config.us_schedule_enabled) if apply_schedule else False,
+        schedule_start=normalize_hhmm(config.us_schedule_start, "04:00"),
+        schedule_end=normalize_hhmm(config.us_schedule_end, "06:00"),
+    )
+
+
+def overlay_legacy_us_options(
+    stored: dict[str, Any],
+    legacy: UsModeStopOptions,
+) -> dict[str, Any]:
+    """Copy Classic app-global ``$us`` stops onto a preset that predates them."""
+    if "us_keep_draining" in stored or "us_stop_on_power_exhausted" in stored:
+        return stored
+    out = dict(stored)
+    out["us_keep_draining"] = False
+    out["us_stop_on_power_exhausted"] = legacy.stop_on_power_exhausted
+    out["us_stop_after_rolls_enabled"] = legacy.stop_after_rolls_enabled
+    out["us_stop_after_rolls"] = legacy.stop_after_rolls
+    return out
+
+
+def us_stop_can_pause(reason: str | None) -> bool:
+    """True when keep-draining should wait instead of quitting."""
+    return bool(reason) and reason.startswith(_POWER_EXHAUSTED_PREFIX)
 
 
 def _perk8_half_cost_applies(state: Any, rules: KakeraReactionRules) -> bool:
@@ -93,7 +162,13 @@ def us_kakera_power_exhausted(state: Any, rules: KakeraReactionRules) -> bool:
         return False
 
     if rules.auto_use_dk and has_dk_available(state):
-        return False
+        held_for_tomorrow = (
+            power_save_enabled(rules)
+            and remaining_perk8_clicks(state) <= 0
+            and not dk_allowed_for_state(state, rules, perk8=False)
+        )
+        if not held_for_tomorrow:
+            return False
 
     min_cost = _minimum_kakera_cost(state, rules)
     if min_cost <= 0:

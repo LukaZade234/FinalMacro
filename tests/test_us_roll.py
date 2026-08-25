@@ -10,6 +10,7 @@ from unittest.mock import patch
 from macro.config import CharacterClaimRules, KakeraReactionRules, MacroConfig, UsRollKakeraRules
 from macro.roll_cycle import RollCycleEngine
 from macro.state import AccountState
+from macro.us_stop import UsModeStopOptions
 from mudae.types import MessageKind, ParseResult
 
 
@@ -99,13 +100,14 @@ class _FakeActions:
         return [c for c, _ in self.sent if c == "wa"]
 
 
-def _make_engine(actions: _FakeActions) -> tuple[RollCycleEngine, AccountState]:
+def _make_engine(actions: _FakeActions, **config_kw) -> tuple[RollCycleEngine, AccountState]:
     # Disable claiming/reactions so the loop is isolated from action side effects.
     config = MacroConfig(
         roll_command="wa",
         roll_delay_sec=0.6,
         us_reset_margin_minutes=2,
         character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+        **config_kw,
     )
     state = AccountState()
     monitor = SimpleNamespace(macro_active=False)
@@ -669,3 +671,142 @@ def test_us_kakera_perk_8_character_uses_base_perk_8_colors():
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
     assert decision.buttons[0].emoji == "kakeraT"
+
+
+def test_us_mode_does_not_add_when_power_exhausted():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30)],
+        roll_script=[],
+        stack_script=[_us_stack(20)],
+    )
+    engine, state = _make_engine(
+        actions,
+        kakera_reaction=KakeraReactionRules(enabled=True, auto_use_dk=True),
+    )
+    state.power_percent = 0.0
+    state.dk_stock = 0
+    engine._us_stop = UsModeStopOptions(stop_on_power_exhausted=True)
+
+    _run_us(engine)
+
+    assert actions.us_adds() == []
+    assert len(actions.roll_commands()) == 0
+    assert any("stopping" in entry.text for entry in state.activity_log)
+
+
+def test_us_mode_keep_draining_resumes_after_power():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30), _tu(0, 30, us_bonus=5)],
+        roll_script=[_roll(i) for i in range(1, 6)],
+        stack_script=[_us_stack(5)],
+    )
+    engine, state = _make_engine(
+        actions,
+        kakera_reaction=KakeraReactionRules(enabled=True, auto_use_dk=True),
+    )
+    state.power_percent = 0.0
+    state.dk_stock = 0
+    engine._us_stop = UsModeStopOptions(
+        keep_draining=True,
+        stop_on_power_exhausted=True,
+    )
+
+    async def _recover() -> bool:
+        state.power_percent = 80.0
+        return True
+
+    engine._wait_for_us_power = _recover  # type: ignore[method-assign]
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 5"]
+    assert len(actions.roll_commands()) == 5
+    assert any("pausing" in entry.text for entry in state.activity_log)
+
+
+def test_us_mode_keep_draining_roll_cap_still_stops():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=20)],
+        roll_script=[_roll(i) for i in range(1, 21)],
+        stack_script=[_us_stack(20)],
+    )
+    engine, state = _make_engine(actions)
+    engine._us_stop = UsModeStopOptions(
+        keep_draining=True,
+        stop_after_rolls_enabled=True,
+        stop_after_rolls=2,
+    )
+
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 20"]
+    assert len(actions.roll_commands()) == 2
+    assert any("roll limit" in entry.text for entry in state.activity_log)
+
+
+def test_us_mode_schedule_stops_after_window_without_adding():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30)],
+        roll_script=[],
+        stack_script=[_us_stack(20)],
+    )
+    engine, state = _make_engine(actions)
+    engine._us_stop = UsModeStopOptions(
+        schedule_enabled=True,
+        schedule_start="04:00",
+        schedule_end="06:00",
+    )
+    engine._us_schedule_entered = True
+    engine._us_in_schedule_window = lambda: False  # type: ignore[method-assign]
+
+    _run_us(engine)
+
+    assert actions.us_adds() == []
+    assert any("schedule window ended" in entry.text for entry in state.activity_log)
+
+
+def test_us_mode_schedule_waits_then_adds():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30), _tu(0, 30, us_bonus=5)],
+        roll_script=[_roll(i) for i in range(1, 6)],
+        stack_script=[_us_stack(5)],
+    )
+    engine, state = _make_engine(actions)
+    engine._us_stop = UsModeStopOptions(
+        schedule_enabled=True,
+        schedule_start="04:00",
+        schedule_end="06:00",
+    )
+    inside = {"on": False}
+    engine._us_in_schedule_window = lambda: inside["on"]  # type: ignore[method-assign]
+
+    async def _open_window() -> bool:
+        inside["on"] = True
+        engine._us_schedule_entered = True
+        return True
+
+    engine._wait_for_us_schedule_window = _open_window  # type: ignore[method-assign]
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 5"]
+    assert len(actions.roll_commands()) == 5
+
+
+def test_us_mode_manual_ignores_closed_schedule_window():
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30), _tu(0, 30, us_bonus=5)],
+        roll_script=[_roll(i) for i in range(1, 6)],
+        stack_script=[_us_stack(5)],
+    )
+    engine, state = _make_engine(actions)
+    engine._us_stop = UsModeStopOptions(
+        schedule_enabled=False,
+        schedule_start="04:00",
+        schedule_end="06:00",
+    )
+    engine._us_in_schedule_window = lambda: False  # type: ignore[method-assign]
+
+    _run_us(engine)
+
+    assert actions.us_adds() == ["us 5"]
+    assert len(actions.roll_commands()) == 5
+    assert not any("schedule window" in entry.text for entry in state.activity_log)

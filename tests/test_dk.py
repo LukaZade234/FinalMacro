@@ -112,3 +112,11 @@ def test_kakera_rules_auto_use_dk_default_off():
     assert rules.auto_use_dk is False
     restored = KakeraReactionRules.from_dict({"auto_use_dk": True})
     assert restored.auto_use_dk is True
+
+
+def test_kakera_rules_power_save_defaults_on():
+    rules = KakeraReactionRules.from_dict({})
+    assert rules.perk_8_power_save is True
+    assert rules.perk_8_power_window_hours == 4.0
+    off = KakeraReactionRules.from_dict({"perk_8_power_save": False})
+    assert off.perk_8_power_save is False

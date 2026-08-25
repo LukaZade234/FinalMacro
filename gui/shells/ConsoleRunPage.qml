@@ -462,6 +462,23 @@ Item {
 
                     Rectangle {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: run.powerSaveOn ? 1 : 0
+                        Layout.maximumHeight: run.powerSaveOn ? 1 : 0
+                        visible: run.powerSaveOn
+                        color: Theme.line
+                    }
+
+                    ConsoleRailBlock {
+                        Layout.fillWidth: true
+                        visible: run.powerSaveOn
+                        Layout.preferredHeight: run.powerSaveOn ? implicitHeight : 0
+                        Layout.maximumHeight: run.powerSaveOn ? 400 : 0
+                        title: "smart saver"
+                        rows: run.powerSaveRows
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
                         Layout.preferredHeight: 1
                         color: Theme.line
                     }
@@ -521,50 +538,50 @@ Item {
                 ConsoleButton {
                     text: "Start hourly"
                     variant: "go"
-                    enabled: run.connected && !run.macroRunning
+                    enabled: run.canStartHourly
                     onClicked: App.startMacro()
                 }
 
                 ConsoleButton {
                     text: "Roll $us"
-                    enabled: run.connected && !run.macroRunning
+                    enabled: run.canStartUs
                     onClicked: App.startUsMode()
                 }
 
                 ConsoleButton {
                     text: "$tu"
-                    enabled: run.connected
+                    enabled: run.canCheck
                     onClicked: App.runTu()
                 }
 
                 ConsoleButton {
                     text: "$us"
-                    enabled: run.connected
+                    enabled: run.canCheck
                     onClicked: App.runUsCheck()
                 }
 
                 ConsoleButton {
                     text: "$oh"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOhSphere()
                 }
 
                 ConsoleButton {
                     text: "$oc"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOcSphere()
                 }
 
                 ConsoleButton {
                     text: "$oq"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOqSphere()
                 }
 
                 ConsoleButton {
                     text: "Play all"
                     variant: "go"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playAllMinigames()
                 }
             }

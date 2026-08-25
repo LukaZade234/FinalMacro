@@ -52,6 +52,8 @@ class AccountState:
     perk9_clicks_today: int = 0
     perk9_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
     perk9_click_max: int = PERK9_CLICK_MAX_DEFAULT
+    kakera_base_cost: float = 30.0
+    dk_cooldown_minutes: int = 20 * 60
 
     def to_dict(self) -> dict[str, Any]:
         return {

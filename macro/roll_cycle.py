@@ -29,7 +29,19 @@ from macro.runtime_store import (
     save_runtime_record,
     snapshot_from_state,
 )
-from macro.us_stop import UsModeStopOptions, us_stop_reason, _minimum_kakera_cost
+from macro.us_schedule import (
+    in_local_window,
+    seconds_until_window_end,
+    seconds_until_window_start,
+)
+from macro.us_stop import (
+    UsModeStopOptions,
+    us_kakera_power_exhausted,
+    us_stop_can_pause,
+    us_stop_from_config,
+    us_stop_reason,
+    _minimum_kakera_cost,
+)
 from mudae.discord_errors import is_fatal_runtime_error
 from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
 from macro.kakera_reactor import KakeraReactor
@@ -118,6 +130,10 @@ class RollCycleEngine:
         self._roll_stop = RollStopTracker()
         self._us_stop = UsModeStopOptions()
         self._us_rolls_done = 0
+        self._us_schedule_entered = False
+        self._us_schedule_wait_logged = False
+        self._us_halt_reason: str | None = None
+        self._waiting_for_hourly_refill = False
         self._activity = ActivityLog(self._state, on_update=self._notify)
         self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
@@ -407,6 +423,22 @@ class RollCycleEngine:
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    @property
+    def running_mode(self) -> str | None:
+        """``hourly``, ``us``, or ``None`` when the engine is idle."""
+        if not self.is_running or self._task is None:
+            return None
+        name = self._task.get_name()
+        if name == "us-roll-cycle":
+            return "us"
+        if name == "roll-cycle":
+            return "hourly"
+        return None
+
+    @property
+    def waiting_for_hourly_refill(self) -> bool:
+        return bool(self._waiting_for_hourly_refill)
+
     def update_config(self, config: MacroConfig) -> None:
         # Copy so live preset edits always replace the running snapshot.
         self._config = MacroConfig.from_dict(config.to_dict())
@@ -522,8 +554,11 @@ class RollCycleEngine:
             return
         if session_meta:
             self.begin_session("us", session_meta)
-        self._us_stop = us_stop or UsModeStopOptions()
+        self._us_stop = us_stop or us_stop_from_config(self._config)
         self._us_rolls_done = 0
+        self._us_schedule_entered = False
+        self._us_schedule_wait_logged = False
+        self._us_halt_reason = None
         self._stop.clear()
         self._task = asyncio.create_task(self._run_us_cycle(), name="us-roll-cycle")
 
@@ -1159,6 +1194,55 @@ class RollCycleEngine:
             us_rolls_done=self._us_rolls_done,
         )
 
+    def _us_in_schedule_window(self) -> bool:
+        if not self._us_stop.schedule_enabled:
+            return True
+        return in_local_window(
+            self._us_stop.schedule_start,
+            self._us_stop.schedule_end,
+        )
+
+    def _us_schedule_phase(self) -> str | None:
+        """``None`` to spend ``$us``, ``wait`` until the window, or ``stop``."""
+        if not self._us_stop.schedule_enabled:
+            return None
+        if self._us_in_schedule_window():
+            self._us_schedule_entered = True
+            return None
+        if self._us_schedule_entered:
+            return "stop"
+        return "wait"
+
+    def _us_halt_kind(self) -> str | None:
+        """``None``, ``"pause"``, or ``"stop"`` for the current ``$us`` limits."""
+        if self._us_schedule_phase() == "stop":
+            self._us_halt_reason = "schedule window ended"
+            return "stop"
+        reason = self._check_us_stop()
+        self._us_halt_reason = reason
+        if not reason:
+            return None
+        if self._us_stop.keep_draining and us_stop_can_pause(reason):
+            return "pause"
+        return "stop"
+
+    def _log_us_halt(self, kind: str) -> None:
+        reason = self._us_halt_reason or self._check_us_stop() or "limit"
+        if kind == "pause":
+            self._log(f"$us mode: pausing — {reason}")
+        else:
+            self._log(f"$us mode: stopping — {reason}")
+
+    async def _apply_us_halt(self, halt: str | None) -> str:
+        """Turn a halt into ``""``, ``"break"``, or ``"continue"`` for the ``$us`` loop."""
+        if halt == "pause":
+            if not await self._wait_for_us_power():
+                return "break"
+            return "continue"
+        if halt == "stop":
+            return "break"
+        return ""
+
     async def _run_normal_roll_segment(
         self,
         cmd: str,
@@ -1256,6 +1340,7 @@ class RollCycleEngine:
             claimed_any = False
             roll_index = 0
             self._us_rolls_done = 0
+            self._us_schedule_wait_logged = False
 
             # Track the stack locally so steady state can be "$us N -> roll" once the
             # pool size is known, using Mudae's tick reaction to skip extra $tu polls.
@@ -1271,17 +1356,26 @@ class RollCycleEngine:
                     self._log("Using saved $tu state — skipping initial $tu")
 
             stop_bits: list[str] = []
+            if self._us_stop.keep_draining:
+                stop_bits.append("keep draining (pause on power / reset)")
             if self._us_stop.stop_on_power_exhausted:
                 rules = self._config.kakera_rules_for_roll(us_roll=True)
-                min_cost = _minimum_kakera_cost(self._state, rules)
-                if min_cost > 0:
-                    stop_bits.append(f"power < {min_cost:g}%")
-                else:
-                    stop_bits.append("power (paid kakera only)")
+                if rules.enabled:
+                    min_cost = _minimum_kakera_cost(self._state, rules)
+                    verb = "pause" if self._us_stop.keep_draining else "stop"
+                    if min_cost > 0:
+                        stop_bits.append(f"{verb} when power < {min_cost:g}%")
+                    else:
+                        stop_bits.append(f"{verb} on power (paid kakera only)")
             if self._us_stop.stop_after_rolls_enabled:
-                stop_bits.append(f"after {self._us_stop.stop_after_rolls} rolls")
+                stop_bits.append(f"stop after {self._us_stop.stop_after_rolls} rolls")
+            if self._us_stop.schedule_enabled:
+                stop_bits.append(
+                    f"local window {self._us_stop.schedule_start}–"
+                    f"{self._us_stop.schedule_end}"
+                )
             if stop_bits:
-                self._log(f"$us mode: stop when {' · '.join(stop_bits)}")
+                self._log(f"$us mode: {' · '.join(stop_bits)}")
             self._log("$us mode: starting")
 
             await self._refresh_perk8_status(at_startup=True)
@@ -1350,16 +1444,17 @@ class RollCycleEngine:
                                         break
                                     continue
                             if us_bonus > 0:
-                                done, claimed, us_stopped = await self._roll_us_batch(
+                                done, claimed, halt = await self._roll_us_batch(
                                     cmd,
                                     us_bonus,
                                     session_records,
                                     roll_index,
                                     us_roll=True,
+                                    respect_us_stop=False,
                                 )
                                 roll_index += done
                                 claimed_any = claimed_any or claimed
-                                if us_stopped:
+                                if halt == "stop":
                                     break
                                 keep, roll_timeouts = await self._handle_us_roll_timeout(
                                     done, us_bonus, roll_timeouts
@@ -1419,12 +1514,24 @@ class RollCycleEngine:
                         continue
 
                     if us_bonus > 0:
+                        schedule_phase = self._us_schedule_phase()
+                        if schedule_phase == "stop":
+                            self._log(
+                                "$us mode: stopping — schedule window ended "
+                                "(leftover $us left on the stack)"
+                            )
+                            break
+                        if schedule_phase == "wait":
+                            if not await self._wait_for_us_schedule_window():
+                                break
+                            skip_tu = False
+                            continue
                         if last_request > 0 and us_stack is not None:
                             us_stack -= last_request
                         last_request = 0
                         failed_adds = 0
 
-                        done, claimed, us_stopped = await self._roll_us_batch(
+                        done, claimed, halt = await self._roll_us_batch(
                             cmd,
                             us_bonus,
                             session_records,
@@ -1433,8 +1540,13 @@ class RollCycleEngine:
                         )
                         roll_index += done
                         claimed_any = claimed_any or claimed
-                        if us_stopped:
-                            break
+                        if halt:
+                            self._log_us_halt(halt)
+                            action = await self._apply_us_halt(halt)
+                            if action == "break":
+                                break
+                            skip_tu = False
+                            continue
                         keep, roll_timeouts = await self._handle_us_roll_timeout(
                             done, us_bonus, roll_timeouts
                         )
@@ -1456,6 +1568,26 @@ class RollCycleEngine:
                         continue
 
                     # Usable pool is empty — add more from the $us stack.
+                    schedule_phase = self._us_schedule_phase()
+                    if schedule_phase == "stop":
+                        self._log(
+                            "$us mode: stopping — schedule window ended "
+                            "(leftover $us left on the stack)"
+                        )
+                        break
+                    if schedule_phase == "wait":
+                        if not await self._wait_for_us_schedule_window():
+                            break
+                        skip_tu = False
+                        continue
+                    halt = self._us_halt_kind()
+                    if halt:
+                        self._log_us_halt(halt)
+                        action = await self._apply_us_halt(halt)
+                        if action == "break":
+                            break
+                        skip_tu = False
+                        continue
                     if (
                         us_stack is not None
                         and us_stack >= 1
@@ -1679,6 +1811,89 @@ class RollCycleEngine:
                 return True
         return False
 
+    async def _wait_for_us_power(self) -> bool:
+        """Pause until paid kakera is affordable again (regen or usable ``$dk``).
+
+        Returns False if the user stops the macro or ``$tu`` fails repeatedly.
+        Daily minigames / perk-8 refresh still run through ``_wait_for_scheduled_wake``.
+        """
+        rules = self._config.kakera_rules_for_roll(us_roll=True)
+        if not us_kakera_power_exhausted(self._state, rules):
+            return True
+        poll_sec = _RESET_POLL_SEC
+        tu_every = 3
+        polls = 0
+        self._log("$us mode: waiting for reaction power or usable $dk")
+        while not self._stop.is_set():
+            if (
+                self._us_stop.schedule_enabled
+                and self._us_schedule_entered
+                and not self._us_in_schedule_window()
+            ):
+                self._log("$us mode: schedule window ended while waiting for power")
+                return False
+            slice_sec = poll_sec
+            until_end = None
+            if self._us_stop.schedule_enabled:
+                until_end = seconds_until_window_end(
+                    self._us_stop.schedule_start,
+                    self._us_stop.schedule_end,
+                )
+                if until_end is not None:
+                    slice_sec = min(slice_sec, max(1.0, until_end))
+            if not await self._wait_for_scheduled_wake(slice_sec):
+                return False
+            await self._maybe_refresh_perk8_status()
+            polls += 1
+            if polls % tu_every == 0:
+                if not await self.run_tu():
+                    self._log("$us mode: $tu failed while waiting for power")
+                    return False
+            if not us_kakera_power_exhausted(self._state, rules):
+                self._log("$us mode: reaction power recovered — resuming")
+                return True
+        return False
+
+    async def _wait_for_us_schedule_window(self) -> bool:
+        """Pause until the local ``$us`` window. Hourly rolls still get a turn.
+
+        Returns False if the user stops or ``$tu`` fails. Returns True when the
+        window is open *or* leftover hourly rolls / an imminent reset should
+        run first (the caller continues the main loop).
+        """
+        start = self._us_stop.schedule_start
+        end = self._us_stop.schedule_end
+        if not self._us_schedule_wait_logged:
+            self._log(
+                f"$us mode: waiting until {start} local (window ends {end}) — "
+                "hourly rolls still run"
+            )
+            self._us_schedule_wait_logged = True
+        while not self._stop.is_set():
+            if self._us_in_schedule_window():
+                self._us_schedule_entered = True
+                self._log(f"$us mode: {start}–{end} local — starting $us")
+                return True
+            if (self._state.rolls_left or 0) > 0:
+                return True
+            margin = max(0, self._config.us_reset_margin_minutes)
+            reset_m = self._state.rolls_reset_minutes
+            if reset_m is not None and reset_m <= margin:
+                return True
+            wait_for = seconds_until_window_start(start, end)
+            if reset_m is not None:
+                until_reset = seconds_until_rolls_reset(reset_m)
+                if until_reset > 0:
+                    wait_for = min(wait_for, until_reset)
+            wait_for = max(1.0, wait_for)
+            if not await self._wait_for_scheduled_wake(wait_for):
+                return False
+            await self._maybe_refresh_perk8_status()
+            if not await self.run_tu():
+                self._log("$us mode: $tu failed while waiting for schedule")
+                return False
+        return False
+
     async def _wait_for_hourly_refill(self) -> bool:
         """Wait until the parsed rolls-reset time, then confirm with ``$tu``."""
         if self._state.rolls_reset_minutes is None:
@@ -1698,7 +1913,14 @@ class RollCycleEngine:
             self._log(
                 f"No rolls remaining — waiting {reset_m}m until hourly refill"
             )
-            if not await self._wait_for_scheduled_wake(self._seconds_until_rolls_reset()):
+            self._waiting_for_hourly_refill = True
+            try:
+                woke = await self._wait_for_scheduled_wake(
+                    self._seconds_until_rolls_reset()
+                )
+            finally:
+                self._waiting_for_hourly_refill = False
+            if not woke:
                 return False
 
             if not await self._restore_connection_for_notifications():
@@ -1748,15 +1970,22 @@ class RollCycleEngine:
         start_index: int,
         *,
         us_roll: bool = True,
-    ) -> tuple[int, bool, bool]:
-        """Roll ``count`` times. Returns ``(rolls_done, claimed_any, stopped_early)``.
+        respect_us_stop: bool = True,
+    ) -> tuple[int, bool, str | None]:
+        """Roll ``count`` times. Returns ``(rolls_done, claimed_any, halt)``.
 
-        Unlike the normal cycle, an interrupt claim does not end the run — the
-        claim is consumed but mass rolling continues so the whole ``$us`` pool
-        is used unless a user stop limit triggers.
+        ``halt`` is ``None``, ``"stop"``, or ``"pause"``. Unlike the normal
+        cycle, an interrupt claim does not end the run — the claim is consumed
+        but mass rolling continues so the whole ``$us`` pool is used unless a
+        user stop limit triggers. Reset-imminent leftover rolls pass
+        ``respect_us_stop=False`` so a power pause cannot sit through the wipe.
         """
         claimed_any = False
         done = 0
+        if respect_us_stop and us_roll and count > 0:
+            halt = self._us_halt_kind()
+            if halt:
+                return 0, False, halt
         for _ in range(count):
             if self._stop.is_set():
                 break
@@ -1773,14 +2002,14 @@ class RollCycleEngine:
             done += 1
             if us_roll:
                 self._us_rolls_done += 1
-                reason = self._check_us_stop()
-                if reason:
-                    self._log(f"$us mode: stopping — {reason}")
-                    return done, claimed_any, True
+                if respect_us_stop:
+                    halt = self._us_halt_kind()
+                    if halt:
+                        return done, claimed_any, halt
             if outcome.claimed:
                 claimed_any = True
             await asyncio.sleep(self._config.roll_delay())
-        return done, claimed_any, False
+        return done, claimed_any, None
 
     def apply_settings_fields(self, fields: dict[str, Any]) -> None:
         """Update claim timer from parsed $settings (``settimer``)."""

@@ -98,13 +98,13 @@ Item {
                 HaulButton {
                     text: "Start hourly"
                     variant: "hourly"
-                    enabled: run.connected && !run.macroRunning
+                    enabled: run.canStartHourly
                     onClicked: App.startMacro()
                 }
 
                 HaulButton {
                     text: "Roll $us"
-                    enabled: run.connected && !run.macroRunning
+                    enabled: run.canStartUs
                     onClicked: App.startUsMode()
                 }
 
@@ -114,13 +114,13 @@ Item {
 
                 HaulButton {
                     text: "$tu"
-                    enabled: run.connected
+                    enabled: run.canCheck
                     onClicked: App.runTu()
                 }
 
                 HaulButton {
                     text: "$us"
-                    enabled: run.connected
+                    enabled: run.canCheck
                     onClicked: App.runUsCheck()
                 }
 
@@ -130,23 +130,23 @@ Item {
 
                 HaulButton {
                     text: "$oh"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOhSphere()
                 }
                 HaulButton {
                     text: "$oc"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOcSphere()
                 }
                 HaulButton {
                     text: "$oq"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOqSphere()
                 }
                 HaulButton {
                     text: "Play all"
                     variant: "go"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playAllMinigames()
                 }
             }
@@ -595,6 +595,67 @@ Item {
                         color: Theme.mute
                         font.family: Theme.monoFamily
                         font.pixelSize: Theme.sizeSmall
+                    }
+                }
+
+                // smart saver
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: run.powerSaveOn
+                    Layout.preferredHeight: run.powerSaveOn ? (saverCol.implicitHeight + 26) : 0
+                    Layout.maximumHeight: run.powerSaveOn ? 400 : 0
+                    radius: Theme.radiusLg
+                    color: Theme.surface
+                    border.width: 1
+                    border.color: Theme.line
+
+                    Column {
+                        id: saverCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 15
+                        anchors.rightMargin: 15
+                        anchors.topMargin: 13
+                        spacing: 0
+
+                        Text {
+                            text: Theme.sectionLabel("Smart saver")
+                            color: Theme.mute
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.sizeMicro
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: Theme.tracking(Theme.sizeMicro)
+                            bottomPadding: 7
+                        }
+
+                        Repeater {
+                            model: run.powerSaveRows
+                            delegate: Item {
+                                required property var modelData
+                                width: saverCol.width
+                                height: 22
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: Theme.dim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.sizeBody
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.value
+                                    color: modelData.tone === "accent" ? Theme.accent
+                                        : (modelData.tone === "good" ? Theme.good : Theme.fg)
+                                    font.family: Theme.monoFamily
+                                    font.pixelSize: Theme.sizeBody
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                        }
                     }
                 }
 

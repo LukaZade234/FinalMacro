@@ -8,7 +8,7 @@ these decisions and is responsible for actually clicking buttons.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from macro.config import (
@@ -22,6 +22,14 @@ from macro.perk8_daily import (
     perk8_budget_applies,
     perk8_requirements_relaxed,
 )
+from macro.perk8_power import (
+    power_save_enabled,
+    remaining_perk8_clicks,
+    seconds_until_midnight,
+    should_spend_paid_non_perk8,
+    snapshot_from_state,
+    window_sec_from_rules,
+)
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
@@ -30,6 +38,7 @@ from macro.reaction_power import (
 )
 from macro.rt_manager import has_rt_available
 from macro.state import AccountState
+from mudae.clock import utc_now
 from mudae.constants import (
     SPHERE_ROLL_DEFAULT_EMOJI,
     SPHERE_ROLL_DEFAULT_FILTER_IDS,
@@ -220,6 +229,7 @@ def passes_kakera_reaction(
     state: AccountState,
     *,
     message_id: int | None = None,
+    now: Any = None,
 ) -> ReactionDecision:
     """Which kakera buttons (if any) should be clicked on a roll?"""
     if not rules.enabled:
@@ -316,6 +326,17 @@ def passes_kakera_reaction(
                     reason="daily kakera budget exhausted (perk-8 only)"
                 )
 
+    if power_save_enabled(rules):
+        selected = _filter_perk8_power_reserve(
+            selected,
+            fields,
+            rules,
+            state,
+            now=now,
+        )
+        if not selected:
+            return ReactionDecision(reason="reserving power for perk-8 burst")
+
     choices = [_make_button_choice(message_id, b) for b in selected]
     reason_parts = [f"{len(choices)} kakera"]
     if using_low_power:
@@ -346,6 +367,47 @@ def perk8_mode_from_state(state: AccountState) -> Perk8PriorityMode:
         return Perk8PriorityMode(state.perk8_priority_mode)
     except ValueError:
         return Perk8PriorityMode.INACTIVE
+
+
+def _filter_perk8_power_reserve(
+    selected: list[dict[str, Any]],
+    fields: dict[str, Any],
+    rules: KakeraReactionRules,
+    state: AccountState,
+    *,
+    now: Any = None,
+) -> list[dict[str, Any]]:
+    """Drop paid non-perk-8 buttons that would break the perk-8 power floor."""
+    if not selected or fields.get("perk_8"):
+        return selected
+
+    stamp = now if now is not None else utc_now()
+    remaining = remaining_perk8_clicks(state)
+    window_sec = window_sec_from_rules(rules)
+    until_midnight = seconds_until_midnight(stamp)
+    cap = perk8_click_budget(state, rules)
+    bar = snapshot_from_state(state, now=stamp)
+    kept: list[dict[str, Any]] = []
+    for button in selected:
+        cost = reaction_power_cost(
+            kakera_emoji=_kakera_emoji(button),
+            has_chaos_key=True,
+            has_perk_8=False,
+        )
+        if cost <= 0:
+            kept.append(button)
+            continue
+        if should_spend_paid_non_perk8(
+            bar,
+            cost=cost,
+            remaining=remaining,
+            window_sec=window_sec,
+            until_midnight_sec=until_midnight,
+            click_cap=cap,
+        ):
+            kept.append(button)
+            bar = replace(bar, power=max(0.0, float(bar.power) - float(cost)))
+    return kept
 
 
 def perk8_click_budget(state: AccountState, rules: KakeraReactionRules) -> int:

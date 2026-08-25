@@ -164,62 +164,6 @@ ColumnLayout {
         onClicked: bar.playUsClicked()
     }
 
-    ThemedCheckBox {
-        visible: bar.showActions
-        Layout.fillWidth: true
-        text: "Stop when out of paid-kakera power ($dk counted)"
-        textSize: 10
-        enabled: !bar.macroEngineRunning
-        checked: App.usStopOnPowerExhausted
-        onToggled: {
-            if (checked !== App.usStopOnPowerExhausted)
-                App.setUsStopOnPowerExhausted(checked)
-        }
-    }
-
-    RowLayout {
-        spacing: 6
-        Layout.fillWidth: true
-        visible: bar.showActions
-
-        ThemedCheckBox {
-            id: stopAfterRollsCheck
-            text: "Stop after"
-            textSize: 10
-            enabled: !bar.macroEngineRunning
-            checked: App.usStopAfterRollsEnabled
-            onToggled: {
-                if (checked !== App.usStopAfterRollsEnabled)
-                    App.setUsStopAfterRollsEnabled(checked)
-            }
-        }
-
-        ThemedSpinBox {
-            id: stopAfterRollsSpin
-            Layout.preferredWidth: 120
-            Layout.minimumWidth: 120
-            from: 1
-            to: 999999
-            stepSize: 10
-            enabled: !bar.macroEngineRunning && stopAfterRollsCheck.checked
-
-            Component.onCompleted: value = App.usStopAfterRolls
-
-            onValueModified: {
-                if (value !== App.usStopAfterRolls)
-                    App.setUsStopAfterRolls(value)
-            }
-        }
-
-        Label {
-            text: "rolls"
-            color: Theme.fgMuted
-            font.pixelSize: 10
-        }
-
-        Item { Layout.fillWidth: true }
-    }
-
     Label {
         visible: bar.showActions
         Layout.fillWidth: true
@@ -288,15 +232,5 @@ ColumnLayout {
         color: Theme.fgMuted
         font.pixelSize: 10
         wrapMode: Text.WordWrap
-    }
-
-    Connections {
-        target: App
-        function onUsModeOptionsChanged() {
-            if (!bar.showActions)
-                return
-            if (stopAfterRollsSpin.value !== App.usStopAfterRolls)
-                stopAfterRollsSpin.value = App.usStopAfterRolls
-        }
     }
 }

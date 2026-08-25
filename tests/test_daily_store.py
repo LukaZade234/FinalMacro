@@ -10,6 +10,7 @@ from macro.daily_store import (
 from macro.minigame_daily import MINIGAME_DAILY_KEY
 from macro.perk8_daily import PERK8_DAILY_KEY, Perk8DailyRecord, load_perk8_record, save_perk8_record
 from macro.perk9_daily import PERK9_DAILY_KEY
+from macro.us_schedule import US_SCHEDULE_KEY
 
 
 def test_legacy_flat_store_detected():
@@ -61,3 +62,4 @@ def test_save_strips_legacy_root_keys():
 def test_legacy_flat_store_detects_minigames_and_perk9():
     assert is_legacy_flat_daily_store({MINIGAME_DAILY_KEY: {"games": {}}}) is True
     assert is_legacy_flat_daily_store({PERK9_DAILY_KEY: {"clicks_exhausted": True}}) is True
+    assert is_legacy_flat_daily_store({US_SCHEDULE_KEY: {"consumed_id": "x"}}) is True

@@ -125,10 +125,9 @@ server bonuses).
 
 **Reaction power:** seeded from `$tu` / `$ku`. Base click costs 30% of the
 bar. A **chaos key** on the character halves the cost; **perk 8** halves it
-again. Power regenerates 1% every 3 minutes. `$dk` tops the bar back up
-(limited stock). The bar's maximum is `$bonus.kakera_max_power` on the run
-channel (`macro/sheet_caps.py`); **155** is the fallback before `$bonus` is
-fetched.
+again. Power regenerates 1% every 3 minutes. `$dk` snaps the bar to
+`$bonus.kakera_max_power` (fallback **155**). Most players have a **20h**
+`$dk` cooldown (`$bonus.dk_cooldown`; 10h only if the sheet says so).
 
 **Macro:** `KakeraReactionRules` filters by color, optional chaos-key /
 perk-8 / min-spheres gates, a low-power override list, and perk-8 daily
@@ -208,8 +207,19 @@ default 2) so a reset does not throw the stack away.
 
 **Macro:** a separate `$us` mode in `RollCycleEngine` that reads the stack,
 adds batches, then rolls them down. Kakera on `$us` rolls can follow the
-normal rules or a narrower override (`UsRollKakeraRules`). Stop options
-include power exhausted and “stop after N rolls”.
+normal rules or a narrower override (`UsRollKakeraRules`). Drain policy lives
+on the preset (Presets → `$us`), not the Run page:
+
+* **Keep draining** pauses on the hourly reset (and on power *if* that stop
+  is on) instead of quitting.
+* **Stop on power** is optional; `$dk` and perk-8 “held for tomorrow” count.
+* **Session roll cap** (e.g. 1000) is a hard stop.
+* **Local schedule** (`us_schedule_*`) is this computer’s clock, not UTC.
+  While connected it drains `$us` on its own, like `$p` / `$daily`. Roll `$us`
+  on the Run page always starts immediately and ignores the window. Auto
+  drain uses the session cap and other preset stops; leftover `$us` stays on
+  the stack when the end time hits. If hourly is waiting for a refill, the
+  schedule pauses it, drains `$us`, then resumes hourly.
 
 ---
 
@@ -241,10 +251,24 @@ chat `+N`, which includes bonuses. `$oq` hunt uses MIXED (`P(purple)+0.1×Gini`)
 ## Perk 8 (daily kakera budget)
 
 Perk 8 marks some characters and grants a **daily kakera-click budget**
-(40 clicks, `$ohu8`). The macro can enter **budget mode**: spend those
-clicks on perk-8 characters first, still allow free purple on everyone
-else, then treat all characters equally once the 40 are used or the roll
-pool is under 10.
+(40 clicks, `$ohu8`). The flag is consumed after the first roll of the day,
+so leftover clicks expire at **UTC midnight**. The macro can enter **budget
+mode**: spend those clicks on perk-8 characters first, still allow free
+purple on everyone else, then treat all characters equally once the 40 are
+used or the roll pool is under 10.
+
+**Power / `$dk` reserve** (`macro/perk8_power.py`) is optional on the perk-8
+budget panel. Off keeps the old click and `$dk` rules. On keeps enough bar
++ `$dk` that a full perk-8 dump is still payable in the first N hours
+**after UTC midnight** (the daily reset; default 4h). Unused perk-8 clicks
+expire at midnight, so they always get power and `$dk` first — that is not
+a separate setting. After 40/40, chaos kakera still click unless *this*
+spend would make the next day's post-reset burst fail; `$dk` on those
+reacts only if a new use is in hand by midnight (typical cooldown **20h**).
+Purple stays free. Costs assume a chaos key (7.5% perk-8, 15% normal).
+N hours is a capacity floor, not a cutoff — slow perk-8 keeps rolling
+until 40/40 or reset. The Run page shows the live saver state while the
+toggle is on.
 
 State is persisted on the **channel profile** (`daily_resets.perk8`) so a
 restart does not re-query until refill. Minigame uses (`daily_resets.minigames`)

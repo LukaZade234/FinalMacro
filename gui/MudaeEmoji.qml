@@ -8,6 +8,39 @@ import gui 1.0
 QtObject {
     readonly property string assetBase: String(Qt.resolvedUrl("assets/kakera/"))
 
+    readonly property var _filePixels: ({
+        "Kakera.png": [128, 127],
+        "KakeraP.png": [128, 128],
+        "KakeraT.png": [128, 128],
+        "KakeraG.png": [128, 128],
+        "KakeraY.png": [128, 128],
+        "KakeraO.png": [128, 128],
+        "KakeraR.png": [128, 128],
+        "KakeraW.png": [128, 127],
+        "KakeraL.png": [128, 127],
+        "KakeraD.webp": [65, 128],
+        "KakeraC.webp": [128, 128],
+        "BronzeSoulKey.webp": [128, 117],
+        "SilverSoulKey.webp": [128, 117],
+        "GoldSoulKey.webp": [128, 117],
+        "ChaosSoulKey.webp": [128, 117],
+        "OmegaSoulKey.webp": [96, 88],
+        "Starwish.webp": [96, 96],
+        "BKU.webp": [96, 96],
+        "SpR.webp": [128, 125],
+        "SpO.webp": [128, 125],
+        "SpY.webp": [128, 125],
+        "SpG.webp": [128, 125],
+        "SpB.webp": [128, 125],
+        "SpP.webp": [128, 125],
+        "SpL.webp": [128, 125],
+        "SpW.webp": [128, 125],
+        "SpU.webp": [128, 125],
+        "SpT.webp": [128, 125],
+        "SpD.webp": [128, 125],
+        "SpM.webp": [96, 93]
+    })
+
     readonly property var _kakeraFile: ({
         "kakera": "Kakera.png",
         "kakerap": "KakeraP.png",
@@ -80,6 +113,30 @@ QtObject {
         if (_markFile[id])
             return assetBase + _markFile[id]
         return sphereUrl(id)
+    }
+
+    function _fileForToken(id) {
+        if (_kakeraFile[id])
+            return _kakeraFile[id]
+        if (_keyFile[id])
+            return _keyFile[id]
+        if (_markFile[id])
+            return _markFile[id]
+        if (id === "sp")
+            return "SpR.webp"
+        if (id.indexOf("sp") === 0 && id.length >= 3)
+            return "Sp" + id.charAt(2).toUpperCase() + ".webp"
+        return ""
+    }
+
+    function _imgTag(url, name, px) {
+        var size = _filePixels[_fileForToken(_tokenId(name))]
+        var w = px
+        var h = px
+        if (size && size[1] > 0)
+            w = Math.max(1, Math.round(px * size[0] / size[1]))
+        return '<img src="' + url + '" width="' + w + '" height="' + h
+            + '" style="vertical-align:middle" />'
     }
 
     // Mix a semantic colour into primary text so highlights read as a tint,
@@ -188,9 +245,7 @@ QtObject {
         while (m !== null) {
             out += str.substring(last, m.index)
             var url = urlFor(m[1])
-            out += url
-                ? ('<img src="' + url + '" width="' + px + '" height="' + px + '" />')
-                : m[0]
+            out += url ? _imgTag(url, m[1], px) : m[0]
             last = m.index + m[0].length
             m = re.exec(str)
         }

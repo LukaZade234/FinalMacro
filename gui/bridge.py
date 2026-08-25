@@ -39,7 +39,11 @@ from macro.activity_log import ActivityLog, ActivitySeverity, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
 from macro.settings_apply import SettingsApplyRunner
-from macro.us_stop import UsModeStopOptions
+from macro.us_stop import (
+    UsModeStopOptions,
+    overlay_legacy_us_options,
+    us_stop_from_config,
+)
 from macro.sphere_game import OhSphereGame
 from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
@@ -231,6 +235,8 @@ class AppBridge(QObject):
         self._run_token: str = ""
         self._account_daily_lock: asyncio.Lock | None = None
         self._account_daily_runtime: Any = None
+        self._us_schedule_session_active = False
+        self._us_schedule_skip_hourly_resume = False
         self._session_started_at: datetime | None = None
         # Rebuilding the run summary walks the whole earning log, and the macro
         # notifies on every activity line, so the change signal is coalesced.
@@ -355,16 +361,20 @@ class AppBridge(QObject):
         return int(stock) if stock is not None else -1
 
     @Property(bool, constant=False, notify=usModeOptionsChanged)
+    def usKeepDraining(self) -> bool:
+        return bool(self._macro_config.us_keep_draining)
+
+    @Property(bool, constant=False, notify=usModeOptionsChanged)
     def usStopOnPowerExhausted(self) -> bool:
-        return self._us_mode_options.stop_on_power_exhausted
+        return bool(self._macro_config.us_stop_on_power_exhausted)
 
     @Property(bool, constant=False, notify=usModeOptionsChanged)
     def usStopAfterRollsEnabled(self) -> bool:
-        return self._us_mode_options.stop_after_rolls_enabled
+        return bool(self._macro_config.us_stop_after_rolls_enabled)
 
     @Property(int, constant=False, notify=usModeOptionsChanged)
     def usStopAfterRolls(self) -> int:
-        return self._us_mode_options.stop_after_rolls
+        return max(1, int(self._macro_config.us_stop_after_rolls))
 
     @Property(bool, constant=False, notify=minimizeToTrayChanged)
     def minimizeToTray(self) -> bool:
@@ -564,9 +574,34 @@ class AppBridge(QObject):
         self._macro_config = self._presets.active_preset()
 
         us_opts_raw = saved.get("us_mode_options")
-        self._us_mode_options = UsModeStopOptions.from_dict(
+        legacy_us = UsModeStopOptions.from_dict(
             us_opts_raw if isinstance(us_opts_raw, dict) else None
         )
+        raw_presets = saved.get("presets")
+        if not isinstance(raw_presets, dict):
+            raw_presets = {}
+        legacy_macro = saved.get("macro")
+        if not isinstance(legacy_macro, dict):
+            legacy_macro = {}
+        for preset_id, cfg in list(self._presets.presets.items()):
+            stored = raw_presets.get(preset_id)
+            if not isinstance(stored, dict):
+                stored = legacy_macro if preset_id == "default" else {}
+            merged = overlay_legacy_us_options(stored, legacy_us)
+            if merged is not stored:
+                data = cfg.to_dict()
+                data["us_keep_draining"] = bool(merged.get("us_keep_draining", False))
+                data["us_stop_on_power_exhausted"] = bool(
+                    merged.get("us_stop_on_power_exhausted", False)
+                )
+                data["us_stop_after_rolls_enabled"] = bool(
+                    merged.get("us_stop_after_rolls_enabled", False)
+                )
+                data["us_stop_after_rolls"] = max(
+                    1, int(merged.get("us_stop_after_rolls", 100) or 100)
+                )
+                self._presets.presets[preset_id] = MacroConfig.from_dict(data)
+        self._macro_config = self._presets.active_preset()
         # NOTE: save_app_settings() flattens every fragment into the top-level
         # dict (the kwarg name is just a label), so these are read from ``saved``
         # directly rather than a nested "run_ui" key.
@@ -679,6 +714,7 @@ class AppBridge(QObject):
         self._config_emit_pending = False
         self.configChanged.emit()
         self.serversChanged.emit()
+        self.usModeOptionsChanged.emit()
 
     def _sync_engine_config(self) -> None:
         """Reload the active run-target preset and push it to a live engine."""
@@ -1120,6 +1156,17 @@ class AppBridge(QObject):
                 "us_mode": {
                     "us_batch_size": data["us_batch_size"],
                     "us_reset_margin_minutes": data["us_reset_margin_minutes"],
+                    "us_keep_draining": data.get("us_keep_draining", False),
+                    "us_stop_on_power_exhausted": data.get(
+                        "us_stop_on_power_exhausted", False
+                    ),
+                    "us_stop_after_rolls_enabled": data.get(
+                        "us_stop_after_rolls_enabled", False
+                    ),
+                    "us_stop_after_rolls": data.get("us_stop_after_rolls", 100),
+                    "us_schedule_enabled": data.get("us_schedule_enabled", False),
+                    "us_schedule_start": data.get("us_schedule_start", "04:00"),
+                    "us_schedule_end": data.get("us_schedule_end", "06:00"),
                 },
                 "expert": {
                     "claim_expire_sec": data["claim_expire_sec"],
@@ -1159,7 +1206,17 @@ class AppBridge(QObject):
 
         us_mode_patch = patch.get("us_mode")
         if isinstance(us_mode_patch, dict):
-            for key in ("us_batch_size", "us_reset_margin_minutes"):
+            for key in (
+                "us_batch_size",
+                "us_reset_margin_minutes",
+                "us_keep_draining",
+                "us_stop_on_power_exhausted",
+                "us_stop_after_rolls_enabled",
+                "us_stop_after_rolls",
+                "us_schedule_enabled",
+                "us_schedule_start",
+                "us_schedule_end",
+            ):
                 if key in us_mode_patch:
                     data[key] = us_mode_patch[key]
 
@@ -1195,7 +1252,6 @@ class AppBridge(QObject):
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
             run_ui={
-                "us_mode_options": self._us_mode_options.to_dict(),
                 "minimize_to_tray": self._minimize_to_tray,
             },
             appearance={
@@ -1212,23 +1268,33 @@ class AppBridge(QObject):
         )
         self._record_settings_file_mtime()
 
+    def _patch_run_us_policy(self, **fields: Any) -> None:
+        preset_id = self._run_preset_id or self._presets.active_preset_id
+        preset = self._presets.find_preset(preset_id)
+        if not preset:
+            return
+        data = preset.to_dict()
+        data.update(fields)
+        self._presets.update_preset(preset_id, MacroConfig.from_dict(data))
+        self._sync_engine_config()
+        self._notify_config()
+        self._persist()
+
+    @Slot(bool)
+    def setUsKeepDraining(self, enabled: bool) -> None:
+        self._patch_run_us_policy(us_keep_draining=bool(enabled))
+
     @Slot(bool)
     def setUsStopOnPowerExhausted(self, enabled: bool) -> None:
-        self._us_mode_options.stop_on_power_exhausted = bool(enabled)
-        self.usModeOptionsChanged.emit()
-        self._persist()
+        self._patch_run_us_policy(us_stop_on_power_exhausted=bool(enabled))
 
     @Slot(bool)
     def setUsStopAfterRollsEnabled(self, enabled: bool) -> None:
-        self._us_mode_options.stop_after_rolls_enabled = bool(enabled)
-        self.usModeOptionsChanged.emit()
-        self._persist()
+        self._patch_run_us_policy(us_stop_after_rolls_enabled=bool(enabled))
 
     @Slot(int)
     def setUsStopAfterRolls(self, count: int) -> None:
-        self._us_mode_options.stop_after_rolls = max(1, int(count))
-        self.usModeOptionsChanged.emit()
-        self._persist()
+        self._patch_run_us_policy(us_stop_after_rolls=max(1, int(count)))
 
     @Property(str, constant=False, notify=appearanceChanged)
     def uiLayout(self) -> str:
@@ -1313,7 +1379,17 @@ class AppBridge(QObject):
 
     @Property(str, constant=False, notify=runSummaryChanged)
     def runSummaryJson(self) -> str:
-        return json.dumps(build_run_summary(self._macro_state, self._session_started_at))
+        return json.dumps(
+            build_run_summary(
+                self._macro_state,
+                self._session_started_at,
+                kakera_rules=(
+                    getattr(self._macro_config, "kakera_reaction", None)
+                    if self._macro_config
+                    else None
+                ),
+            )
+        )
 
     def _notify_run_summary(self) -> None:
         if not self._run_summary_timer.isActive():
@@ -2406,6 +2482,7 @@ class AppBridge(QObject):
         )
         self._actions = DiscordActions(self._monitor)
         from macro.account_dailies import seconds_until_due
+        from macro.roll_scheduler import earliest_wake_seconds
 
         self._engine = RollCycleEngine(
             self._actions,
@@ -2421,7 +2498,10 @@ class AppBridge(QObject):
             notification_reconnect=self._notification_reconnect,
             account_id=resolved.account_id,
             on_priority_pause=lambda: self._run_account_dailies(from_engine=True),
-            priority_wake_hint=lambda: seconds_until_due(self._accounts.accounts),
+            priority_wake_hint=earliest_wake_seconds(
+                lambda: seconds_until_due(self._accounts.accounts),
+                self._us_schedule_wake_seconds,
+            ),
             play_daily_minigames=self._play_daily_minigames_from_engine,
         )
         if channel_settings is not None:
@@ -2450,6 +2530,10 @@ class AppBridge(QObject):
                 self._account_daily_loop(),
                 name="account-dailies",
             )
+            us_task = asyncio.create_task(
+                self._us_schedule_loop(),
+                name="us-schedule",
+            )
             try:
                 ready = await self._monitor.start_background()
                 if ready:
@@ -2469,11 +2553,12 @@ class AppBridge(QObject):
                 await self._monitor.stop_background()
                 self._on_connected(False)
             finally:
-                daily_task.cancel()
-                try:
-                    await daily_task
-                except asyncio.CancelledError:
-                    pass
+                for task in (daily_task, us_task):
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
                 self._account_daily_runtime = None
                 self._account_daily_lock = None
 
@@ -2858,6 +2943,191 @@ class AppBridge(QObject):
                 sleep_for = min(delay, 30.0)
             await asyncio.sleep(sleep_for)
 
+    def _us_schedule_wake_seconds(self) -> float | None:
+        """Seconds until the next automatic ``$us`` window, if one is armed."""
+        from macro.us_schedule import in_local_window, seconds_until_window_start
+
+        cfg = self._macro_config
+        if not cfg.us_schedule_enabled:
+            return None
+        start = cfg.us_schedule_start
+        end = cfg.us_schedule_end
+        if in_local_window(start, end):
+            # Already open — the auto loop starts it. A 0s hint would spam $p.
+            return None
+        return seconds_until_window_start(start, end)
+
+    def _us_schedule_consumed_id(self) -> str:
+        from macro.us_schedule import load_consumed_window_id
+
+        if not self._run_account_id or not self._run_channel_profile_id:
+            return ""
+        daily = self._get_daily_resets_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
+        return load_consumed_window_id(daily)
+
+    def _mark_us_schedule_consumed(self, window_id: str | None = None) -> None:
+        from macro.us_schedule import (
+            containing_window_id,
+            store_consumed_window_id,
+        )
+
+        if not self._run_account_id or not self._run_channel_profile_id:
+            return
+        cfg = self._macro_config
+        wid = window_id or containing_window_id(
+            cfg.us_schedule_start, cfg.us_schedule_end
+        )
+        if not wid:
+            return
+        daily = dict(
+            self._get_daily_resets_for(
+                self._run_account_id, self._run_channel_profile_id
+            )
+        )
+        self._save_daily_resets_for(
+            self._run_account_id,
+            self._run_channel_profile_id,
+            store_consumed_window_id(daily, wid),
+        )
+
+    def _us_schedule_loop_delay(self) -> float:
+        from macro.us_schedule import (
+            containing_window_id,
+            in_local_window,
+            seconds_until_window_end,
+            seconds_until_window_start,
+        )
+
+        cfg = self._macro_config
+        if not cfg.us_schedule_enabled:
+            return 30.0
+        start = cfg.us_schedule_start
+        end = cfg.us_schedule_end
+        if in_local_window(start, end):
+            current = containing_window_id(start, end)
+            if current and current == self._us_schedule_consumed_id():
+                until_end = seconds_until_window_end(start, end)
+                if until_end is None:
+                    return 30.0
+                return min(max(1.0, until_end), 30.0)
+            return 5.0
+        until = seconds_until_window_start(start, end)
+        if until <= 0:
+            return 5.0
+        return min(until, 30.0)
+
+    async def _wait_engine_idle(self, *, timeout: float | None = 30.0) -> bool:
+        started = time.monotonic()
+        while self._engine and self._engine.is_running:
+            if timeout is not None and time.monotonic() - started > timeout:
+                return False
+            await asyncio.sleep(0.05)
+        return True
+
+    async def _ensure_connected_for_us_schedule(self) -> bool:
+        if not self._monitor:
+            return False
+        if self._monitor.is_connected:
+            return True
+        if not await self._notification_reconnect():
+            self._append_activity_log("$us schedule: reconnect failed")
+            return False
+        return True
+
+    async def _us_schedule_loop(self) -> None:
+        while True:
+            try:
+                await self._maybe_run_scheduled_us()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._append_activity_log(f"$us schedule: {exc}")
+            await asyncio.sleep(self._us_schedule_loop_delay())
+
+    async def _maybe_run_scheduled_us(self) -> None:
+        from macro.us_schedule import containing_window_id, in_local_window
+
+        if not self._monitor or not self._engine:
+            return
+        if self._minigames_busy() or self._settings_apply_running:
+            return
+        if not self._connected and not self._notification_standby:
+            return
+        cfg = self._macro_config
+        if not cfg.us_schedule_enabled:
+            return
+        start = cfg.us_schedule_start
+        end = cfg.us_schedule_end
+        if not in_local_window(start, end):
+            return
+        window_id = containing_window_id(start, end)
+        if not window_id:
+            return
+        if self._us_schedule_consumed_id() == window_id:
+            return
+
+        engine = self._engine
+        if engine.is_running and engine.running_mode == "us":
+            self._mark_us_schedule_consumed(window_id)
+            return
+        if engine.is_running and engine.running_mode != "hourly":
+            return
+        if engine.is_running and not engine.waiting_for_hourly_refill:
+            return
+
+        resume_hourly = False
+        self._us_schedule_skip_hourly_resume = False
+        try:
+            if engine.is_running and engine.running_mode == "hourly":
+                resume_hourly = True
+                self._append_activity_log(
+                    f"$us schedule: pausing hourly for {start}–{end} local"
+                )
+                engine.end_session("scheduled $us")
+                engine.stop()
+                if not await self._wait_engine_idle(timeout=30.0):
+                    self._append_activity_log(
+                        "$us schedule: hourly did not stop — skipping"
+                    )
+                    resume_hourly = False
+                    return
+
+            if (
+                not self._minigames_busy()
+                and not self._settings_apply_running
+                and not engine.is_running
+                and await self._ensure_connected_for_us_schedule()
+            ):
+                self._mark_us_schedule_consumed(window_id)
+                engine.update_config(self._macro_config)
+                self._us_schedule_session_active = True
+                self._append_activity_log(
+                    f"$us schedule: starting ({start}–{end} local)"
+                )
+                engine.start_us_mode(
+                    session_meta=self._session_meta(),
+                    us_stop=us_stop_from_config(self._macro_config),
+                )
+                await self._wait_engine_idle(timeout=None)
+        except asyncio.CancelledError:
+            self._us_schedule_skip_hourly_resume = True
+            raise
+        finally:
+            self._us_schedule_session_active = False
+            if (
+                resume_hourly
+                and not self._us_schedule_skip_hourly_resume
+                and self._engine
+                and not self._engine.is_running
+                and not self._minigames_busy()
+                and (self._connected or self._notification_standby)
+            ):
+                self._append_activity_log("$us schedule: resuming hourly")
+                self._engine.update_config(self._macro_config)
+                self._engine.start(session_meta=self._session_meta())
+
     @Slot()
     def startMacro(self) -> None:
         if not self._loop or not self._engine:
@@ -2898,16 +3168,25 @@ class AppBridge(QObject):
         def _start() -> None:
             self._engine.start_us_mode(
                 session_meta=meta,
-                us_stop=self._us_mode_options,
+                us_stop=us_stop_from_config(self._macro_config, apply_schedule=False),
             )
 
         self._loop.call_soon_threadsafe(_start)
+        from macro.us_schedule import in_local_window
+
+        if self._macro_config.us_schedule_enabled and in_local_window(
+            self._macro_config.us_schedule_start,
+            self._macro_config.us_schedule_end,
+        ):
+            self._mark_us_schedule_consumed()
 
     @Slot()
     def stopMacro(self) -> None:
         if not self._engine or not self._loop:
             return
         self._set_run_action_pending("stop")
+        if self._us_schedule_session_active:
+            self._us_schedule_skip_hourly_resume = True
         release_session = self._notification_standby
 
         def _stop() -> None:

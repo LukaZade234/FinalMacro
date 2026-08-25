@@ -17,7 +17,16 @@ Item {
     property var stateData: ({})
     property var activeRules: ({})
     property var activityEntries: []
+    property var runSummary: ({})
     property double nowMs: Date.now()
+
+    function refreshSummary() {
+        try {
+            runSummary = JSON.parse(App.runSummaryJson)
+        } catch (e) {
+            runSummary = {}
+        }
+    }
 
     function refreshActiveRules() {
         try {
@@ -161,6 +170,7 @@ Item {
         }
         function onConfigChanged() {
             runRoot.refreshActiveRules()
+            runRoot.refreshSummary()
         }
         function onMacroPhaseChanged() {
             syncControlBars()
@@ -169,7 +179,11 @@ Item {
         function onMacroStateChanged() {
             syncControlBars()
             runRoot.refreshState()
+            runRoot.refreshSummary()
             refreshStatusBar()
+        }
+        function onRunSummaryChanged() {
+            runRoot.refreshSummary()
         }
         function onMacroLogChanged() {
             runRoot.refreshActivityLog()
@@ -249,6 +263,11 @@ Item {
             claimTone: runRoot.claimTone()
             powerTone: runRoot.powerTone()
             dkTone: runRoot.dkTone()
+        }
+
+        Perk8PowerSaveStatus {
+            Layout.fillWidth: true
+            status: runRoot.runSummary.power_save || null
         }
 
         RowLayout {
@@ -333,6 +352,7 @@ Item {
         refreshState()
         refreshActivityLog()
         refreshActiveRules()
+        refreshSummary()
         syncControlBars()
         refreshStatusBar()
     }

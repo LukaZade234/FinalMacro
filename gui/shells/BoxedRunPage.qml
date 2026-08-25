@@ -133,43 +133,43 @@ Item {
                 BoxedButton {
                     text: "Start hourly"
                     variant: "hourly"
-                    enabled: run.connected && !run.macroRunning
+                    enabled: run.canStartHourly
                     onClicked: App.startMacro()
                 }
                 BoxedButton {
                     text: "Roll $us"
-                    enabled: run.connected && !run.macroRunning
+                    enabled: run.canStartUs
                     onClicked: App.startUsMode()
                 }
                 BoxedButton {
                     text: "$tu"
-                    enabled: run.connected
+                    enabled: run.canCheck
                     onClicked: App.runTu()
                 }
                 BoxedButton {
                     text: "$us"
-                    enabled: run.connected
+                    enabled: run.canCheck
                     onClicked: App.runUsCheck()
                 }
                 BoxedButton {
                     text: "$oh"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOhSphere()
                 }
                 BoxedButton {
                     text: "$oc"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOcSphere()
                 }
                 BoxedButton {
                     text: "$oq"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playOqSphere()
                 }
                 BoxedButton {
                     text: "Play all"
                     variant: "go"
-                    enabled: run.connected
+                    enabled: run.canPlayMinigame
                     onClicked: App.playAllMinigames()
                 }
             }
@@ -334,6 +334,30 @@ Item {
                             width: parent.width
                             label: "Perk 9 today"
                             value: run.perk9Text
+                        }
+                    }
+                }
+
+                BoxedBox {
+                    Layout.fillWidth: true
+                    visible: run.powerSaveOn
+                    Layout.preferredHeight: run.powerSaveOn ? (saverCol.implicitHeight + 28) : 0
+                    Layout.maximumHeight: run.powerSaveOn ? 400 : 0
+                    caption: "Smart saver"
+
+                    Column {
+                        id: saverCol
+                        width: parent.width
+                        spacing: 0
+
+                        Repeater {
+                            model: run.powerSaveRows
+                            BoxedStatRow {
+                                width: saverCol.width
+                                label: modelData.label
+                                value: modelData.value
+                                tone: modelData.tone || ""
+                            }
                         }
                     }
                 }

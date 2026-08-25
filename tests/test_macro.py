@@ -156,6 +156,34 @@ def test_macro_config_roundtrip():
     assert restored.claim_best_at_claim_reset is False
     assert restored.normalized_roll_command() == "wa"
     assert restored.roll_delay() >= 0.6
+    assert restored.us_keep_draining is False
+    assert restored.us_stop_after_rolls == 100
+
+
+def test_us_drain_policy_roundtrip():
+    cfg = MacroConfig(
+        us_keep_draining=True,
+        us_stop_on_power_exhausted=True,
+        us_stop_after_rolls_enabled=True,
+        us_stop_after_rolls=50,
+    )
+    restored = MacroConfig.from_dict(cfg.to_dict())
+    assert restored.us_keep_draining is True
+    assert restored.us_stop_on_power_exhausted is True
+    assert restored.us_stop_after_rolls_enabled is True
+    assert restored.us_stop_after_rolls == 50
+
+
+def test_us_schedule_roundtrip():
+    cfg = MacroConfig(
+        us_schedule_enabled=True,
+        us_schedule_start="4:00",
+        us_schedule_end="18:30",
+    )
+    restored = MacroConfig.from_dict(cfg.to_dict())
+    assert restored.us_schedule_enabled is True
+    assert restored.us_schedule_start == "04:00"
+    assert restored.us_schedule_end == "18:30"
 
 
 def test_humanize_roll_delay_roundtrip_and_jitter(monkeypatch):

@@ -43,6 +43,23 @@ Item {
         || phase === "Post-roll"
         || phase === "Stopping"
 
+    readonly property bool minigameBusy:
+        App.runActionPending === "oh"
+        || App.runActionPending === "oc"
+        || App.runActionPending === "oq"
+        || App.runActionPending === "minigames"
+    readonly property bool checkBusy:
+        App.runActionPending === "tu"
+        || App.runActionPending === "us_check"
+    readonly property bool canStartHourly: connected && !engineRunning
+        && App.runActionPending !== "start" && !checkBusy && !minigameBusy
+    readonly property bool canStartUs: connected && !engineRunning
+        && App.runActionPending !== "us" && !checkBusy && !minigameBusy
+    readonly property bool canCheck: connected && !engineRunning
+        && !checkBusy && !minigameBusy
+    readonly property bool canPlayMinigame: connected && !engineRunning
+        && !minigameBusy && !checkBusy
+
     readonly property string connectLabel: {
         if (connecting) return "Connecting…"
         if (disconnecting) return "Disconnecting…"
@@ -146,6 +163,29 @@ Item {
     readonly property string perk9Text: perk9Max > 0 ? perk9Used + " / " + perk9Max : String(perk9Used)
     readonly property real perk9Fraction: perk9Max > 0 ? Math.min(1, perk9Used / perk9Max) : -1
     readonly property int perk9Today: perk9Used
+
+    readonly property var powerSave: summary.power_save || null
+    readonly property bool powerSaveOn: !!(powerSave && powerSave.enabled)
+    readonly property var powerSaveRows: {
+        if (!powerSaveOn)
+            return []
+        var s = powerSave
+        var spend = "—"
+        if (s.spendable_percent !== null && s.spendable_percent !== undefined) {
+            var n = Number(s.spendable_percent)
+            var bar = Number(s.power_percent)
+            spend = (isFinite(bar) && n >= bar - 0.5)
+                ? "all (" + Math.round(n) + "%)"
+                : (Math.round(n) + "%")
+        }
+        return [
+            { label: "perk-8 priority", value: s.perk8_priority ? "on" : "off", tone: s.perk8_priority ? "accent" : "" },
+            { label: "normal kakera", value: s.normal_clicks ? "allowed" : "held", tone: s.normal_clicks ? "good" : "" },
+            { label: "saving power", value: s.power_blocked ? "blocking" : "open", tone: s.power_blocked ? "" : "good" },
+            { label: "clicks", value: s.kakera_free ? "free" : "limited", tone: s.kakera_free ? "good" : "" },
+            { label: "can spend", value: spend, tone: "" }
+        ]
+    }
 
     // ---- session haul ------------------------------------------------------
 
@@ -331,7 +371,7 @@ Item {
         function onMacroStateChanged() { model.reloadState() }
         function onMacroLogChanged() { model.reloadFeed() }
         function onRunSummaryChanged() { model.reloadSummary() }
-        function onConfigChanged() { model.reloadRules() }
+        function onConfigChanged() { model.reloadRules(); model.reloadSummary() }
         function onConnectedChanged() { model.reloadSummary() }
     }
 

@@ -9,6 +9,10 @@ from typing import Any
 
 from macro.perk9_daily import PERK9_CLICK_MAX_DEFAULT
 from macro.reaction_power import DEFAULT_MAX_REACTION_POWER
+from macro.perk8_power import (
+    dk_cooldown_minutes_from_bonus,
+    kakera_base_cost_from_bonus,
+)
 
 
 def power_max_from_bonus(bonus: dict[str, Any] | None) -> float:
@@ -79,3 +83,9 @@ def apply_sheet_caps(
     if current is not None and float(current) > max_power:
         state.power_percent = max_power
     state.perk9_click_max = perk9_max_from_shop(shop)
+    state.kakera_base_cost = kakera_base_cost_from_bonus(
+        (bonus or {}).get("power_cost_per_kakera_button")
+    )
+    state.dk_cooldown_minutes = dk_cooldown_minutes_from_bonus(
+        (bonus or {}).get("dk_cooldown")
+    )
