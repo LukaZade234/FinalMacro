@@ -172,6 +172,7 @@ class Perk8Runtime:
         if record.last_clicked is not None:
             state.rollover_kakera_budget_if_needed()
             state.kakera_clicks_today = record.last_clicked
+            state.clamp_kakera_clicks_to_perk8_cap()
 
     def _set_inactive(self) -> None:
         self._ctx.state.perk8_priority_mode = Perk8PriorityMode.INACTIVE.value
@@ -212,6 +213,7 @@ class Perk8Runtime:
         """Write this account's kakera click count back to persisted daily state."""
         if not self.budget_mode:
             return
+        self._ctx.state.clamp_kakera_clicks_to_perk8_cap()
         daily = self.load_daily()
         record = load_perk8_record(daily)
         record.last_clicked = self._ctx.state.kakera_clicks_today
@@ -300,7 +302,27 @@ class Perk8Runtime:
 
         record, mode = update_record_from_ohu8(record, parsed.fields)
         refresh_exhausted_if_refill_passed(record)
-        self.save_daily(save_perk8_record(daily, record))
+        daily = save_perk8_record(daily, record)
+        from macro.minigame_daily import (
+            save_minigame_record,
+            update_record_from_ohu as update_minigames_from_ohu,
+            load_minigame_record,
+        )
+        from macro.perk9_daily import (
+            apply_record_to_state as apply_perk9_record_to_state,
+            load_perk9_record,
+            save_perk9_record,
+            update_record_from_ohu as update_perk9_from_ohu,
+        )
+
+        daily = save_minigame_record(
+            daily,
+            update_minigames_from_ohu(load_minigame_record(daily), parsed.fields),
+        )
+        perk9 = update_perk9_from_ohu(load_perk9_record(daily), parsed.fields)
+        daily = save_perk9_record(daily, perk9)
+        apply_perk9_record_to_state(self._ctx.state, perk9)
+        self.save_daily(daily)
         self.apply_mode(mode, record)
         ctx.log(_mode_summary(mode, record))
         if self._on_idle:

@@ -68,6 +68,9 @@ def sync_reaction_power_fields(state: Any, fields: dict[str, Any], *, now: float
     if "power_percent" in fields and fields["power_percent"] is not None:
         state.power_percent = float(fields["power_percent"])
         state.power_tracked_at = stamp
+        from macro.live_clock import stamp_power_updated
+
+        stamp_power_updated(state)
     if fields.get("power_max_percent") is not None:
         state.power_max_percent = float(fields["power_max_percent"])
 
@@ -111,6 +114,9 @@ def spend_reaction_power(state: Any, cost: float, *, now: float | None = None) -
         return False
     state.power_percent = float(state.power_percent) - cost
     state.power_tracked_at = now if now is not None else time.monotonic()
+    from macro.live_clock import stamp_power_updated
+
+    stamp_power_updated(state)
     return True
 
 
@@ -124,3 +130,6 @@ def sync_reaction_power_from_denial(
     """Re-anchor power when Mudae rejects a kakera click for insufficient power."""
     state.power_percent = estimate_power_from_cooldown(cooldown_minutes, cost=cost)
     state.power_tracked_at = now if now is not None else time.monotonic()
+    from macro.live_clock import stamp_power_updated
+
+    stamp_power_updated(state)

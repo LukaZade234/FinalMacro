@@ -15,18 +15,6 @@ ColumnLayout {
     property string filter: "all"
     property bool stickToBottom: true
 
-    function severityColor(severity) {
-        if (severity === "claim")
-            return Theme.success
-        if (severity === "click")
-            return Theme.accentPrimary
-        if (severity === "skip")
-            return Theme.fgMuted
-        if (severity === "error")
-            return Theme.error
-        return Theme.fgSecondary
-    }
-
     function filteredEntries() {
         if (root.filter === "all")
             return root.entries
@@ -73,12 +61,17 @@ ColumnLayout {
         var parts = []
         for (var i = 0; i < rows.length; i++) {
             var entry = rows[i]
-            var color = severityColor(entry.severity).toString()
             var prefix = ""
             var localTime = formatLocalTime(entry.ts)
             if (localTime)
                 prefix = "[" + localTime + "] "
-            parts.push('<span style="color:' + color + '">' + escapeHtml(prefix + entry.text) + "</span>")
+            var body = MudaeEmoji.feedHtml(entry.text, 16)
+            if (entry.severity === "error")
+                body = '<span style="color:' + Theme.error + '">' + body + "</span>"
+            parts.push(
+                '<span style="color:' + Theme.mute + '">' + escapeHtml(prefix) + "</span>"
+                + body
+            )
         }
         return parts.join("<br>")
     }
@@ -113,7 +106,6 @@ ColumnLayout {
                     { id: "all", label: "All" },
                     { id: "claim", label: "Claim" },
                     { id: "click", label: "Click" },
-                    { id: "skip", label: "Skip" },
                     { id: "error", label: "Error" },
                     { id: "info", label: "Info" }
                 ]

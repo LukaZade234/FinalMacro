@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from macro.perk9_daily import (
     PERK9_CLICK_MAX_DEFAULT,
+    Perk9DailyRecord,
     count_perk9_clicks,
     is_perk9_sphere_click,
     sync_perk9_clicks_from_log,
@@ -82,3 +83,51 @@ def test_run_summary_reports_perk9_from_state():
     assert summary["today"]["perk9_used"] == 6
     assert summary["today"]["perk9_max"] == 20
     assert summary["today"]["perk9_spheres"] == 6
+
+
+def test_ohu_buttons_clicked_persist():
+    import datetime as dt
+
+    from macro.perk9_daily import apply_record_to_state, update_record_from_ohu
+
+    now = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
+    record = update_record_from_ohu(
+        Perk9DailyRecord(),
+        {
+            "perk9_clicked_today": 15,
+            "perk9_click_max": 15,
+            "megasphere_left": False,
+            "sphere_stock": 3924,
+            "perk8_refill_minutes": 180,
+        },
+        now=now,
+    )
+    assert record.clicks_exhausted is True
+    assert record.megasphere_exhausted is True
+    assert record.stock == 3924
+
+    state = AccountState()
+    apply_record_to_state(state, record, now=now)
+    assert state.perk9_clicks_today == 15
+    assert state.perk9_click_max == 15
+
+
+def test_perk9_record_clears_after_midnight():
+    import datetime as dt
+
+    from macro.perk9_daily import refresh_exhausted_if_refill_passed
+
+    now = dt.datetime(2026, 8, 25, 23, 0, tzinfo=dt.timezone.utc)
+    record = Perk9DailyRecord(
+        clicks_exhausted=True,
+        last_clicked=15,
+        last_click_max=15,
+        megasphere_exhausted=True,
+        refill_at="2026-08-26T12:00:00+00:00",
+        updated_at=now.isoformat(),
+    )
+    later = dt.datetime(2026, 8, 26, 0, 5, tzinfo=dt.timezone.utc)
+    refresh_exhausted_if_refill_passed(record, now=later)
+    assert record.clicks_exhausted is False
+    assert record.megasphere_exhausted is False
+    assert record.last_clicked == 0

@@ -7,7 +7,9 @@ from macro.daily_store import (
     is_legacy_flat_daily_store,
     set_account_daily_slice,
 )
+from macro.minigame_daily import MINIGAME_DAILY_KEY
 from macro.perk8_daily import PERK8_DAILY_KEY, Perk8DailyRecord, load_perk8_record, save_perk8_record
+from macro.perk9_daily import PERK9_DAILY_KEY
 
 
 def test_legacy_flat_store_detected():
@@ -54,3 +56,8 @@ def test_save_strips_legacy_root_keys():
     assert PERK8_DAILY_KEY not in updated
     record = load_perk8_record(get_account_daily_slice(updated, "acc_a"))
     assert record.last_clicked == 5
+
+
+def test_legacy_flat_store_detects_minigames_and_perk9():
+    assert is_legacy_flat_daily_store({MINIGAME_DAILY_KEY: {"games": {}}}) is True
+    assert is_legacy_flat_daily_store({PERK9_DAILY_KEY: {"clicks_exhausted": True}}) is True

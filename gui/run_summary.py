@@ -76,19 +76,6 @@ def _sum_amounts(
     return total
 
 
-def _count_events(
-    events: list[dict[str, Any]],
-    *,
-    since: dt.datetime | None,
-    date_key: str | None = None,
-) -> int:
-    unbounded = date_key is not None
-    return sum(
-        1 for entry in events
-        if _in_window(entry, since, date_key, unbounded=unbounded)
-    )
-
-
 def _claims_from_activity(activity_log: list[Any]) -> tuple[int, dict[str, str] | None]:
     """Count claims in the activity log and describe the most recent one."""
     count = 0
@@ -129,24 +116,30 @@ def build_run_summary(
     claims, last_claim = _claims_from_activity(getattr(state, "activity_log", []) or [])
 
     perk8_max = getattr(state, "perk8_click_max", None)
+    perk8_cap = int(perk8_max) if perk8_max else None
+    perk8_used = int(getattr(state, "kakera_clicks_today", 0) or 0)
+    if perk8_cap is not None and perk8_cap > 0:
+        perk8_used = min(perk8_used, perk8_cap)
+        if str(getattr(state, "perk8_priority_mode", "") or "") == "done":
+            perk8_used = perk8_cap
     elapsed = int((now - session_started_at).total_seconds()) if session_started_at else 0
+    sphere_sp = _sum_amounts(sphere_events, since=session_started_at)
 
     return {
         "session": {
             "started_at": session_started_at.isoformat() if session_started_at else None,
             "elapsed_seconds": max(0, elapsed),
             "kakera": _sum_amounts(kakera_events, since=session_started_at),
-            # Sphere entries store a kakera value, not a quantity, so the
-            # headline "spheres" figure counts drops and the value is separate.
-            "spheres": _count_events(sphere_events, since=session_started_at),
-            "sphere_value": _sum_amounts(sphere_events, since=session_started_at),
+            # Same unit as kakera / keys: sum of logged SP, not the drop count.
+            "spheres": sphere_sp,
+            "sphere_value": sphere_sp,
             "keys": _sum_amounts(key_events, since=session_started_at),
             "claims": claims,
         },
         "today": {
             "kakera": _sum_amounts(kakera_events, since=None, date_key=today_key),
-            "perk8_used": int(getattr(state, "kakera_clicks_today", 0) or 0),
-            "perk8_max": int(perk8_max) if perk8_max else None,
+            "perk8_used": perk8_used,
+            "perk8_max": perk8_cap,
             "perk8_mode": str(getattr(state, "perk8_priority_mode", "") or ""),
             "perk9_used": int(getattr(state, "perk9_clicks_today", 0) or 0),
             "perk9_max": int(getattr(state, "perk9_click_max", 0) or 0) or None,

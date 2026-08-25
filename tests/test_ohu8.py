@@ -9,6 +9,7 @@ from macro.perk8_daily import (
     Perk8DailyRecord,
     Perk8PriorityMode,
     apply_cached_perk8,
+    apply_record_to_state,
     load_perk8_record,
     mark_perk8_exhausted,
     mode_from_ohu8_fields,
@@ -61,8 +62,10 @@ def test_ohu8_parser_fields():
 
 def test_ohu8_new_format_parser_fields():
     parsed = parse_ohu8(_OHU8_NEW_SAMPLE)
-    assert parsed.fields["perk8_clicked_today"] == 3
-    assert parsed.fields["perk8_click_max"] == 15
+    assert "perk8_clicked_today" not in parsed.fields
+    assert parsed.fields["perk9_clicked_today"] == 3
+    assert parsed.fields["perk9_click_max"] == 15
+    assert parsed.fields["sphere_stock"] == 2001
     assert parsed.fields["perk8_refill_minutes"] == 8 * 60 + 28
 
 
@@ -350,6 +353,44 @@ def test_apply_cached_perk8_done():
 def test_apply_cached_perk8_insufficient_pool():
     record = Perk8DailyRecord(last_roll_pool=5)
     assert apply_cached_perk8(record) is Perk8PriorityMode.INSUFFICIENT_POOL
+
+
+def test_apply_record_to_state_keeps_spent_day():
+    state = AccountState()
+    record = Perk8DailyRecord(
+        clicks_exhausted=True,
+        last_clicked=40,
+        last_click_max=40,
+        refill_at="2099-01-01T00:00:00+00:00",
+        updated_at="2026-08-25T12:00:00+00:00",
+    )
+    apply_record_to_state(
+        state,
+        record,
+        now=dt.datetime(2026, 8, 25, 14, 0, tzinfo=dt.timezone.utc),
+    )
+    assert state.perk8_priority_mode == Perk8PriorityMode.DONE.value
+    assert state.kakera_clicks_today == 40
+    assert state.perk8_click_max == 40
+
+
+def test_apply_record_to_state_resets_used_after_midnight():
+    state = AccountState()
+    record = Perk8DailyRecord(
+        clicks_exhausted=True,
+        last_clicked=40,
+        last_click_max=40,
+        refill_at="2026-08-25T00:00:00+00:00",
+        updated_at="2026-08-24T22:00:00+00:00",
+    )
+    apply_record_to_state(
+        state,
+        record,
+        now=dt.datetime(2026, 8, 25, 1, 0, tzinfo=dt.timezone.utc),
+    )
+    assert state.kakera_clicks_today == 0
+    assert state.perk8_click_max == 40
+    assert state.perk8_priority_mode == Perk8PriorityMode.ACTIVE.value
 
 
 def _kakera_fields(buttons, *, perk_8=None):

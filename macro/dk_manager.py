@@ -13,7 +13,11 @@ def sync_dk_fields_from_tu(state: Any, fields: dict[str, Any]) -> None:
     if "dk_stock" in fields and fields["dk_stock"] is not None:
         state.dk_stock = max(0, int(fields["dk_stock"]))
     if fields.get("dk_next_minutes") is not None:
-        state.dk_next_minutes = int(fields["dk_next_minutes"])
+        setter = getattr(state, "set_dk_reset", None)
+        if callable(setter):
+            setter(int(fields["dk_next_minutes"]))
+        else:
+            state.dk_next_minutes = int(fields["dk_next_minutes"])
 
 
 def reset_reaction_power_to_max(state: Any, *, now: float | None = None) -> None:
@@ -21,6 +25,9 @@ def reset_reaction_power_to_max(state: Any, *, now: float | None = None) -> None
     stamp = now if now is not None else time.monotonic()
     state.power_percent = float(getattr(state, "power_max_percent", 155.0))
     state.power_tracked_at = stamp
+    from macro.live_clock import stamp_power_updated
+
+    stamp_power_updated(state)
 
 
 def apply_dk_response(state: Any, fields: dict[str, Any], *, now: float | None = None) -> None:

@@ -336,6 +336,14 @@ def test_account_state_daily_budget_rollover():
     assert state.kakera_clicks_today == 0
 
 
+def test_account_state_kakera_clicks_do_not_pass_perk8_cap():
+    state = AccountState(perk8_click_max=40, perk8_priority_mode="done")
+    state.rollover_kakera_budget_if_needed()
+    state.kakera_clicks_today = 39
+    state.record_kakera_clicks(5)
+    assert state.kakera_clicks_today == 40
+
+
 # ---------------------------------------------------------------------------
 # Sphere reaction
 

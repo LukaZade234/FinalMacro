@@ -78,7 +78,7 @@ class KakeraReactor:
         )
         if not decision.should_click:
             if rules.enabled:
-                self.log(f"kakera skip {character}: {decision.reason}")
+                self._debug(f"kakera skip {character}: {decision.reason}")
             return 0
 
         candidates = decision.buttons
@@ -96,7 +96,7 @@ class KakeraReactor:
             if remaining <= 0 and not paid_candidates:
                 candidates = bypass_candidates
             elif remaining <= 0:
-                self.log(
+                self._debug(
                     f"kakera skip {character}: daily budget "
                     f"{self.state.kakera_clicks_today}/{budget} reached"
                 )
@@ -105,7 +105,7 @@ class KakeraReactor:
                 candidates = bypass_candidates + paid_candidates[:remaining]
 
             if not candidates:
-                self.log(
+                self._debug(
                     f"kakera skip {character}: daily budget "
                     f"{self.state.kakera_clicks_today}/{budget} reached"
                 )
@@ -156,7 +156,7 @@ class KakeraReactor:
             dk_note = ""
             if self.state.dk_stock is not None:
                 dk_note = f" · {self.state.dk_stock} dk"
-            self.log(
+            self._debug(
                 f"kakera click ×{clicks} {character}: {decision.reason}"
                 f"{budget_note}{power_note}{dk_note}"
             )
@@ -242,7 +242,7 @@ class KakeraReactor:
                                 f"{display_reaction_power(self.state.power_percent)}%)"
                             )
                             continue
-                    self.log(
+                    self._debug(
                         f"kakera skip {character}: insufficient power "
                         f"({display_reaction_power(self.state.power_percent)}% "
                         f"need {cost:g}%)"
@@ -292,7 +292,7 @@ class KakeraReactor:
                         cost=cost,
                     )
                     self._notify_state()
-                    self.log(
+                    self._debug(
                         f"kakera denied {character}: Mudae cooldown {cooldown}m "
                         f"(tracked power ≈ "
                         f"{display_reaction_power(self.state.power_percent)}%)"

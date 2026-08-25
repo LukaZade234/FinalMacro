@@ -25,6 +25,33 @@ def power_max_from_bonus(bonus: dict[str, Any] | None) -> float:
     return value
 
 
+def _positive_int(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def rolls_max_from_sheets(
+    bonus: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> int | None:
+    """Hourly roll pool: ``$bonus`` net, else ``$setrolls``.
+
+    ``$settings`` ``setrolls`` is the server base (often 21). ``$bonus``
+    ``rolls_per_hour.net`` is what ``$tu`` reports as the hour's total.
+    """
+    rolls = (bonus or {}).get("rolls_per_hour")
+    if isinstance(rolls, dict):
+        net = _positive_int(rolls.get("net"))
+        if net is not None:
+            return net
+    return _positive_int((settings or {}).get("setrolls"))
+
+
 def perk9_max_from_shop(shop: dict[str, Any] | None) -> int:
     """``perk9_click_max`` from ``$shop`` (10 + OP9 extra), or 20."""
     raw = (shop or {}).get("perk9_click_max")

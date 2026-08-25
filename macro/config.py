@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -239,6 +240,8 @@ class MacroConfig:
     roll_command: str = "wa"
     prefix: str = "$"
     roll_delay_sec: float = 0.6
+    humanize_roll_delay: bool = False
+    roll_delay_jitter_sec: float = 0.4
     claim_expire_sec: int = 45
     # $us mass-roll mode: rolls Mudae adds per "$us N" (capped at 20 by Mudae),
     # and how close to the hourly rolls reset (minutes) we refuse to add more
@@ -319,7 +322,13 @@ class MacroConfig:
         )
 
     def roll_delay(self) -> float:
-        return max(self.roll_delay_sec, 0.6)
+        base = max(float(self.roll_delay_sec), 0.6)
+        if not self.humanize_roll_delay:
+            return base
+        jitter = max(0.0, float(self.roll_delay_jitter_sec))
+        if jitter <= 0:
+            return base
+        return base + random.uniform(0.0, jitter)
 
     # --- legacy shims (read-only access for older callers) ---
     @property
@@ -370,6 +379,8 @@ class MacroConfig:
             roll_command=str(data.get("roll_command", "wa")),
             prefix=str(data.get("prefix", "$")),
             roll_delay_sec=float(data.get("roll_delay_sec", 0.6)),
+            humanize_roll_delay=bool(data.get("humanize_roll_delay", False)),
+            roll_delay_jitter_sec=float(data.get("roll_delay_jitter_sec", 0.4)),
             claim_expire_sec=int(data.get("claim_expire_sec", 45)),
             us_batch_size=int(data.get("us_batch_size", 20)),
             us_reset_margin_minutes=int(data.get("us_reset_margin_minutes", 2)),
@@ -388,6 +399,8 @@ class MacroConfig:
             "roll_command": self.roll_command,
             "prefix": self.prefix,
             "roll_delay_sec": self.roll_delay_sec,
+            "humanize_roll_delay": self.humanize_roll_delay,
+            "roll_delay_jitter_sec": self.roll_delay_jitter_sec,
             "claim_expire_sec": self.claim_expire_sec,
             "us_batch_size": self.us_batch_size,
             "us_reset_margin_minutes": self.us_reset_margin_minutes,

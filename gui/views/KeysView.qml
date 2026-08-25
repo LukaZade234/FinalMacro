@@ -144,14 +144,6 @@ Item {
         serverFilter = "all"
     }
 
-    function keyColor(typeId) {
-        for (var i = 0; i < keyCards.length; i++) {
-            if (keyCards[i].key === typeId)
-                return keyCards[i].color
-        }
-        return Theme.accentPrimary
-    }
-
     function accountComboIndex() {
         if (accountFilter === "all")
             return 0
@@ -220,7 +212,7 @@ Item {
                 delegate: Rectangle {
                     required property var modelData
                     width: Math.max(120, (keysRoot.width - 40) / 5 - 10)
-                    height: 78
+                    height: 84
                     radius: 10
                     color: Theme.bgMedium
                     border.color: Theme.border
@@ -231,10 +223,20 @@ Item {
                         anchors.margins: 12
                         spacing: 2
 
-                        Label {
-                            text: modelData.label
-                            color: Theme.fgMuted
-                            font.pixelSize: 11
+                        RowLayout {
+                            spacing: 6
+                            KeyTypeBadge {
+                                keyType: modelData.key
+                                size: 20
+                                Layout.preferredWidth: 20
+                                Layout.preferredHeight: 20
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+                            Label {
+                                text: modelData.label
+                                color: Theme.fgMuted
+                                font.pixelSize: 11
+                            }
                         }
                         Label {
                             text: "+" + formatAmount(displayTotalsForType(modelData.key).all_time || 0)
@@ -532,11 +534,12 @@ Item {
                             anchors.rightMargin: 12
                             spacing: 10
 
-                            Rectangle {
-                                width: 8
-                                height: 8
-                                radius: 4
-                                color: keyColor(modelData.key_type)
+                            KeyTypeBadge {
+                                keyType: modelData.key_type || ""
+                                size: 22
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                Layout.alignment: Qt.AlignVCenter
                             }
 
                             ColumnLayout {

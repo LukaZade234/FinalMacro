@@ -12,7 +12,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 
 1. ~~**Empty states** — copy.~~ `gui/emptyStates.js`: disconnected vs nothing recorded vs filters.
 2. ~~**Compile leftover parser regexes** — mechanical.~~ Module-level `_…_RE` in `tu`, `roll`, `settings`, `claim`, `kakera`, `bonus`, `utils`, etc.
-3. **Humanized delays** — jitter existing sleeps.
+3. ~~**Humanized delays** — jitter existing sleeps.~~ Opt-in on the Rolls preset tab (`humanize_roll_delay` + adjustable `roll_delay_jitter_sec`).
 4. ~~**Reaction power max on the account page** — `kakera_max_power` is parsed from `$bonus`; still not wired (hardcoded `155`).~~ Wired from the run channel's `$bonus` (`macro/sheet_caps.py`).
 5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
 6. ~~**`$p` / `$daily`** — send at the right time; parsers exist.~~ Account-global; designated channel on the Accounts tab; priority over rolls.
@@ -43,7 +43,7 @@ Highest first. What makes an overnight run correct and complete.
 8. **Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`), `$us` on a clock.
 9. **More SP from games we already play** — `$oh` DP / `$oc` lookahead. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase).
 10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker.
-11. **`$dl` switch**, humanized delays, shell Run parity.
+11. **`$dl` switch**, shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
 
 ---
@@ -71,8 +71,8 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 **Wave 3 — close the daily loop on one account**
 
-- ~~`$p` / `$daily`~~ — designated per-account channel; auto-send on cooldown with roll priority. Remaining: perk 8 power save, `$us` clock, humanized delays.
-- Extend `daily_resets` (already used for perk 8) to `$oh` / `$oc` / `$oq` / `$ot` and sphere stock — this *is* most of “full daily autonomy”.
+- ~~`$p` / `$daily`~~ — designated per-account channel; auto-send on cooldown with roll priority. Remaining: perk 8 power save, `$us` clock.
+- ~~Extend `daily_resets` (already used for perk 8) to `$oh` / `$oc` / `$oq` / `$ot` and sphere stock~~ — `macro/minigame_daily.py` + `macro/perk9_daily.py`; play-all / hourly skip minigames until UTC refill. Perk 9 / megasphere counts persist for the Run tab; the reactor does not skip — Mudae stops spawning those buttons.
 - `$dl` / `$adl` / `$wl` one-click if you want a GUI win in the same stretch.
 - Shared Run action gating (pending + minigame flags) on Haul / Console / Boxed. `$us` stop options only exist on Classic today.
 
@@ -112,12 +112,12 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 
 ## Daily loop and scheduling
 
-- **Full daily autonomy** — one connect should cover rolls, reacts, minigames, `$p`/`$daily`, and skip anything already exhausted until refill. `$p`/`$daily` send on a designated channel; perk 8 skip exists (`macro/perk8_daily.py`); extend `daily_resets` the same way for `$oh` / `$oc` / `$oq` / `$ot` and sphere stock.
+- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill. `$p`/`$daily` send on a designated channel; perk 8 / minigame skip live in `daily_resets`. Remaining: perk 8 power save, `$us` clock.
 - **Save power for perk 8 refresh** — stop paid kakera reacts near the daily refill so the bar is full when perk 8 comes back. Purple stays free.
 - **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click.
 - **`$ot` solver** — play `$ot` (parsed in `$ohu`, not played). Method notes in **Colblitz tools** below.
 - **`$us` scheduling** — start / stop `$us` on a clock (not only a manual button), including the reset-margin so a reset does not wipe the stack.
-- **Humanized delays** — jitter command / click timing so the session is less metronomic.
+- ~~**Humanized delays** — jitter command / click timing so the session is less metronomic.~~ Opt-in roll jitter in preset Rolls settings.
 
 ---
 
@@ -176,7 +176,7 @@ Pass over the running app after the rankings above. Items already listed earlier
 - **`$us` slow-path add does not use the reconnect wrapper**; a single 503 fails the add. Reconnect retries once, then aborts.
 - **Perk-6 queue drain does not match parent character** — late spawns are serviced (good) but a stale “Akame spawned by POWER” can attach to the next `Rem` roll (bad for session records). The wait path already requires `parent_character`.
 - **Perk-8 budget: `rule_eval` vs `KakeraReactor`** — rule_eval still returns perk-8 kakera when the daily budget is 0; the reactor then skips the whole roll if any paid candidate remains. Integration-test the reactor, not only `rule_eval`.
-- **`SphereReactor` is fire-and-forget** — HTTP click success is logged as a sphere; no wait for the `(used/max)` line, no megasphere-exhausted handling. `$ohu` already prints `No :spM: left today` and `N/15 buttons clicked` and we ignore both.
+- **`SphereReactor` is fire-and-forget** — HTTP click success is logged as a sphere; no wait for the `(used/max)` line. `$ohu` `N/15 buttons clicked` is persisted for the Run counter; the reactor does not skip at cap (Mudae stops spawning those buttons).
 - **Resume holes** — `macro_runtime` snapshot omits perk-8 click counts; claim cooldown restore subtracts wall-clock minutes instead of using the claim-reset instant; legacy flat `daily_resets` is dropped with no migration.
 - **Quit is fire-and-forget** — `shutdown()` persists and disconnects without waiting for the reader thread or an in-flight minigame.
 

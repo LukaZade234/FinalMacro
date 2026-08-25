@@ -1,8 +1,9 @@
 """Persist ``$tu`` runtime fields per account on a channel profile.
 
-When ``character_claim.persist_tu_state`` is enabled, rolls/timers/power are saved
-after each ``$tu`` and on disconnect so the next session can skip an initial
-``$tu`` and extrapolate countdowns (including passive reaction-power regen).
+Reset countdowns are always snapshotted after ``$tu`` / disconnect so the next
+Connect can show refill times (and ``—/N`` rolls) before a fresh ``$tu``.
+When ``character_claim.persist_tu_state`` is enabled, rolls/claim/power are
+restored as well so the next session can skip that initial ``$tu``.
 Hourly roll and claim resets are inferred from saved deadlines plus ``$settings``
 (``setrolls``, ``setclaim``, ``setinterval``, ``shifthour``).
 """
@@ -278,15 +279,17 @@ def snapshot_from_state(
         claim_expire_sec=state.claim_expire_sec,
         power_percent=state.power_percent,
         power_max_percent=float(state.power_max_percent or 155.0),
-        power_updated_at=_iso(now),
+        power_updated_at=state.power_updated_at or _iso(now),
         dk_stock=state.dk_stock,
         dk_next_minutes=state.dk_next_minutes,
-        rolls_reset_at=_deadline_iso(now, state.rolls_reset_minutes),
-        claim_reset_at=_deadline_iso(now, state.next_claim_reset_minutes),
+        rolls_reset_at=state.rolls_reset_at or _deadline_iso(now, state.rolls_reset_minutes),
+        claim_reset_at=state.claim_reset_at or _deadline_iso(
+            now, state.next_claim_reset_minutes
+        ),
         rt_available=state.rt_available,
         rt_next_minutes=state.rt_next_minutes,
-        rt_reset_at=_deadline_iso(now, state.rt_next_minutes),
-        dk_reset_at=_deadline_iso(now, state.dk_next_minutes),
+        rt_reset_at=state.rt_reset_at or _deadline_iso(now, state.rt_next_minutes),
+        dk_reset_at=state.dk_reset_at or _deadline_iso(now, state.dk_next_minutes),
         setrolls=schedule.setrolls,
         setclaim=schedule.setclaim,
         setinterval=schedule.setinterval,
@@ -318,6 +321,9 @@ def apply_power_with_regen(
     import time
 
     state.power_tracked_at = time.monotonic()
+    from macro.live_clock import stamp_power_updated
+
+    stamp_power_updated(state, now=now)
 
 
 def apply_to_state(
@@ -352,18 +358,18 @@ def apply_to_state(
         else:
             return RuntimeRestoreResult(False, True, "rolls unknown after reset")
         state.rolls_us_bonus = 0
-        state.rolls_reset_minutes = roll_remaining
+        state.set_rolls_reset(roll_remaining, now=now)
     else:
         if record.rolls_left is None:
             return RuntimeRestoreResult(False, True, "rolls unknown in saved runtime")
         state.rolls_left = record.rolls_left
         state.rolls_us_bonus = record.rolls_us_bonus
-        state.rolls_reset_minutes = roll_remaining
+        state.set_rolls_reset(roll_remaining, now=now)
 
     if state.rolls_reset_minutes is None:
-        state.rolls_reset_minutes = minutes_until_deadline(
-            next_hourly_reset_at(now, schedule),
-            now,
+        state.set_rolls_reset(
+            minutes_until_deadline(next_hourly_reset_at(now, schedule), now),
+            now=now,
         )
 
     saved_at = parse_iso(record.saved_at)
@@ -371,48 +377,53 @@ def apply_to_state(
 
     if claim_crossed > 0:
         state.claim_available = True
-        state.claim_cooldown_minutes = 0
-        state.next_claim_reset_minutes = claim_remaining
+        state.set_claim_cooldown(0, now=now)
+        state.set_claim_reset(claim_remaining, now=now)
     elif record.claim_available:
         state.claim_available = True
-        state.claim_cooldown_minutes = 0
-        state.next_claim_reset_minutes = (
+        state.set_claim_cooldown(0, now=now)
+        state.set_claim_reset(
             claim_remaining
             if claim_remaining is not None
-            else record.next_claim_reset_minutes
+            else record.next_claim_reset_minutes,
+            now=now,
         )
     elif record.claim_cooldown_minutes is not None:
         new_cd = max(0, int(record.claim_cooldown_minutes) - elapsed_min)
-        state.claim_cooldown_minutes = new_cd if new_cd > 0 else None
+        state.set_claim_cooldown(new_cd if new_cd > 0 else None, now=now)
         state.claim_available = new_cd == 0
-        state.next_claim_reset_minutes = (
+        state.set_claim_reset(
             claim_remaining
             if claim_remaining is not None
-            else record.next_claim_reset_minutes
+            else record.next_claim_reset_minutes,
+            now=now,
         )
     else:
         state.claim_available = record.claim_available
-        state.claim_cooldown_minutes = record.claim_cooldown_minutes
-        state.next_claim_reset_minutes = (
+        state.set_claim_cooldown(record.claim_cooldown_minutes, now=now)
+        state.set_claim_reset(
             claim_remaining
             if claim_remaining is not None
-            else record.next_claim_reset_minutes
+            else record.next_claim_reset_minutes,
+            now=now,
         )
 
     rt_minutes, rt_passed = _minutes_until(record.rt_reset_at, now)
     if rt_passed:
         state.rt_available = True
-        state.rt_next_minutes = None
+        state.set_rt_reset(None, now=now)
     else:
         state.rt_available = record.rt_available
-        state.rt_next_minutes = (
-            rt_minutes if rt_minutes is not None else record.rt_next_minutes
+        state.set_rt_reset(
+            rt_minutes if rt_minutes is not None else record.rt_next_minutes,
+            now=now,
         )
 
     dk_minutes, _ = _minutes_until(record.dk_reset_at, now)
     state.dk_stock = record.dk_stock
-    state.dk_next_minutes = (
-        dk_minutes if dk_minutes is not None else record.dk_next_minutes
+    state.set_dk_reset(
+        dk_minutes if dk_minutes is not None else record.dk_next_minutes,
+        now=now,
     )
 
     state.claim_expire_sec = record.claim_expire_sec
@@ -430,6 +441,42 @@ def apply_to_state(
         message += f" ({', '.join(notes)} applied)"
 
     return RuntimeRestoreResult(True, False, message)
+
+
+def apply_timers_to_state(
+    state: AccountState,
+    record: MacroRuntimeRecord,
+    *,
+    now: dt.datetime | None = None,
+    settings: dict[str, Any] | None = None,
+) -> bool:
+    """Restore roll/claim reset countdowns without claiming to know rolls left.
+
+    Used on Connect when ``persist_tu_state`` is off: the GUI can still show
+    ``—/62`` and ``refill 14m`` from the last ``$tu`` / ``$settings``.
+    """
+    now = now or _utc_now()
+    schedule = _resolve_schedule(record, settings)
+    applied = False
+
+    roll_remaining: int | None = None
+    if record.rolls_reset_at or record.saved_at:
+        _crossed, roll_remaining = _roll_resets_crossed(record, schedule, now)
+    if roll_remaining is None:
+        roll_remaining = minutes_until_deadline(next_hourly_reset_at(now, schedule), now)
+    if roll_remaining is not None:
+        state.set_rolls_reset(roll_remaining, now=now)
+        applied = True
+
+    claim_remaining: int | None = None
+    if record.claim_reset_at or (
+        record.saved_at and record.next_claim_reset_minutes is not None
+    ):
+        _crossed, claim_remaining = _claim_resets_crossed(record, schedule, now)
+    if claim_remaining is not None:
+        state.set_claim_reset(claim_remaining, now=now)
+        applied = True
+    return applied
 
 
 def can_skip_initial_tu(result: RuntimeRestoreResult) -> bool:

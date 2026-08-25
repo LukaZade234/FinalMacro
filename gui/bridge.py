@@ -35,7 +35,7 @@ from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
 from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
 from macro.actions import DiscordActions
-from macro.activity_log import ActivityLog, activity_log_text
+from macro.activity_log import ActivityLog, ActivitySeverity, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
 from macro.settings_apply import SettingsApplyRunner
@@ -64,6 +64,7 @@ from mudae.settings_catalog import (
     merge_preset_fields,
 )
 from mudae.list_formatter import extract_character_names, format_mudae_character_list
+from mudae.live_feed import format_live_feed
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 _UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
@@ -315,18 +316,27 @@ class AppBridge(QObject):
 
     @Property(int, constant=False, notify=macroStateChanged)
     def macroRollsMax(self) -> int:
-        """Rolls per hour from the channel's $settings, or -1 if never fetched.
+        """Hourly roll pool from ``$bonus`` net, else ``$setrolls``, or -1.
 
-        The macro only ever learns how many rolls are *left*, so a full/empty
-        gauge is only meaningful once $settings has been read for the channel.
+        ``$tu`` remaining is often far above ``$setrolls`` (the server base)
+        because ``$bonus`` adds extra rolls. The gauge scale has to match that.
         """
-        channel = self._profiles.active_channel()
-        raw = (channel.settings or {}).get("setrolls") if channel else None
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            return -1
-        return value if value > 0 else -1
+        from macro.sheet_caps import rolls_max_from_sheets
+
+        channel = None
+        if self._run_channel_profile_id:
+            found = self._profiles.find_channel_by_profile_id(
+                self._run_channel_profile_id
+            )
+            if found:
+                channel = found[1]
+        if channel is None:
+            channel = self._profiles.active_channel()
+        value = rolls_max_from_sheets(
+            getattr(channel, "bonus", None) if channel else None,
+            getattr(channel, "settings", None) if channel else None,
+        )
+        return int(value) if value else -1
 
     @Property(str, constant=False, notify=macroStateChanged)
     def macroClaimStatus(self) -> str:
@@ -334,9 +344,10 @@ class AppBridge(QObject):
 
     @Property(int, constant=False, notify=macroStateChanged)
     def macroPowerPercent(self) -> int:
+        from macro.live_clock import live_power_percent
         from macro.reaction_power import display_reaction_power
 
-        return display_reaction_power(self._macro_state.power_percent)
+        return display_reaction_power(live_power_percent(self._macro_state))
 
     @Property(int, constant=False, notify=macroStateChanged)
     def macroDkStock(self) -> int:
@@ -1073,6 +1084,10 @@ class AppBridge(QObject):
             data["character_claim"] = character
         elif key == "roll_delay_sec":
             data[key] = float(value) if value.strip() else 0.6
+        elif key == "humanize_roll_delay":
+            data[key] = value.lower() in {"1", "true", "yes", "on"}
+        elif key == "roll_delay_jitter_sec":
+            data[key] = float(value) if value.strip() else 0.4
         else:
             data[key] = value
         self._presets.update_preset(preset_id, MacroConfig.from_dict(data))
@@ -1094,6 +1109,8 @@ class AppBridge(QObject):
                     "roll_command": data["roll_command"],
                     "prefix": data["prefix"],
                     "roll_delay_sec": data["roll_delay_sec"],
+                    "humanize_roll_delay": data.get("humanize_roll_delay", False),
+                    "roll_delay_jitter_sec": data.get("roll_delay_jitter_sec", 0.4),
                     "notification_mode": data["notification_mode"],
                 },
                 "character_claim": data["character_claim"],
@@ -1133,6 +1150,8 @@ class AppBridge(QObject):
                 "roll_command",
                 "prefix",
                 "roll_delay_sec",
+                "humanize_roll_delay",
+                "roll_delay_jitter_sec",
                 "notification_mode",
             ):
                 if key in basic_patch:
@@ -1553,10 +1572,7 @@ class AppBridge(QObject):
         set_minigame_account(resolved.account_id, account_name)
         set_chaos_account(resolved.account_id, account_name)
 
-        from macro.perk9_daily import sync_perk9_clicks_from_log
-
-        sync_perk9_clicks_from_log(self._macro_state)
-        self._apply_sheet_caps_to_run_state(resolved.channel_profile_id)
+        self._restore_known_run_state(resolved.account_id, resolved.channel_profile_id)
 
         channel_profile = self._profiles.find_channel_by_profile_id(
             resolved.channel_profile_id
@@ -1601,32 +1617,27 @@ class AppBridge(QObject):
 
     def _reset_macro_state_preserve_identity(self) -> None:
         """Clear channel-specific runtime state while keeping user identity and log."""
-        if (
-            self._macro_config.character_claim.persist_tu_state
-            and self._run_account_id
-            and self._run_channel_profile_id
-        ):
-            if self._load_persisted_runtime_state(
-                self._run_account_id,
-                self._run_channel_profile_id,
-            ):
-                return
-
         state = self._macro_state
         state.rolls_left = None
         state.rolls_us_bonus = None
         state.us_stacked = None
         state.claim_available = None
         state.claim_cooldown_minutes = None
+        state.claim_cooldown_at = ""
         state.power_percent = None
         state.power_tracked_at = 0.0
+        state.power_updated_at = ""
         state.dk_stock = None
         state.dk_next_minutes = None
+        state.dk_reset_at = ""
         state.rolls_reset_minutes = None
+        state.rolls_reset_at = ""
         state.next_claim_reset_minutes = None
+        state.claim_reset_at = ""
         state.claim_expire_sec = None
         state.rt_available = None
         state.rt_next_minutes = None
+        state.rt_reset_at = ""
         state.phase = MacroPhase.IDLE
         state.kakera_clicks_today = 0
         state.kakera_clicks_day = ""
@@ -1635,40 +1646,98 @@ class AppBridge(QObject):
         state.perk9_clicks_today = 0
         state.perk9_clicks_day = ""
 
-        from macro.perk9_daily import sync_perk9_clicks_from_log
-
-        sync_perk9_clicks_from_log(state)
-        self._apply_sheet_caps_to_run_state(self._run_channel_profile_id)
-
-    def _load_persisted_runtime_state(
+    def _restore_known_run_state(
         self,
         account_id: str,
         channel_profile_id: str,
-    ) -> bool:
-        from macro.runtime_store import apply_to_state, load_runtime_record
+    ) -> None:
+        """Fill perk 8/9, roll cap, and cached reset times for this account/channel.
+
+        A new Connect used to start from a blank ``AccountState``. We still do
+        not know rolls *left* or claim *ready* until ``$tu``, but the daily
+        perk counters, ``$bonus`` roll pool, and last reset deadlines are
+        already on disk.
+        """
+        from macro.minigame_daily import load_minigame_record, refresh_minigames_if_refill_passed
+        from macro.perk8_daily import apply_record_to_state, load_perk8_record
+        from macro.perk9_daily import (
+            apply_record_to_state as apply_perk9_record_to_state,
+            load_perk9_record,
+            sync_perk9_clicks_from_log,
+        )
+        from macro.runtime_store import (
+            apply_timers_to_state,
+            apply_to_state,
+            load_runtime_record,
+        )
+
+        if not account_id or not channel_profile_id:
+            self._apply_sheet_caps_to_run_state(channel_profile_id)
+            return
 
         daily = self._get_daily_resets_for(account_id, channel_profile_id)
-        record = load_runtime_record(daily)
+        apply_record_to_state(self._macro_state, load_perk8_record(daily))
+        self._apply_sheet_caps_to_run_state(channel_profile_id)
+        apply_perk9_record_to_state(self._macro_state, load_perk9_record(daily))
+        refresh_minigames_if_refill_passed(load_minigame_record(daily))
+        sync_perk9_clicks_from_log(self._macro_state)
+
         settings: dict[str, Any] | None = None
         bundle = self._channel_settings_bundle(channel_profile_id)
         if bundle:
-            _channel, settings = bundle
-        result = apply_to_state(
-            self._macro_state,
-            record,
-            settings=settings,
-        )
-        if result.applied:
-            self._apply_sheet_caps_to_run_state(channel_profile_id)
-            self._append_activity_log(
-                f"Restored saved $tu state — {result.message}"
+            settings = bundle[1]
+        record = load_runtime_record(daily)
+        persist_tu = bool(self._macro_config.character_claim.persist_tu_state)
+        restored_tu = False
+        had_rolls = self._macro_state.rolls_left is not None
+        if persist_tu:
+            result = apply_to_state(self._macro_state, record, settings=settings)
+            if result.applied:
+                restored_tu = True
+                if not had_rolls:
+                    self._append_activity_log(
+                        f"Restored saved $tu state — {result.message}"
+                    )
+        if not restored_tu:
+            apply_timers_to_state(
+                self._macro_state,
+                record,
+                settings=settings,
             )
-            self._notify_macro()
-            return True
-        return False
+        self._notify_macro()
+        self._notify_run_summary()
 
-    def _append_activity_log(self, text: str) -> None:
-        ActivityLog(self._macro_state, on_update=self._notify_macro).write(text)
+    def _append_activity_log(
+        self,
+        text: str,
+        *,
+        severity: ActivitySeverity | None = None,
+    ) -> None:
+        ActivityLog(self._macro_state, on_update=self._notify_macro).write(
+            text, severity=severity
+        )
+
+    def _write_live_feed(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+    ) -> None:
+        """Mirror Mudae channel text into the Run feed (not macro skip chatter)."""
+        if parsed.kind == MessageKind.ROLL:
+            if snapshot.edited:
+                return
+            # The roll loop logs the card after a button refresh so reacts are
+            # complete; skip the first-parse copy while a session is running.
+            if self._engine is not None and self._engine.is_running:
+                return
+        formatted = format_live_feed(snapshot, parsed)
+        if not formatted:
+            return
+        text, severity = formatted
+        if self._engine is not None:
+            self._engine.write_activity(text, severity=severity)  # type: ignore[arg-type]
+        else:
+            self._append_activity_log(text, severity=severity)  # type: ignore[arg-type]
 
     def _schedule_run_target_switch(self) -> None:
         """Move the live Discord session to the newly selected run target."""
@@ -1920,6 +1989,7 @@ class AppBridge(QObject):
                 "_deliver_keys_notify",
                 Qt.ConnectionType.QueuedConnection,
             )
+        self._write_live_feed(snapshot, parsed)
 
     @Slot()
     def _deliver_soulmates_notify(self) -> None:
@@ -2021,6 +2091,7 @@ class AppBridge(QObject):
 
         if is_perk9_sphere_click(parsed.fields.get("sphere_type")):
             self._macro_state.record_perk9_click()
+            self._persist_perk9_progress()
         return True
 
     def _try_record_key_events(
@@ -2083,7 +2154,113 @@ class AppBridge(QObject):
             return
         from mudae.parsers.minigame_exhausted import format_exhausted_activity
 
+        self._persist_minigame_exhausted(result)
         self._set_status(format_exhausted_activity(result))
+
+    def _minigame_skip_message(self, game: str) -> str | None:
+        from macro.minigame_daily import (
+            load_minigame_record,
+            refresh_minigames_if_refill_passed,
+            should_skip_game,
+        )
+
+        daily = self._get_daily_resets_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
+        record = refresh_minigames_if_refill_passed(load_minigame_record(daily))
+        if not should_skip_game(record, game):
+            return None
+        eta = record.refill_at or "unknown"
+        return f"${game}: skipped until refill ({eta})"
+
+    def _persist_minigame_exhausted(self, result: dict[str, Any] | None) -> None:
+        if not result:
+            return
+        game = str(result.get("game") or "").lstrip("$").lower()
+        if game not in {"oh", "oc", "oq", "ot"}:
+            return
+        from macro.minigame_daily import (
+            load_minigame_record,
+            mark_game_exhausted,
+            save_minigame_record,
+        )
+
+        daily_get, daily_save = self._daily_resets_callbacks_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
+        refill = result.get("refill_minutes")
+        try:
+            refill_minutes = int(refill) if refill is not None else None
+        except (TypeError, ValueError):
+            refill_minutes = None
+        daily = dict(daily_get())
+        daily_save(
+            save_minigame_record(
+                daily,
+                mark_game_exhausted(
+                    load_minigame_record(daily),
+                    game,
+                    refill_minutes=refill_minutes,
+                ),
+            )
+        )
+
+    def _persist_perk9_progress(self) -> None:
+        from macro.perk9_daily import (
+            load_perk9_record,
+            persist_click_progress,
+            save_perk9_record,
+        )
+
+        daily_get, daily_save = self._daily_resets_callbacks_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
+        daily = dict(daily_get())
+        daily_save(
+            save_perk9_record(
+                daily,
+                persist_click_progress(
+                    load_perk9_record(daily),
+                    clicked_today=int(self._macro_state.perk9_clicks_today),
+                    click_max=int(self._macro_state.perk9_click_max),
+                ),
+            )
+        )
+
+    async def _play_daily_minigames_from_engine(self) -> None:
+        if not self._actions or not self._monitor:
+            return
+        if self._minigames_busy():
+            return
+        daily_get, daily_save = self._daily_resets_callbacks_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
+        self._minigames_running = True
+        try:
+            runner = PlayAllMinigames(
+                self._actions,
+                self._monitor,
+                log=self._append_activity_log,
+                on_game_reward=lambda game, amount, clicks: self._record_minigame_spheres(
+                    game, amount, clicks=clicks
+                ),
+                on_game_result=lambda _game, result: self._record_minigame_session(
+                    result, log=self._append_activity_log
+                ),
+                daily_get=daily_get,
+                daily_save=daily_save,
+                state=self._macro_state,
+            )
+            result = await runner.play(prefix=self._macro_config.prefix)
+            self._minigame_availability = dict(result.get("availability") or {})
+            for game_result in (result.get("played") or {}).values():
+                if game_result.get("reason") == "exhausted":
+                    self._apply_minigame_play_status(game_result)
+                    break
+        except Exception as exc:  # noqa: BLE001 - surface to the activity log
+            self._append_activity_log(f"play-all error: {exc}")
+        finally:
+            self._minigames_running = False
 
     def _record_minigame_session(
         self,
@@ -2245,6 +2422,7 @@ class AppBridge(QObject):
             account_id=resolved.account_id,
             on_priority_pause=lambda: self._run_account_dailies(from_engine=True),
             priority_wake_hint=lambda: seconds_until_due(self._accounts.accounts),
+            play_daily_minigames=self._play_daily_minigames_from_engine,
         )
         if channel_settings is not None:
             self._engine.update_run_target(
@@ -2375,13 +2553,10 @@ class AppBridge(QObject):
         self._persist()
         self._macro_state = AccountState()
         self._session_started_at = datetime.now(timezone.utc)
-        self._notify_run_summary()
-        if resolved.macro_config.character_claim.persist_tu_state:
-            self._load_persisted_runtime_state(
-                resolved.account_id,
-                resolved.channel_profile_id,
-            )
-        self._apply_sheet_caps_to_run_state(resolved.channel_profile_id)
+        self._restore_known_run_state(
+            resolved.account_id,
+            resolved.channel_profile_id,
+        )
         self._set_connecting(True)
         self._set_status("Connecting…")
         self._thread = threading.Thread(
@@ -2753,6 +2928,11 @@ class AppBridge(QObject):
         if self._minigames_busy():
             self._set_status("Stop the minigame before playing $oh")
             return
+        skip = self._minigame_skip_message("oh")
+        if skip:
+            self._set_status(skip)
+            self._append_activity_log(skip)
+            return
 
         activity, recorder = self._begin_minigame_session("oh")
         game = OhSphereGame(self._actions, self._monitor, log=activity.write)
@@ -2796,6 +2976,11 @@ class AppBridge(QObject):
         if self._minigames_busy():
             self._set_status("Stop the minigame before playing $oc")
             return
+        skip = self._minigame_skip_message("oc")
+        if skip:
+            self._set_status(skip)
+            self._append_activity_log(skip)
+            return
 
         activity, recorder = self._begin_minigame_session("oc")
         game = OcSphereGame(self._actions, self._monitor, log=activity.write)
@@ -2838,6 +3023,11 @@ class AppBridge(QObject):
             return
         if self._minigames_busy():
             self._set_status("Stop the minigame before playing $oq")
+            return
+        skip = self._minigame_skip_message("oq")
+        if skip:
+            self._set_status(skip)
+            self._append_activity_log(skip)
             return
 
         activity, recorder = self._begin_minigame_session("oq")
@@ -2895,12 +3085,18 @@ class AppBridge(QObject):
                 result, recorder=recorder, log=activity.write
             )
 
+        daily_get, daily_save = self._daily_resets_callbacks_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
         runner = PlayAllMinigames(
             self._actions,
             self._monitor,
             log=activity.write,
             on_game_reward=_on_reward,
             on_game_result=_on_result,
+            daily_get=daily_get,
+            daily_save=daily_save,
+            state=self._macro_state,
         )
 
         async def _run() -> None:
@@ -2910,6 +3106,8 @@ class AppBridge(QObject):
                 self._minigame_availability = dict(result.get("availability") or {})
                 if result.get("reason") == "ohu failed":
                     reason = "error"
+                elif result.get("reason") == "skipped until refill":
+                    reason = "finished"
                 for game_result in (result.get("played") or {}).values():
                     if game_result.get("reason") == "exhausted":
                         self._apply_minigame_play_status(game_result)

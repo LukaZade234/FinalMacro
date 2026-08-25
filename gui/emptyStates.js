@@ -31,14 +31,14 @@ function chartRangeEmpty(connected, hasAnyEntries, noun) {
 function runFeedEmpty(connected) {
     if (!connected)
         return "Not connected — connect to see live activity."
-    return "No activity this session — start the macro or run a check."
+    return "Waiting for Mudae in this channel."
 }
 
 function activityLogEmpty(connected, hasAnyEntries) {
     if (!hasAnyEntries) {
         if (!connected)
             return "Not connected — connect to see activity here."
-        return "No activity this session — start the macro or run a check."
+        return "Waiting for Mudae in this channel."
     }
     return "No lines match this filter."
 }

@@ -100,9 +100,12 @@ def test_record_new_soulmate_uses_recording_account(tmp_path, monkeypatch):
         buttons=[],
         created_at="12:00:00",
     )
-    entry = record_new_soulmate(snapshot, {"character_name": "Bob", "series": "Test"})
+    entry = record_new_soulmate(
+        snapshot, {"character_name": "Bob", "series": "Test", "starwish": True}
+    )
     assert entry["account_id"] == "acc42"
     assert entry["account_name"] == "Roller"
+    assert entry["starwish"] is True
     clear_recording_account()
 
 

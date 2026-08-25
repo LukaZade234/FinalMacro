@@ -84,7 +84,7 @@ def test_record_and_stats(tmp_path, monkeypatch):
     )
     record_roll_bku_earning(
         snapshot,
-        {"bku": 500, "bku_reset": True, "character_name": "Alice"},
+        {"bku": 500, "bku_reset": True, "character_name": "Alice", "starwish": True},
         now=now,
     )
 
@@ -96,7 +96,9 @@ def test_record_and_stats(tmp_path, monkeypatch):
     assert len(payload["recent"]) == 2
     assert len(payload["by_method"]) == 2
     assert payload["recent"][0]["earn_method_label"] == earn_method_label("bku_reset")
+    assert payload["recent"][0]["starwish"] is True
     assert payload["recent"][1]["earn_method_label"] == earn_method_label("kakera_click")
+    assert payload["recent"][1]["starwish"] is False
 
 
 def test_build_stats_by_method():

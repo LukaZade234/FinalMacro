@@ -55,9 +55,13 @@ def test_classify_activity_line():
 
     assert classify_activity_line("Claimed Rem (you)") == "claim"
     assert classify_activity_line("kakera click ×2 Maki: matched") == "click"
+    assert classify_activity_line(":kakeraT: TestUser +546 ($k)") == "click"
+    assert classify_activity_line(":spB: lukazade234 +72 (1/15)") == "click"
     assert classify_activity_line("sphere skip Rem: no button") == "skip"
     assert classify_activity_line("Roll embed timeout") == "error"
     assert classify_activity_line("Sent $tu") == "info"
+    assert classify_activity_line("$wa") == "info"
+    assert classify_activity_line("Roll 12: $wa") == "info"
 
 
 def test_roll_stop_tracker_warning_then_tail():
@@ -152,6 +156,33 @@ def test_macro_config_roundtrip():
     assert restored.claim_best_at_claim_reset is False
     assert restored.normalized_roll_command() == "wa"
     assert restored.roll_delay() >= 0.6
+
+
+def test_humanize_roll_delay_roundtrip_and_jitter(monkeypatch):
+    cfg = MacroConfig(
+        humanize_roll_delay=True,
+        roll_delay_sec=0.8,
+        roll_delay_jitter_sec=0.3,
+    )
+    restored = MacroConfig.from_dict(cfg.to_dict())
+    assert restored.humanize_roll_delay is True
+    assert restored.roll_delay_jitter_sec == 0.3
+    monkeypatch.setattr("macro.config.random.uniform", lambda _a, _b: 0.25)
+    delay = restored.roll_delay()
+    assert delay == 0.8 + 0.25
+
+
+def test_humanize_off_uses_fixed_delay(monkeypatch):
+    calls = []
+
+    def _uniform(a, b):
+        calls.append((a, b))
+        return 0.5
+
+    monkeypatch.setattr("macro.config.random.uniform", _uniform)
+    cfg = MacroConfig(humanize_roll_delay=False, roll_delay_sec=0.9)
+    assert cfg.roll_delay() == 0.9
+    assert calls == []
 
 
 def test_notification_mode_config_roundtrip():

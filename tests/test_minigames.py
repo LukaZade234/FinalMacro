@@ -98,6 +98,10 @@ def test_parse_ohu_summary_and_detection():
     parsed = parse_ohu(_OHU_SAMPLE)
     assert parsed.fields["oh_total"] == 7
     assert parsed.fields["perk8_refill_minutes"] == 5 * 60 + 49
+    assert parsed.fields["perk9_clicked_today"] == 7
+    assert parsed.fields["perk9_click_max"] == 15
+    assert parsed.fields["megasphere_left"] is False
+    assert parsed.fields["sphere_stock"] == 3924
     assert "$oh 7" in parsed.summary
     assert "$oq 9" in parsed.summary
 
@@ -268,3 +272,111 @@ def test_play_all_skips_zero_uses(monkeypatch):
     )
     asyncio.run(runner.play())
     assert sent == ["oc:2:$"]
+
+
+def test_play_all_skips_ohu_when_playable_games_exhausted():
+    from macro.minigame_daily import (
+        MINIGAME_DAILY_KEY,
+        MinigameDailyEntry,
+        MinigameDailyRecord,
+        save_minigame_record,
+    )
+
+    store = {"value": {}}
+    record = MinigameDailyRecord(
+        refill_at="2099-01-01T00:00:00+00:00",
+        games={
+            "oh": MinigameDailyEntry(exhausted=True, total=0),
+            "oc": MinigameDailyEntry(exhausted=True, total=0),
+            "oq": MinigameDailyEntry(exhausted=True, total=0),
+            "ot": MinigameDailyEntry(exhausted=False, total=2),
+        },
+    )
+    store["value"] = save_minigame_record({}, record)
+    sent: list[str] = []
+    actions = _FakeActions(
+        {
+            "oh_total": 4,
+            "oc_total": 2,
+            "oq_total": 1,
+            "ot_total": 2,
+            "oh_left": 4,
+            "oh_stored": 0,
+            "oc_left": 2,
+            "oc_stored": 0,
+            "oq_left": 1,
+            "oq_stored": 0,
+            "ot_left": 2,
+            "ot_stored": 0,
+        }
+    )
+    logs: list[str] = []
+    runner = PlayAllMinigames(
+        actions,
+        SimpleNamespace(),
+        log=logs.append,
+        between_games_sec=0,
+        daily_get=lambda: store["value"],
+        daily_save=lambda daily: store.__setitem__("value", daily),
+    )
+    result = asyncio.run(runner.play())
+    assert actions.sent == []
+    assert sent == []
+    assert result["reason"] == "skipped until refill"
+    assert any("skipped until refill" in line for line in logs)
+    assert MINIGAME_DAILY_KEY in store["value"]
+
+
+def test_play_all_persists_ohu_totals(monkeypatch):
+    monkeypatch.setattr(
+        "macro.minigames.OhSphereGame",
+        lambda *a, **k: _FakeGame("oh", {"reason": "done", "reward": 0}, []),
+    )
+    monkeypatch.setattr(
+        "macro.minigames.OcSphereGame",
+        lambda *a, **k: _FakeGame("oc", {"reason": "done", "reward": 0}, []),
+    )
+    monkeypatch.setattr(
+        "macro.minigames.OqSphereGame",
+        lambda *a, **k: _FakeGame("oq", {"reason": "done", "reward": 0}, []),
+    )
+    store = {"value": {}}
+    actions = _FakeActions(
+        {
+            "oh_left": 0,
+            "oh_stored": 0,
+            "oh_total": 0,
+            "oc_left": 0,
+            "oc_stored": 0,
+            "oc_total": 0,
+            "oq_left": 0,
+            "oq_stored": 0,
+            "oq_total": 0,
+            "ot_left": 0,
+            "ot_stored": 1,
+            "ot_total": 1,
+            "perk8_refill_minutes": 120,
+            "perk9_clicked_today": 15,
+            "perk9_click_max": 15,
+        }
+    )
+    runner = PlayAllMinigames(
+        actions,
+        SimpleNamespace(),
+        log=lambda _t: None,
+        between_games_sec=0,
+        daily_get=lambda: store["value"],
+        daily_save=lambda daily: store.__setitem__("value", daily),
+    )
+    asyncio.run(runner.play())
+    from macro.minigame_daily import load_minigame_record, should_skip_playable_minigames
+    from macro.perk9_daily import load_perk9_record
+
+    daily = store["value"]
+    minigames = load_minigame_record(daily)
+    assert should_skip_playable_minigames(minigames) is True
+    assert minigames.entry("ot").total == 1
+    perk9 = load_perk9_record(daily)
+    assert perk9.last_clicked == 15
+    assert perk9.last_click_max == 15
+    assert perk9.clicks_exhausted is True

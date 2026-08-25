@@ -3,7 +3,7 @@
 Channel profiles store::
 
     daily_resets: {
-        "<account_id>": { "perk8": { ... } },
+        "<account_id>": { "perk8": { ... }, "minigames": { ... }, "perk9": { ... } },
         ...
     }
 
@@ -15,10 +15,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from macro.minigame_daily import MINIGAME_DAILY_KEY
 from macro.perk8_daily import PERK8_DAILY_KEY
+from macro.perk9_daily import PERK9_DAILY_KEY
 
 # Keys that belong inside an account slice, not at the channel root.
-_ACCOUNT_SLICE_KEYS = frozenset({PERK8_DAILY_KEY, "macro_runtime"})
+_ACCOUNT_SLICE_KEYS = frozenset(
+    {PERK8_DAILY_KEY, PERK9_DAILY_KEY, MINIGAME_DAILY_KEY, "macro_runtime"}
+)
 
 
 def is_legacy_flat_daily_store(channel_daily: dict[str, Any] | None) -> bool:

@@ -89,6 +89,25 @@ Item {
         return payload.by_method || []
     }
 
+    function methodIcon(methodId) {
+        var id = String(methodId || "")
+        if (id.indexOf("bku") === 0)
+            return MudaeEmoji.urlFor("bku")
+        if (id === "kakera_click")
+            return MudaeEmoji.kakeraUrl("kakera")
+        return ""
+    }
+
+    function kakeraRowIcon(entry) {
+        var typed = MudaeEmoji.kakeraUrl(entry.kakera_type)
+        if (typed)
+            return typed
+        var method = String(entry.earn_method || "")
+        if (method.indexOf("bku") === 0)
+            return MudaeEmoji.urlFor("bku")
+        return ""
+    }
+
     function filteredDailySeries() {
         return payload.daily_series || []
     }
@@ -291,18 +310,34 @@ Item {
                         border.color: Theme.border
                         border.width: 1
                         implicitHeight: 52
-                        implicitWidth: methodLabel.implicitWidth + amountLabel.implicitWidth + 24
+                        implicitWidth: Math.max(
+                            methodLabel.implicitWidth + (methodIcon(modelData.id) !== "" ? 18 : 0),
+                            amountLabel.implicitWidth
+                        ) + 24
 
-                        Column {
+                            Column {
                             anchors.centerIn: parent
                             spacing: 2
 
-                            Label {
-                                id: methodLabel
+                            Row {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData.label
-                                color: Theme.fgSecondary
-                                font.pixelSize: 10
+                                spacing: 4
+                                Image {
+                                    visible: methodIcon(modelData.id) !== ""
+                                    source: methodIcon(modelData.id)
+                                    width: 14
+                                    height: 14
+                                    sourceSize.width: 14
+                                    sourceSize.height: 14
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                }
+                                Label {
+                                    id: methodLabel
+                                    text: modelData.label
+                                    color: Theme.fgSecondary
+                                    font.pixelSize: 10
+                                }
                             }
                             Label {
                                 id: amountLabel
@@ -445,19 +480,52 @@ Item {
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
-                                Label {
+                                Item {
                                     Layout.preferredWidth: 72
-                                    text: modelData.kakera_type || "—"
-                                    color: Theme.fgMuted
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
+                                    Layout.preferredHeight: 18
+                                    Image {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: kakeraRowIcon(modelData) !== ""
+                                        source: kakeraRowIcon(modelData)
+                                        width: 16
+                                        height: 16
+                                        sourceSize.width: 16
+                                        sourceSize.height: 16
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                    }
+                                    Label {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: kakeraRowIcon(modelData) === ""
+                                        text: modelData.kakera_type || "—"
+                                        color: Theme.fgMuted
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                    }
                                 }
-                                Label {
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    text: modelData.character_name || "—"
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
+                                    spacing: 4
+                                    Image {
+                                        visible: !!modelData.starwish
+                                        source: MudaeEmoji.urlFor("starwish")
+                                        Layout.preferredWidth: 14
+                                        Layout.preferredHeight: 14
+                                        sourceSize.width: 14
+                                        sourceSize.height: 14
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.character_name || "—"
+                                        color: Theme.fgSecondary
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
                                 }
                             }
                         }

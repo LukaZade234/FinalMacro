@@ -343,6 +343,27 @@ Item {
                                 onEditingFinished: patch("basic", "roll_delay_sec", parseFloatOrDefault(text, 0.6))
                             }
                         }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Humanize delays (random extra wait between rolls)"
+                            checked: rules.basic ? !!rules.basic.humanize_roll_delay : false
+                            onToggled: patch("basic", "humanize_roll_delay", checked)
+                        }
+                        GridLayout {
+                            columns: 2
+                            columnSpacing: 12
+                            rowSpacing: 8
+                            Layout.fillWidth: true
+                            visible: rules.basic ? !!rules.basic.humanize_roll_delay : false
+
+                            Label { text: "Extra jitter (s)"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
+                            ThemedTextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                text: (rules.basic && rules.basic.roll_delay_jitter_sec !== undefined) ? rules.basic.roll_delay_jitter_sec.toString() : "0.4"
+                                onEditingFinished: patch("basic", "roll_delay_jitter_sec", parseFloatOrDefault(text, 0.4))
+                            }
+                        }
                     }
 
                     PanelCard {

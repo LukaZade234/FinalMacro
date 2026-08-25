@@ -174,7 +174,7 @@ Item {
                 label: "Rolls"
                 tone: "accent"
                 value: run.rollsLeft >= 0 ? String(run.rollsLeft) : "—"
-                suffix: (run.rollsLeft >= 0 && run.rollsMax > 0) ? "/" + run.rollsMax : ""
+                suffix: run.rollsMax > 0 ? "/" + run.rollsMax : ""
                 fraction: run.rollsFraction
                 caption: run.usText !== "—" ? run.usText : "no $us stack"
             }
@@ -183,10 +183,9 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 100
                 label: "Refill"
-                value: run.resetMinutes >= 0 ? String(run.resetMinutes) : "—"
-                suffix: run.resetMinutes >= 0 ? "m" : ""
+                value: run.resetText
                 fraction: run.resetFraction
-                caption: "waiting for $tu"
+                caption: run.resetMinutes >= 0 ? "" : "waiting for $tu"
             }
 
             HaulVital {
@@ -380,12 +379,14 @@ Item {
                                 anchors.right: stamp.left
                                 anchors.rightMargin: 10
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.text
+                                text: MudaeEmoji.feedHtml(modelData.text, 16)
+                                textFormat: Text.RichText
+                                wrapMode: Text.NoWrap
+                                clip: true
                                 color: modelData.kind === "error" ? Theme.bad
                                     : (modelData.kind === "skip" ? Theme.mute : Theme.dim)
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.sizeBody
-                                elide: Text.ElideRight
                             }
 
                             Text {

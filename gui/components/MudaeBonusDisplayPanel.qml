@@ -10,6 +10,15 @@ Item {
     property string channelProfileId: ""
     property var displayData: ({ sections: [], field_count: 0 })
 
+    function fieldIcon(field) {
+        var f = String(field || "")
+        if (f.indexOf("starwish") !== -1)
+            return MudaeEmoji.urlFor("starwish")
+        if (f.indexOf("bku") !== -1)
+            return MudaeEmoji.urlFor("bku")
+        return ""
+    }
+
     function refresh() {
         if (!channelProfileId) {
             displayData = { sections: [], field_count: 0 }
@@ -96,6 +105,18 @@ Item {
                                 radius: 2
                                 color: modelData.has_value ? Theme.success : Theme.fgMuted
                                 opacity: modelData.has_value ? 0.85 : 0.35
+                            }
+
+                            Image {
+                                Layout.preferredWidth: 14
+                                Layout.preferredHeight: 14
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: fieldIcon(modelData.field) !== ""
+                                source: fieldIcon(modelData.field)
+                                sourceSize.width: 14
+                                sourceSize.height: 14
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
                             }
 
                             Label {

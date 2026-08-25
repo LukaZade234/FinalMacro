@@ -320,3 +320,53 @@ def perk8_budget_applies(mode: Perk8PriorityMode) -> bool:
 def perk8_requirements_relaxed(mode: Perk8PriorityMode) -> bool:
     """When True, ``require_perk_8`` and budget priority are not enforced."""
     return mode in (Perk8PriorityMode.DONE, Perk8PriorityMode.INSUFFICIENT_POOL)
+
+
+def apply_record_to_state(state: Any, record: Perk8DailyRecord, *, now: dt.datetime | None = None) -> None:
+    """Copy persisted perk-8 clicks onto runtime state for the GUI / budget.
+
+    A spent day stays at ``cap/cap``. After UTC midnight (or a passed refill)
+    the used count goes back to 0 while the cap is kept, so a new session does
+    not look empty and does not show yesterday's 40/40.
+    """
+    from mudae.clock import utc_date_key
+
+    now = now or _utc_now()
+    record = refresh_exhausted_if_refill_passed(record, now=now)
+    if (
+        record.last_clicked is None
+        and record.last_click_max is None
+        and not record.clicks_exhausted
+    ):
+        return
+
+    updated = parse_iso(record.updated_at)
+    refill_at = parse_iso(record.refill_at)
+    new_day = bool(
+        (updated is not None and mudae_daily_date(updated) < mudae_daily_date(now))
+        or (refill_at is not None and now >= refill_at)
+    )
+    if new_day:
+        state.perk8_priority_mode = Perk8PriorityMode.ACTIVE.value
+        if record.last_click_max is not None:
+            state.perk8_click_max = record.last_click_max
+        state.kakera_clicks_today = 0
+        state.kakera_clicks_day = utc_date_key(now)
+        clamp = getattr(state, "clamp_kakera_clicks_to_perk8_cap", None)
+        if callable(clamp):
+            clamp()
+        return
+
+    mode = apply_cached_perk8(record)
+    state.perk8_priority_mode = mode.value
+    if record.last_click_max is not None:
+        state.perk8_click_max = record.last_click_max
+    clicked = record.last_clicked
+    if clicked is None and mode is Perk8PriorityMode.DONE and record.last_click_max is not None:
+        clicked = record.last_click_max
+    if clicked is not None:
+        state.kakera_clicks_today = int(clicked)
+        state.kakera_clicks_day = utc_date_key(now)
+        clamp = getattr(state, "clamp_kakera_clicks_to_perk8_cap", None)
+        if callable(clamp):
+            clamp()

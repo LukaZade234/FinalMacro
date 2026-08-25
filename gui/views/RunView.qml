@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
 import "../components"
+import "../clock.js" as Clock
 
 Item {
     id: runRoot
@@ -16,6 +17,7 @@ Item {
     property var stateData: ({})
     property var activeRules: ({})
     property var activityEntries: []
+    property double nowMs: Date.now()
 
     function refreshActiveRules() {
         try {
@@ -53,19 +55,27 @@ Item {
     }
 
     function rollsLeftText() {
-        var base = App.macroRollsLeft >= 0 ? App.macroRollsLeft.toString() : "—"
+        var left = App.macroRollsLeft >= 0 ? App.macroRollsLeft.toString() : "—"
+        if (App.macroRollsMax > 0)
+            left += "/" + App.macroRollsMax
         var us = stateData.rolls_us_bonus
         if (us !== undefined && us !== null && us > 0)
-            base += " (+" + us + " $us)"
+            left += " (+" + us + " $us)"
         var stacked = stateData.us_stacked
         if (stacked !== undefined && stacked !== null)
-            base += " · " + stacked + " stacked"
-        return base
+            left += " · " + stacked + " stacked"
+        return left
     }
 
     function powerText() {
-        if (App.macroPowerPercent >= 0)
-            return App.macroPowerPercent + "%"
+        var pct = Clock.livePowerPercent(
+            stateData.power_percent,
+            stateData.power_updated_at,
+            stateData.power_max_percent,
+            runRoot.nowMs
+        )
+        if (pct >= 0)
+            return pct + "%"
         return "—"
     }
 
@@ -76,6 +86,9 @@ Item {
     }
 
     function resetText() {
+        var sec = Clock.remainingSeconds(stateData.rolls_reset_at, runRoot.nowMs)
+        if (sec >= 0)
+            return (sec <= 0 ? 0 : Math.max(1, Math.floor(sec / 60))) + "m"
         var m = stateData.rolls_reset_minutes
         if (m !== undefined && m !== null)
             return m + "m"
@@ -96,7 +109,13 @@ Item {
     }
 
     function powerTone() {
-        if (App.macroPowerPercent >= 0 && App.macroPowerPercent < 30)
+        var pct = Clock.livePowerPercent(
+            stateData.power_percent,
+            stateData.power_updated_at,
+            stateData.power_max_percent,
+            runRoot.nowMs
+        )
+        if (pct >= 0 && pct < 30)
             return "warn"
         return "neutral"
     }
@@ -154,6 +173,16 @@ Item {
         }
         function onMacroLogChanged() {
             runRoot.refreshActivityLog()
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: App.connected
+        repeat: true
+        onTriggered: {
+            runRoot.nowMs = Date.now()
+            runRoot.refreshStatusBar()
         }
     }
 

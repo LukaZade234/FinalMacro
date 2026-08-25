@@ -160,7 +160,10 @@ def test_perk6_spawn_is_processed_after_parent_roll():
     assert outcome.ok is True
     perk6_logs = [entry.text for entry in state.activity_log if "perk 6" in entry.text.lower()]
     assert any("Akame spawned by POWER" in text for text in perk6_logs)
-    assert any("perk 6 · → Akame" in text for text in perk6_logs)
+    assert any(
+        "Akame" in entry.text and "spawned by POWER" in entry.text
+        for entry in state.activity_log
+    )
     assert any("settled" in text for text in perk6_logs)
 
 

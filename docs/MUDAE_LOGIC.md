@@ -247,8 +247,10 @@ else, then treat all characters equally once the 40 are used or the roll
 pool is under 10.
 
 State is persisted on the **channel profile** (`daily_resets.perk8`) so a
-restart does not re-query until refill. Other daily items (`$oh` / `$oc`
-counts, sphere stock) are not generalized yet — see `docs/TODO.md`.
+restart does not re-query until refill. Minigame uses (`daily_resets.minigames`)
+skip `$ohu` / play-all until refill. Perk 9 click counts (`daily_resets.perk9`)
+are restored for the Run tab; sphere reacts do not skip at the cap — Mudae
+stops spawning those buttons.
 
 ---
 
@@ -269,8 +271,9 @@ this as **clicks used / cap** on the Run page. The cap is
 - **Megasphere** (`spM`) on a roll is a free bonus, not a perk 9 click —
   the Run counter ignores it.
 - The macro increments by one on each confirmed **sphere button click**
-  (`MessageKind.SPHERE_CLICK`, excluding `spM`). No adaptive skip logic yet —
-  `SphereReactionRules.types_allowed` still governs which colours to click.
+  (`MessageKind.SPHERE_CLICK`, excluding `spM`). `SphereReactionRules.types_allowed`
+  still governs which colours to click. After the daily budget is used, Mudae
+  stops spawning the buttons — the reactor does not add its own skip.
 
 ---
 

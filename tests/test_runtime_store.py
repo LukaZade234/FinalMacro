@@ -8,6 +8,7 @@ from macro.runtime_store import (
     MACRO_RUNTIME_KEY,
     MacroRuntimeRecord,
     apply_power_with_regen,
+    apply_timers_to_state,
     apply_to_state,
     can_skip_initial_tu,
     load_runtime_record,
@@ -163,3 +164,29 @@ def test_apply_power_with_regen_from_iso():
     )
     apply_power_with_regen(state, record, now=_utc(2026, 8, 4, 12, 6))
     assert state.power_percent == 102.0
+
+
+def test_apply_timers_restores_reset_minutes_without_rolls_left():
+    saved = _utc(2026, 8, 4, 12, 0)
+    record = MacroRuntimeRecord(
+        saved_at=saved.isoformat(),
+        rolls_reset_at=(_utc(2026, 8, 4, 12, 40)).isoformat(),
+        claim_reset_at=(_utc(2026, 8, 4, 14, 0)).isoformat(),
+        setclaim=180,
+    )
+    state = AccountState()
+    assert apply_timers_to_state(state, record, now=_utc(2026, 8, 4, 12, 10)) is True
+    assert state.rolls_left is None
+    assert state.claim_available is None
+    assert state.rolls_reset_minutes == 30
+    assert state.next_claim_reset_minutes == 110
+
+
+def test_apply_timers_uses_settings_hourly_when_no_snapshot():
+    state = AccountState()
+    record = MacroRuntimeRecord()
+    settings = {"setinterval": 0, "shifthour": 0}
+    now = _utc(2026, 8, 4, 12, 20)
+    assert apply_timers_to_state(state, record, now=now, settings=settings) is True
+    assert state.rolls_reset_minutes == 40
+    assert state.next_claim_reset_minutes is None

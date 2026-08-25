@@ -1,6 +1,7 @@
 import QtQuick
 
 import gui 1.0
+import "../clock.js" as Clock
 
 /*
     Everything the Run designs display, read from the App bridge once and
@@ -61,9 +62,11 @@ Item {
     readonly property int usBonus: numberOr(stateData.rolls_us_bonus, 0)
     readonly property real usStacked: numberOr(stateData.us_stacked, 0)
 
-    readonly property string rollsText: rollsLeft >= 0
-        ? (rollsMax > 0 ? rollsLeft + "/" + rollsMax : String(rollsLeft))
-        : "—"
+    readonly property string rollsText: {
+        if (rollsMax > 0)
+            return (rollsLeft >= 0 ? rollsLeft : "—") + "/" + rollsMax
+        return rollsLeft >= 0 ? String(rollsLeft) : "—"
+    }
     // -1 when $settings has never been read, so the gauge has no scale.
     readonly property real rollsFraction: (rollsLeft >= 0 && rollsMax > 0)
         ? Math.min(1, rollsLeft / rollsMax)
@@ -76,35 +79,48 @@ Item {
         return parts.join(" · ")
     }
 
-    readonly property int resetMinutes: numberOr(stateData.rolls_reset_minutes, -1)
+    readonly property int resetSeconds: Clock.remainingSeconds(stateData.rolls_reset_at, nowMs)
+    readonly property int resetMinutes: resetSeconds >= 0
+        ? minutesFromSeconds(resetSeconds)
+        : numberOr(stateData.rolls_reset_minutes, -1)
     readonly property string resetText: resetMinutes >= 0 ? durationFromMinutes(resetMinutes) : "—"
-    // Rolls refill hourly, so the reset countdown is always out of 60 minutes.
-    readonly property real resetFraction: resetMinutes >= 0
-        ? Math.min(1, Math.max(0, (60 - resetMinutes) / 60))
-        : -1
-
-    // ---- claim -------------------------------------------------------------
+    readonly property real resetFraction: resetSeconds >= 0
+        ? Math.min(1, Math.max(0, (3600 - resetSeconds) / 3600))
+        : (resetMinutes >= 0 ? Math.min(1, Math.max(0, (60 - resetMinutes) / 60)) : -1)
 
     readonly property string claimStatus: App.macroClaimStatus
+    readonly property int claimCooldownSeconds: Clock.remainingSeconds(stateData.claim_cooldown_at, nowMs)
+    readonly property int claimCooldownMinutes: claimCooldownSeconds >= 0
+        ? minutesFromSeconds(claimCooldownSeconds)
+        : numberOr(stateData.claim_cooldown_minutes, -1)
+    readonly property int nextClaimSeconds: Clock.remainingSeconds(stateData.claim_reset_at, nowMs)
+    readonly property int nextClaimMinutes: nextClaimSeconds >= 0
+        ? minutesFromSeconds(nextClaimSeconds)
+        : numberOr(stateData.next_claim_reset_minutes, -1)
     readonly property bool claimReady: claimStatus === "can claim"
-    readonly property int claimCooldownMinutes: numberOr(stateData.claim_cooldown_minutes, -1)
-    readonly property int nextClaimMinutes: numberOr(stateData.next_claim_reset_minutes, -1)
+        || claimCooldownSeconds === 0
+        || (claimCooldownMinutes === 0 && numberOr(stateData.claim_cooldown_minutes, -1) >= 0)
 
     readonly property string claimText: {
-        if (claimStatus === "can claim") return "Ready"
+        if (claimReady) return "Ready"
         if (claimCooldownMinutes >= 0) return durationFromMinutes(claimCooldownMinutes)
         if (claimStatus === "on cooldown") return "Cooldown"
         return "—"
     }
     readonly property string nextClaimText: nextClaimMinutes >= 0
         ? durationFromMinutes(nextClaimMinutes)
-        : (claimCooldownMinutes >= 0 ? durationFromMinutes(claimCooldownMinutes) : "—")
+        : "—"
     readonly property string claimTone: claimReady ? "good" : (claimCooldownMinutes >= 0 ? "warn" : "neutral")
 
     // ---- power and dk ------------------------------------------------------
 
-    readonly property int powerPercent: App.macroPowerPercent
-    readonly property real powerMax: numberOr(stateData.power_max_percent, 100)
+    readonly property int powerPercent: Clock.livePowerPercent(
+        stateData.power_percent,
+        stateData.power_updated_at,
+        powerMax,
+        nowMs
+    )
+    readonly property real powerMax: numberOr(stateData.power_max_percent, 155)
     readonly property string powerText: powerPercent >= 0 ? powerPercent + "%" : "—"
     readonly property real powerFraction: (powerPercent >= 0 && powerMax > 0)
         ? Math.min(1, powerPercent / powerMax)
@@ -113,7 +129,10 @@ Item {
 
     readonly property int dkStock: App.macroDkStock
     readonly property string dkText: dkStock >= 0 ? String(dkStock) : "—"
-    readonly property int dkNextMinutes: numberOr(stateData.dk_next_minutes, -1)
+    readonly property int dkNextSeconds: Clock.remainingSeconds(stateData.dk_reset_at, nowMs)
+    readonly property int dkNextMinutes: dkNextSeconds >= 0
+        ? Math.ceil(dkNextSeconds / 60)
+        : numberOr(stateData.dk_next_minutes, -1)
 
     // ---- perks -------------------------------------------------------------
 
@@ -186,13 +205,21 @@ Item {
         return m > 0 ? h + "h " + m + "m" : h + "h"
     }
 
+    function minutesFromSeconds(seconds) {
+        if (seconds <= 0) return 0
+        return Math.max(1, Math.floor(seconds / 60))
+    }
+
     function durationFromSeconds(seconds) {
         var total = Math.floor(seconds)
         var h = Math.floor(total / 3600)
         var m = Math.floor((total % 3600) / 60)
-        if (h > 0) return h + "h " + m + "m"
         var s = total % 60
-        return m > 0 ? m + "m " + s + "s" : s + "s"
+        if (h > 0)
+            return m > 0 ? h + "h " + m + "m" : h + "h"
+        if (m > 0)
+            return s > 0 ? m + "m " + s + "s" : m + "m"
+        return s + "s"
     }
 
     function compact(value) {
@@ -211,7 +238,11 @@ Item {
         if (severity === "click") return "kakera"
         if (severity === "skip") return "skip"
         var text = String(entry.text || "")
-        if (/^(sent|checked|playing|running)\s+\$/i.test(text) || /\$\w+/.test(text.split(" ")[0]))
+        if (/\(\$k\)/i.test(text))
+            return "kakera"
+        if (/^roll\s+\d+:\s*\$/i.test(text)
+                || /^(sent|checked|playing|running)\s+\$/i.test(text)
+                || /\$\w+/.test(text.split(" ")[0]))
             return "cmd"
         return "info"
     }

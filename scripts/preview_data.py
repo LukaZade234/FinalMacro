@@ -45,12 +45,15 @@ def apply(bridge: Any) -> None:
     state.rolls_us_bonus = 3
     state.us_stacked = 2
     state.claim_available = True
-    state.claim_cooldown_minutes = None
-    state.next_claim_reset_minutes = 192
-    state.rolls_reset_minutes = 47
+    state.set_claim_cooldown(None)
+    state.set_claim_reset(192)
+    state.set_rolls_reset(47)
     state.power_percent = 68.0
+    from macro.live_clock import stamp_power_updated
+
+    stamp_power_updated(state)
     state.dk_stock = 3
-    state.dk_next_minutes = 26
+    state.set_dk_reset(26)
 
     start = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=len(FEED))
     state.activity_log[:] = [

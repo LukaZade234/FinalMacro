@@ -7,6 +7,31 @@ function pad2(n) {
     return (n < 10 ? "0" : "") + n
 }
 
+function remainingSeconds(iso, nowMs) {
+    if (!iso)
+        return -1
+    var ms = Date.parse(iso)
+    if (isNaN(ms))
+        return -1
+    return Math.max(0, Math.floor((ms - (nowMs || Date.now())) / 1000))
+}
+
+function livePowerPercent(anchored, updatedAt, maxPower, nowMs) {
+    if (anchored === undefined || anchored === null)
+        return -1
+    var n = Number(anchored)
+    if (isNaN(n))
+        return -1
+    var max = (maxPower !== undefined && maxPower !== null && Number(maxPower) > 0)
+        ? Number(maxPower)
+        : 155
+    var at = Date.parse(updatedAt || "")
+    var now = nowMs || Date.now()
+    if (!isNaN(at) && now > at)
+        n = Math.min(max, n + ((now - at) / 1000 / 180) * 1.0)
+    return Math.round(n)
+}
+
 function utcDateKey(now) {
     var d = now || new Date()
     return d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate())

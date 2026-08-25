@@ -6,9 +6,24 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
+from macro.minigame_daily import (
+    availability_from_record,
+    load_minigame_record,
+    mark_game_exhausted,
+    refresh_minigames_if_refill_passed,
+    save_minigame_record,
+    should_skip_playable_minigames,
+    update_record_from_ohu,
+)
 from macro.minigame_util import minigame_use_batches
 from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
+from macro.perk9_daily import (
+    apply_record_to_state as apply_perk9_record_to_state,
+    load_perk9_record,
+    save_perk9_record,
+    update_record_from_ohu as update_perk9_from_ohu,
+)
 from macro.sphere_game import OhSphereGame
 
 _OHU_SETTLE_SEC = 2.0
@@ -67,6 +82,9 @@ class PlayAllMinigames:
         on_game_reward: Callable[[str, int, int], None] | None = None,
         on_game_result: Callable[[str, dict[str, Any]], None] | None = None,
         between_games_sec: float = _BETWEEN_GAMES_SEC,
+        daily_get: Callable[[], dict[str, Any]] | None = None,
+        daily_save: Callable[[dict[str, Any]], None] | None = None,
+        state: Any | None = None,
     ) -> None:
         self._actions = actions
         self._monitor = monitor
@@ -74,6 +92,9 @@ class PlayAllMinigames:
         self._on_game_reward = on_game_reward
         self._on_game_result = on_game_result
         self._between_games_sec = between_games_sec
+        self._daily_get = daily_get
+        self._daily_save = daily_save
+        self._state = state
         self.availability: dict[str, int] = {
             f"{game}_{kind}": 0
             for game in ("oh", "oc", "oq", "ot")
@@ -81,6 +102,18 @@ class PlayAllMinigames:
         }
 
     async def play(self, *, prefix: str = "$") -> dict[str, Any]:
+        cached = self._load_refreshed_record()
+        if cached is not None and should_skip_playable_minigames(cached):
+            availability = availability_from_record(cached)
+            self.availability = availability
+            eta = cached.refill_at or "unknown"
+            self._log(f"$ohu: skipped until refill ({eta})")
+            return {
+                "availability": dict(availability),
+                "played": {},
+                "reason": "skipped until refill",
+            }
+
         availability = await self._query_ohu(prefix=prefix)
         if availability is None:
             return {
@@ -134,6 +167,7 @@ class PlayAllMinigames:
                 self._log(
                     f"play-all: +{oc_bonus} $oc from $oh hidden clicks → $oc {oc_uses}"
                 )
+            self._note_game_finished("oh", oh_result)
             await asyncio.sleep(self._between_games_sec)
         else:
             self._log("play-all: no $oh uses — skipping")
@@ -145,6 +179,7 @@ class PlayAllMinigames:
             played["oc"] = _merge_game_results(oc_results)
             for result in oc_results:
                 self._record_reward("oc", result)
+            self._note_game_finished("oc", played["oc"])
             await asyncio.sleep(self._between_games_sec)
         else:
             self._log("play-all: no $oc uses — skipping")
@@ -156,6 +191,7 @@ class PlayAllMinigames:
             played["oq"] = _merge_game_results(oq_results)
             for result in oq_results:
                 self._record_reward("oq", result)
+            self._note_game_finished("oq", played["oq"])
         else:
             self._log("play-all: no $oq uses — skipping")
 
@@ -218,4 +254,47 @@ class PlayAllMinigames:
         if parsed is None:
             self._log("$ohu timeout — cannot play all minigames")
             return None
-        return _availability_from_fields(dict(parsed.fields or {}))
+        fields = dict(parsed.fields or {})
+        self._persist_ohu_fields(fields)
+        return _availability_from_fields(fields)
+
+    def _load_refreshed_record(self):
+        if not self._daily_get:
+            return None
+        record = refresh_minigames_if_refill_passed(load_minigame_record(self._daily_get()))
+        return record
+
+    def _persist_daily(self, daily: dict[str, Any]) -> None:
+        if self._daily_save:
+            self._daily_save(daily)
+
+    def _persist_ohu_fields(self, fields: dict[str, Any]) -> None:
+        if not self._daily_get or not self._daily_save:
+            return
+        daily = dict(self._daily_get())
+        minigames = update_record_from_ohu(load_minigame_record(daily), fields)
+        daily = save_minigame_record(daily, minigames)
+        perk9 = update_perk9_from_ohu(load_perk9_record(daily), fields)
+        daily = save_perk9_record(daily, perk9)
+        self._persist_daily(daily)
+        if self._state is not None:
+            apply_perk9_record_to_state(self._state, perk9)
+
+    def _note_game_finished(self, game: str, result: dict[str, Any]) -> None:
+        reason = result.get("reason")
+        if reason not in {None, "done", "exhausted"}:
+            return
+        if not self._daily_get or not self._daily_save:
+            return
+        daily = dict(self._daily_get())
+        record = load_minigame_record(daily)
+        refill = result.get("refill_minutes")
+        try:
+            refill_minutes = int(refill) if refill is not None else None
+        except (TypeError, ValueError):
+            refill_minutes = None
+        daily = save_minigame_record(
+            daily,
+            mark_game_exhausted(record, game, refill_minutes=refill_minutes),
+        )
+        self._persist_daily(daily)

@@ -20,7 +20,8 @@ Item {
     ]
 
     property var draft: ({
-        basic: { prefix: "$", roll_command: "wa", roll_delay_sec: 0.6, notification_mode: false },
+        basic: { prefix: "$", roll_command: "wa", roll_delay_sec: 0.6,
+                 humanize_roll_delay: false, roll_delay_jitter_sec: 0.4, notification_mode: false },
         character_claim: { enabled: true, claim_on_wish_ping: true, only_final_hour: true,
                            auto_use_rt: false, min_kakera: null, max_claim_rank: null },
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
@@ -245,6 +246,27 @@ Item {
                             Layout.preferredHeight: 32
                             text: draft.basic.roll_delay_sec !== undefined ? draft.basic.roll_delay_sec.toString() : "0.6"
                             onEditingFinished: setDraftField("basic", "roll_delay_sec", parseFloatOrDefault(text, 0.6))
+                        }
+                    }
+                    ThemedCheckBox {
+                        Layout.fillWidth: true
+                        text: "Humanize delays (random extra wait between rolls)"
+                        checked: !!draft.basic.humanize_roll_delay
+                        onToggled: setDraftField("basic", "humanize_roll_delay", checked)
+                    }
+                    GridLayout {
+                        columns: 2
+                        columnSpacing: 12
+                        rowSpacing: 8
+                        Layout.fillWidth: true
+                        visible: !!draft.basic.humanize_roll_delay
+
+                        Label { text: "Extra jitter (s)"; color: Theme.fgSecondary; font.pixelSize: 11; Layout.preferredWidth: 140 }
+                        ThemedTextField {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 32
+                            text: draft.basic.roll_delay_jitter_sec !== undefined ? draft.basic.roll_delay_jitter_sec.toString() : "0.4"
+                            onEditingFinished: setDraftField("basic", "roll_delay_jitter_sec", parseFloatOrDefault(text, 0.4))
                         }
                     }
                     ThemedCheckBox {

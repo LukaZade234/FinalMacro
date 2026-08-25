@@ -240,14 +240,16 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 2
                             anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.text
+                            text: MudaeEmoji.feedHtml(modelData.text, 16, !parent.hit)
+                            textFormat: Text.RichText
+                            wrapMode: Text.NoWrap
+                            clip: true
                             color: parent.hit ? Theme.bg
                                 : (modelData.kind === "kakera" ? Theme.accent
                                 : (modelData.kind === "error" ? Theme.bad
                                 : (modelData.kind === "skip" ? Theme.mute : Theme.dim)))
                             font.family: Theme.monoFamily
                             font.pixelSize: Theme.sizeBody
-                            elide: Text.ElideRight
                         }
                     }
                 }

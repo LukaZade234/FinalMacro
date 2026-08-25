@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import re
 
-from mudae.parsers.ohu import parse_minigame_availability
+from typing import Any
+
+from mudae.parsers.ohu import (
+    parse_megasphere_left,
+    parse_minigame_availability,
+    parse_perk9_buttons,
+    parse_sphere_stock,
+)
 from mudae.types import MessageKind, ParseResult
 
 _PERK8_CLICKED_RE = re.compile(
@@ -13,10 +20,6 @@ _PERK8_CLICKED_RE = re.compile(
 )
 _PERK8_CLICKED_ALT_RE = re.compile(
     r"(?:\(perk\s*8\)\s*)?clicked today:?\s*\*{0,2}(\d+)\*{0,2}/(\d+)",
-    re.IGNORECASE,
-)
-_BUTTONS_CLICKED_RE = re.compile(
-    r"(\d+)\s*/\s*(\d+)\s+buttons?\s+clicked",
     re.IGNORECASE,
 )
 _PERK8_ROLLED_RE = re.compile(
@@ -86,7 +89,7 @@ def parse_perk8_clicked(content: str) -> tuple[int, int] | None:
     """Return ``(clicked, max)`` from perk-8 click counters."""
     if not content:
         return None
-    for pattern in (_PERK8_CLICKED_RE, _PERK8_CLICKED_ALT_RE, _BUTTONS_CLICKED_RE):
+    for pattern in (_PERK8_CLICKED_RE, _PERK8_CLICKED_ALT_RE):
         match = pattern.search(content)
         if match:
             return int(match.group(1)), int(match.group(2))
@@ -117,7 +120,7 @@ def is_ohu8_response(content: str) -> bool:
 
 def parse_ohu8(content: str) -> ParseResult:
     warnings: list[str] = []
-    fields: dict[str, int | None] = dict(parse_minigame_availability(content))
+    fields: dict[str, Any] = dict(parse_minigame_availability(content))
 
     clicked = parse_perk8_clicked(content)
     if clicked is not None:
@@ -134,6 +137,16 @@ def parse_ohu8(content: str) -> ParseResult:
     refill = parse_refill_minutes(content)
     if refill is not None:
         fields["perk8_refill_minutes"] = refill
+
+    buttons = parse_perk9_buttons(content)
+    if buttons is not None:
+        fields["perk9_clicked_today"], fields["perk9_click_max"] = buttons
+    megasphere_left = parse_megasphere_left(content)
+    if megasphere_left is not None:
+        fields["megasphere_left"] = megasphere_left
+    stock = parse_sphere_stock(content)
+    if stock is not None:
+        fields["sphere_stock"] = stock
 
     summary = "$ohu8"
     if fields.get("oh_total") or fields.get("oc_total") or fields.get("oq_total"):

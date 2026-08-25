@@ -311,6 +311,17 @@ def test_mark_exhausted_only_applies_while_active():
     assert any("daily perk 8 clicks used" in line for line in logs)
 
 
+def test_apply_mode_clamps_clicked_count_to_daily_cap():
+    runtime, ctx, _actions, _logs, _store = _make_runtime()
+    record = Perk8DailyRecord(last_clicked=67, last_click_max=40)
+
+    runtime.apply_mode(Perk8PriorityMode.DONE, record)
+
+    assert ctx.state.kakera_clicks_today == 40
+    assert ctx.state.perk8_click_max == 40
+    assert ctx.state.perk8_priority_mode == Perk8PriorityMode.DONE.value
+
+
 def test_mark_exhausted_ignored_when_not_active():
     runtime, ctx, _actions, _logs, store = _make_runtime()
     ctx.state.perk8_priority_mode = Perk8PriorityMode.DONE.value

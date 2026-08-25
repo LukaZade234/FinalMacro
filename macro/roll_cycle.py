@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from macro.actions import DiscordActions, is_perk6_spawn_parse_result
-from macro.activity_log import ActivityLog
+from macro.activity_log import ActivityLog, ActivitySeverity
 from macro.connection_recovery import ConnectionRecovery
 from macro.roll_context import RollContext
 from macro.roll_scheduler import (
@@ -44,6 +44,7 @@ from macro.sphere_reactor import SphereReactor
 from macro.state import AccountState, MacroPhase
 from mudae.parsers.us import is_us_stack_response, parse_us_stacked
 from mudae.parsers.pipeline import parse_mudae_message
+from mudae.live_feed import format_roll_line
 from mudae.types import MessageKind
 from mudae.buttons import is_kakera_button, is_sphere_button
 
@@ -97,6 +98,7 @@ class RollCycleEngine:
         account_id: str = "",
         on_priority_pause: Callable[[], Any] | None = None,
         priority_wake_hint: Callable[[], float | None] | None = None,
+        play_daily_minigames: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -107,6 +109,7 @@ class RollCycleEngine:
         self._on_persist = on_persist
         self._on_priority_pause = on_priority_pause
         self._priority_wake_hint = priority_wake_hint
+        self._play_daily_minigames = play_daily_minigames
         self._daily_get = daily_resets_get
         self._daily_save = daily_resets_save
         self._channel_settings: dict[str, Any] = {}
@@ -184,8 +187,6 @@ class RollCycleEngine:
         return bool(self._config.character_claim.persist_tu_state)
 
     def _save_runtime_state(self) -> None:
-        if not self._persist_tu_state_enabled():
-            return
         if not self._daily_get or not self._daily_save:
             return
         daily = self._daily_get()
@@ -217,6 +218,14 @@ class RollCycleEngine:
 
     def _log(self, text: str) -> None:
         self._activity.write(text)
+
+    def write_activity(
+        self,
+        text: str,
+        *,
+        severity: ActivitySeverity | None = None,
+    ) -> None:
+        self._activity.write(text, severity=severity)
 
     def _log_debug(self, text: str) -> None:
         self._activity.debug(text)
@@ -342,9 +351,17 @@ class RollCycleEngine:
     async def _on_scheduled_wake(self) -> None:
         await self._run_priority_pause()
         await self._perk8.maybe_refresh()
+        await self._maybe_play_daily_minigames()
 
     async def _maybe_refresh_perk8_status(self) -> None:
         await self._perk8.maybe_refresh()
+
+    async def _maybe_play_daily_minigames(self) -> None:
+        """Spend remaining ``$oh`` / ``$oc`` / ``$oq`` once per daily cycle."""
+        cb = self._play_daily_minigames
+        if cb is None or self._stop.is_set():
+            return
+        await cb()
 
     async def _roll_hourly_normal_segment(
         self,
@@ -377,6 +394,7 @@ class RollCycleEngine:
             config=self._config,
             state=self._state,
             log=self._log,
+            debug_log=self._log_debug,
         )
 
     def _sync_claim_window_from_tu(self) -> None:
@@ -554,6 +572,7 @@ class RollCycleEngine:
                     tu_fresh = False
 
                     await self._maybe_refresh_perk8_status()
+                    await self._maybe_play_daily_minigames()
 
                     normal_rolls = self._state.rolls_left or 0
                     if normal_rolls <= 0:
@@ -681,7 +700,7 @@ class RollCycleEngine:
             fields = parsed.fields
             self._state.rolls_left = 0
             if fields.get("rolls_reset_minutes") is not None:
-                self._state.rolls_reset_minutes = int(fields["rolls_reset_minutes"])
+                self._state.set_rolls_reset(int(fields["rolls_reset_minutes"]))
             self._notify()
             self._log(parsed.summary or "Hourly roll limit reached")
             return _RollOutcome(ok=False, rolls_left=0, roll_limit=True)
@@ -742,7 +761,8 @@ class RollCycleEngine:
         if fields.get("perk_6"):
             spawner = fields.get("spawned_by") or "?"
             spawn_note = f" · perk 6 spawn by {spawner}"
-        self._log(f"{log_prefix}→ {name}{ka_text}{spawn_note}")
+        self._log_debug(f"{log_prefix}→ {name}{ka_text}{spawn_note}")
+        self._log(format_roll_line(fields))
 
         rl = fields.get("rolls_left")
         if not fields.get("perk_6"):
@@ -1776,14 +1796,16 @@ class RollCycleEngine:
         self._state.rolls_us_bonus = int(us_bonus) if us_bonus is not None else None
         if "claim_available" in fields:
             self._state.claim_available = fields["claim_available"]
+            if fields["claim_available"]:
+                self._state.set_claim_cooldown(None)
         if "claim_cooldown_minutes" in fields:
-            self._state.claim_cooldown_minutes = fields["claim_cooldown_minutes"]
+            self._state.set_claim_cooldown(fields["claim_cooldown_minutes"])
         sync_reaction_power_fields(self._state, fields)
         sync_dk_fields_from_tu(self._state, fields)
         from macro.rt_manager import sync_rt_fields_from_tu
 
         sync_rt_fields_from_tu(self._state, fields)
         if "rolls_reset_minutes" in fields:
-            self._state.rolls_reset_minutes = int(fields["rolls_reset_minutes"])
+            self._state.set_rolls_reset(int(fields["rolls_reset_minutes"]))
         if "next_claim_reset_minutes" in fields and fields["next_claim_reset_minutes"] is not None:
-            self._state.next_claim_reset_minutes = int(fields["next_claim_reset_minutes"])
+            self._state.set_claim_reset(int(fields["next_claim_reset_minutes"]))

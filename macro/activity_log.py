@@ -62,14 +62,18 @@ def classify_activity_line(text: str) -> ActivitySeverity:
         or lower.startswith("claimed ")
         or "claim now" in lower
         or "character claim" in lower
+        or "are now married" in lower
     ):
         return "claim"
+    if "($k)" in lower:
+        return "click"
     if (
         " click ×" in lower
         or " click " in lower
         or lower.startswith("kakera click")
         or lower.startswith("sphere click")
         or "$oh: click" in lower
+        or (":sp" in lower and "(" in lower and "/" in lower)
     ):
         return "click"
     return "info"

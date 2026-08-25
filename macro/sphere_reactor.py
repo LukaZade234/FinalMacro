@@ -18,6 +18,11 @@ class SphereReactor:
     config: MacroConfig
     state: AccountState
     log: Callable[[str], None]
+    debug_log: Callable[[str], None] | None = None
+
+    def _debug(self, text: str) -> None:
+        if self.debug_log:
+            self.debug_log(text)
 
     async def react(
         self,
@@ -37,7 +42,7 @@ class SphereReactor:
         character = fields.get("character_name") or "?"
         if not decision.should_click:
             if rules.enabled:
-                self.log(f"sphere skip {character}: {decision.reason}")
+                self._debug(f"sphere skip {character}: {decision.reason}")
             return 0
 
         clicks = 0
@@ -49,7 +54,7 @@ class SphereReactor:
                 clicks += 1
 
         if clicks:
-            self.log(f"sphere click ×{clicks} {character}: {decision.reason}")
+            self._debug(f"sphere click ×{clicks} {character}: {decision.reason}")
         else:
             self.log(f"sphere click failed {character}")
         return clicks

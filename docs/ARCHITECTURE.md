@@ -83,6 +83,8 @@ changes.
 | `roll_scheduler.py` / `roll_stop.py` / `roll_interrupts.py` | Sleep, stop, wish-claim interrupt |
 | `us_stop.py` | `$us` stop options |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
+| `perk9_daily.py` | Daily perk-9 click counter |
+| `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
 | `sphere_game.py` / `oc_game.py` / `oq_game.py` | Individual minigames |
 | `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
@@ -103,6 +105,7 @@ changes.
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP** |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere) |
+| `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets) |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot |

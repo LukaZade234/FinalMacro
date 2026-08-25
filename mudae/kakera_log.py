@@ -195,6 +195,7 @@ def record_kakera_earning(
         "source": method,
         "kakera_type": fields.get("kakera_type") or fields.get("sphere_type"),
         "character_name": fields.get("character_name"),
+        "starwish": bool(fields.get("starwish")),
         "claimed_by": fields.get("claimed_by"),
         "recorded_at": stamp.isoformat(),
         "date_key": utc_date_key(stamp),

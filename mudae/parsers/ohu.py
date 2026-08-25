@@ -33,6 +33,20 @@ _OT_LEFT_RE = re.compile(
 # First $oh of the day can grant perk-10 bonuses from invested stock:
 # ``+2 $oq and +5,344 <:sp:…> from your invested spheres!``
 # ``+2 $oq, +1 $ot and +5,600 :sp: from your invested spheres!``
+# Shared header on ``$ohu`` / ``$ohu8`` / ``$ohu9``: ``7/15 buttons clicked``.
+_BUTTONS_CLICKED_RE = re.compile(
+    r"\*{0,2}(\d+)\*{0,2}\s*/\s*\*{0,2}(\d+)\*{0,2}\s+buttons?\s+clicked",
+    re.IGNORECASE,
+)
+_NO_MEGASPHERE_RE = re.compile(
+    r"no\s+(?:<:spm:[^>]+>|:spm:)\s+left\s+today",
+    re.IGNORECASE,
+)
+_STOCK_RE = re.compile(
+    r"stock:\s*\*{0,2}([\d,]+)\*{0,2}\s*(?:<:sp:|:sp:)",
+    re.IGNORECASE,
+)
+
 _INVESTED_ANCHOR_RE = re.compile(
     r"from your invested spheres",
     re.IGNORECASE,
@@ -85,6 +99,35 @@ def parse_minigame_availability(content: str) -> dict[str, int]:
     return fields
 
 
+def parse_perk9_buttons(content: str) -> tuple[int, int] | None:
+    """Return ``(clicked, max)`` from ``7/15 buttons clicked`` (perk 9, not perk 8)."""
+    if not content:
+        return None
+    match = _BUTTONS_CLICKED_RE.search(content)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def parse_megasphere_left(content: str) -> bool | None:
+    """``False`` when ``$ohu`` says no megaspheres left today; else ``None``."""
+    if not content:
+        return None
+    if _NO_MEGASPHERE_RE.search(content):
+        return False
+    return None
+
+
+def parse_sphere_stock(content: str) -> int | None:
+    """``:sp:`` inventory from the ``Stock: 3,924 :sp:`` line."""
+    if not content:
+        return None
+    match = _STOCK_RE.search(content)
+    if match is None:
+        return None
+    return int(match.group(1).replace(",", ""))
+
+
 def parse_oh_invested_bonus(content: str) -> dict[str, int]:
     """Parse perk-10 ``$oq`` / ``$ot`` / SP on the first ``$oh`` of the day."""
     empty = {"oq_bonus": 0, "ot_bonus": 0, "spheres_bonus": 0}
@@ -122,6 +165,16 @@ def parse_ohu(content: str) -> ParseResult:
     refill = parse_refill_minutes(content)
     if refill is not None:
         fields["perk8_refill_minutes"] = refill
+
+    buttons = parse_perk9_buttons(content)
+    if buttons is not None:
+        fields["perk9_clicked_today"], fields["perk9_click_max"] = buttons
+    megasphere_left = parse_megasphere_left(content)
+    if megasphere_left is not None:
+        fields["megasphere_left"] = megasphere_left
+    stock = parse_sphere_stock(content)
+    if stock is not None:
+        fields["sphere_stock"] = stock
 
     summary = "$ohu"
     parts = [

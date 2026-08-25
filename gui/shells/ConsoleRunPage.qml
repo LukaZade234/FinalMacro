@@ -213,7 +213,6 @@ Item {
                                 { key: "all", label: "all" },
                                 { key: "claim", label: "claim" },
                                 { key: "kakera", label: "kakera" },
-                                { key: "skip", label: "skip" },
                                 { key: "error", label: "error" }
                             ]
 
@@ -361,13 +360,15 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 15
                             anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.text
+                            text: MudaeEmoji.feedHtml(modelData.text, 16)
+                            textFormat: Text.RichText
+                            wrapMode: Text.NoWrap
+                            clip: true
                             color: modelData.kind === "claim" ? Theme.good
                                 : (modelData.kind === "error" ? Theme.bad
                                 : (modelData.kind === "skip" ? Theme.mute : Theme.dim))
                             font.family: Theme.monoFamily
                             font.pixelSize: Theme.sizeBody
-                            elide: Text.ElideRight
                         }
                     }
                 }

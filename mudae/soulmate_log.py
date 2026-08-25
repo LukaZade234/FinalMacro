@@ -190,6 +190,7 @@ def record_new_soulmate(
         "account_id": acc_id,
         "account_name": acc_name,
         "character_name": fields.get("character_name"),
+        "starwish": bool(fields.get("starwish")),
         "series": fields.get("series"),
         "owner": fields.get("owner"),
         "time": snapshot.created_at,

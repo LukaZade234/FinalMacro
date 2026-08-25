@@ -424,7 +424,7 @@ Item {
                         Label { Layout.preferredWidth: 110; text: "Account"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
                         Label { Layout.preferredWidth: 130; text: "Server"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
                         Label { Layout.preferredWidth: 90; text: "Channel"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
-                        Label { Layout.preferredWidth: 120; text: "Character"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
+                        Label { Layout.preferredWidth: 138; text: "Character"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
                         Label { Layout.fillWidth: true; text: "Series"; color: Theme.fgMuted; font.pixelSize: 10; font.weight: Font.DemiBold }
                     }
                 }
@@ -484,13 +484,27 @@ Item {
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
-                                Label {
-                                    Layout.preferredWidth: 120
-                                    text: modelData.character_name || "—"
-                                    color: Theme.fgPrimary
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                    elide: Text.ElideRight
+                                RowLayout {
+                                    Layout.preferredWidth: 138
+                                    spacing: 4
+                                    Image {
+                                        visible: !!modelData.starwish
+                                        source: MudaeEmoji.urlFor("starwish")
+                                        Layout.preferredWidth: 14
+                                        Layout.preferredHeight: 14
+                                        sourceSize.width: 14
+                                        sourceSize.height: 14
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.character_name || "—"
+                                        color: Theme.fgPrimary
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
+                                    }
                                 }
                                 Label {
                                     Layout.fillWidth: true
