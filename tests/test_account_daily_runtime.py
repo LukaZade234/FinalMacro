@@ -82,10 +82,11 @@ def test_run_plans_sends_one_account_then_restores_home():
 
 
 def test_run_plans_pauses_after_switch_and_between_commands():
-    sleeps: list[float] = []
+    events: list[str] = []
+    drains = 0
 
     async def sleep(seconds: float) -> None:
-        sleeps.append(seconds)
+        events.append(f"sleep:{seconds:g}")
 
     async def wait_for(predicate, *, timeout: float = 15.0):
         parsed = ParseResult(
@@ -98,7 +99,13 @@ def test_run_plans_pauses_after_switch_and_between_commands():
         return None
 
     async def send_command(command: str) -> int:
+        events.append(f"send:{command}")
         return 11 if command == "daily" else 10
+
+    def drain() -> None:
+        nonlocal drains
+        drains += 1
+        events.append("drain")
 
     runtime = AccountDailyRuntime(
         switch_to=AsyncMock(return_value=True),
@@ -108,6 +115,7 @@ def test_run_plans_pauses_after_switch_and_between_commands():
         sleep=sleep,
         log=lambda _t: None,
         persist_account=lambda *_a, **_k: None,
+        drain=drain,
         now=lambda: _at(1, 19),
     )
     plan = AccountDailyPlan(
@@ -125,7 +133,14 @@ def test_run_plans_pauses_after_switch_and_between_commands():
             discord_channel_id_for=lambda _plan: 2,
         )
     )
-    assert sleeps.count(COMMAND_GAP_SEC) >= 3
+    gap = f"sleep:{COMMAND_GAP_SEC:g}"
+    assert events[:2] == [gap, "drain"]
+    assert events.index("send:p") < events.index(gap, events.index("send:p"))
+    p_idx = events.index("send:p")
+    daily_idx = events.index("send:daily")
+    assert events[p_idx:daily_idx].count(gap) >= 1
+    assert drains == 2
+    assert events.count(gap) >= 3
 
 
 def test_run_plans_records_p_cooldown_without_marking_success():

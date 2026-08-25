@@ -2266,6 +2266,7 @@ class AppBridge(QObject):
                 sleep=asyncio.sleep,
                 log=self._append_activity_log,
                 persist_account=self._persist_account_daily_fields,
+                drain=self._actions.drain_queue,
             )
             daily_task = asyncio.create_task(
                 self._account_daily_loop(),

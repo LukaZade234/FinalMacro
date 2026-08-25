@@ -28,7 +28,7 @@ SWITCH_ATTEMPTS = 3
 SWITCH_RETRY_SEC = 2.0
 # Pause after a channel switch and between $p / $daily so Mudae replies
 # are not still in flight when the next command is typed.
-COMMAND_GAP_SEC = 2.5
+COMMAND_GAP_SEC = 3.0
 P_REPLY_TIMEOUT_SEC = 15.0
 DAILY_TICK_TIMEOUT_SEC = 8.0
 DAILY_COOLDOWN_TIMEOUT_SEC = 8.0
@@ -41,6 +41,7 @@ WaitFn = Callable[..., Awaitable[tuple[Any, ParseResult] | None]]
 SleepFn = Callable[[float], Awaitable[None]]
 LogFn = Callable[[str], None]
 PersistFn = Callable[[str, dict[str, str]], None]
+DrainFn = Callable[[], None]
 
 
 class AccountDailyRuntime:
@@ -56,6 +57,7 @@ class AccountDailyRuntime:
         sleep: SleepFn,
         log: LogFn,
         persist_account: PersistFn,
+        drain: DrainFn | None = None,
         now: Callable[[], dt.datetime] | None = None,
     ) -> None:
         self._switch_to = switch_to
@@ -65,8 +67,17 @@ class AccountDailyRuntime:
         self._sleep = sleep
         self._log = log
         self._persist = persist_account
+        self._drain = drain
         self._now = now or utc_now
         self._fail_until: dict[tuple[str, str], float] = {}
+
+    def _drain_queue(self) -> None:
+        if self._drain is not None:
+            self._drain()
+
+    async def _pause(self, reason: str) -> None:
+        self._log(f"$p/$daily: waiting {COMMAND_GAP_SEC:g}s {reason}")
+        await self._sleep(COMMAND_GAP_SEC)
 
     def _blocked(self, account_id: str, command: str) -> bool:
         import time
@@ -142,12 +153,10 @@ class AccountDailyRuntime:
                     )
                     continue
                 attempted = True
-                await self._sleep(COMMAND_GAP_SEC)
-                for index, command in enumerate(cmds):
-                    if index:
-                        await self._sleep(COMMAND_GAP_SEC)
+                await self._pause("after channel switch")
+                for command in cmds:
                     await self._send_one(plan, command)
-                await self._sleep(COMMAND_GAP_SEC)
+                    await self._pause(f"after ${command}")
         finally:
             restored = await self.switch_with_retries(home_token, home_channel_id)
             if not restored:
@@ -161,6 +170,7 @@ class AccountDailyRuntime:
             await self._send_daily(plan)
 
     async def _send_p(self, plan: AccountDailyPlan) -> None:
+        self._drain_queue()
         self._log(f"$p: sending for {plan.account_name}")
         try:
             await self._send_command("p")
@@ -193,6 +203,7 @@ class AccountDailyRuntime:
         self._log(f"$p: ok for {plan.account_name}")
 
     async def _send_daily(self, plan: AccountDailyPlan) -> None:
+        self._drain_queue()
         self._log(f"$daily: sending for {plan.account_name}")
         try:
             message_id = await self._send_command("daily")
