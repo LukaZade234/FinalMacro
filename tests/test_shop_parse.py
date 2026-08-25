@@ -8,7 +8,12 @@ from mudae.parsers.pipeline import format_entry_for_gui, parse_message
 from mudae.parsers.shop import parse_shop
 from mudae.parsers.shop_catalog import fields_to_shop_display_dict, perk9_click_max
 from mudae.types import MessageKind, MudaeMessageSnapshot
-from tests.mudae_sheet_fixtures import SHOP_REPLY_LVL0, SHOP_REPLY_MID, SHOP_REPLY_MIXED
+from tests.mudae_sheet_fixtures import (
+    SHOP_REPLY_LVL0,
+    SHOP_REPLY_MID,
+    SHOP_REPLY_MIXED,
+    SHOP_REPLY_MIXED_LIVE,
+)
 
 MUDAE_ALT_ID = 432610292342587392
 
@@ -108,6 +113,29 @@ def test_parse_shop_mixed_max():
     assert not result.warnings
 
 
+def test_parse_shop_live_discord_markdown():
+    """Debug dump uses [**LVL 5**] / **15,660** <:sp:id>, not the copy-paste form."""
+    result = parse_shop(SHOP_REPLY_MIXED_LIVE)
+    assert not result.warnings
+    assert result.fields["spheres"] == 15660
+    assert result.fields["level_cost_step"] == 4000
+    assert result.fields["perk_count"] == 10
+    perks = result.fields["perks"]
+    assert perks["1"]["level"] == 5
+    assert perks["1"]["spawn_share_pct"] == 50
+    assert perks["1"]["next_spawn_share_pct"] == 60
+    assert perks["5"]["maxed"] is True
+    assert perks["5"]["ot_chance_pct"] == 0.14
+    assert perks["9"]["extra_clicks"] == 10
+    assert perks["9"]["sphere_value_pct"] == 100
+    assert perks["10"]["ot_chance_pct"] == 2
+    assert perks["10"]["next_ot_chance_pct"] == 2.25
+    assert result.fields["perk9_click_max"] == 20
+    via_pipeline = parse_message(_snap(content=SHOP_REPLY_MIXED_LIVE), reply_to_command="shop")
+    assert via_pipeline.fields["perk9_click_max"] == 20
+    assert via_pipeline.fields["spheres"] == 15660
+
+
 def test_parse_shop_mid_levels():
     result = parse_shop(SHOP_REPLY_MID)
     perks = result.fields["perks"]
@@ -193,3 +221,42 @@ def test_snapshot_from_message_uses_raw_components():
     assert snapshot.components[0]["type"] == 10
     result = parse_message(snapshot, reply_to_command="shop")
     assert result.fields["perk9_click_max"] == 10
+
+
+def test_component_patch_does_not_write_slotted_message():
+    import discord
+    from mudae.serialization import raw_components_for
+
+    class Slotted:
+        __slots__ = ("id", "components")
+
+        def __init__(self) -> None:
+            self.id = 88
+            self.components = None
+
+    message = Slotted()
+    discord.Message._handle_components(message, [{"type": 10, "content": "shop body"}])
+    assert raw_components_for(message) == [{"type": 10, "content": "shop body"}]
+
+
+def test_raw_components_cache_does_not_need_message_slots():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from mudae.serialization import remember_raw_components, snapshot_from_message
+
+    remember_raw_components(77, [{"type": 10, "content": SHOP_REPLY_MID}])
+    message = SimpleNamespace(
+        id=77,
+        channel=SimpleNamespace(id=99, name="mudae"),
+        guild=SimpleNamespace(id=1, name="srv"),
+        author=SimpleNamespace(id=MUDAE_ALT_ID, display_name="Mudae", name="Mudae"),
+        content="",
+        embeds=[],
+        components=[],
+        created_at=datetime(2026, 8, 25, 0, 53, tzinfo=timezone.utc),
+    )
+    snapshot = snapshot_from_message(message)
+    assert "You have 55,613 :sp:" in snapshot.content
+    result = parse_message(snapshot, reply_to_command="shop")
+    assert result.fields["perk9_click_max"] == 15

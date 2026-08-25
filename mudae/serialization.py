@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 
 import discord
@@ -11,6 +12,30 @@ from mudae.constants import BOT_NAME, MUDAE_BOT_IDS
 from mudae.message_text import flatten_component_text
 from mudae.types import MudaeMessageSnapshot
 
+# discord.Message is slotted and has no ``__weakref__``, so we cannot stash
+# Components V2 payloads on the instance. Key by snowflake; cap the map so
+# overnight sessions do not grow without bound.
+_RAW_COMPONENTS_BY_ID: OrderedDict[int, list[Any]] = OrderedDict()
+_RAW_COMPONENTS_MAX = 400
+
+
+def remember_raw_components(message_id: int, data: Any) -> None:
+    payload = list(data) if data else []
+    _RAW_COMPONENTS_BY_ID[int(message_id)] = payload
+    _RAW_COMPONENTS_BY_ID.move_to_end(int(message_id))
+    while len(_RAW_COMPONENTS_BY_ID) > _RAW_COMPONENTS_MAX:
+        _RAW_COMPONENTS_BY_ID.popitem(last=False)
+
+
+def raw_components_for(message: Any) -> list[Any]:
+    cached = getattr(message, "_raw_components", None)
+    if cached:
+        return list(cached)
+    message_id = getattr(message, "id", None)
+    if message_id is None:
+        return []
+    return list(_RAW_COMPONENTS_BY_ID.get(int(message_id), []))
+
 
 def _install_raw_component_capture() -> None:
     """Keep Components V2 payloads that discord.py-self 2.1 otherwise drops."""
@@ -19,7 +44,10 @@ def _install_raw_component_capture() -> None:
         return
 
     def _keep_raw(self: discord.Message, data: Any) -> None:
-        self._raw_components = data or []
+        try:
+            remember_raw_components(int(self.id), data)
+        except Exception:
+            pass
         original(self, data)
 
     _keep_raw._finalmacro_keeps_raw = True  # type: ignore[attr-defined]
@@ -84,7 +112,7 @@ def snapshot_from_message(
     author_id = author.id if author else 0
     author_name = getattr(author, "display_name", None) or getattr(author, "name", "?") or "?"
     mudae = is_mudae_message(message)
-    raw_components = list(getattr(message, "_raw_components", None) or [])
+    raw_components = raw_components_for(message)
     component_text = flatten_component_text(raw_components)
     content = (message.content or "").strip()
     if component_text and component_text not in content:

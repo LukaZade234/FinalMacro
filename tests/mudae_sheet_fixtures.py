@@ -230,3 +230,32 @@ SHOP_REPLY_MID = (
     "Spheres clicked from perk 9 give more spheres: 50% > 60%\n"
     "[LVL 0]  The first $oh of the day has a chance to give 1 $ot for each character you have fully upgraded (120 characters max): +0% > +0.25%"
 )
+
+# Live Debug dump (data/parsedshop.json): Discord bold + custom emoji, not the
+# copy-paste chrome. Parser must strip ``[**LVL 5**]`` / ``**15,660** <:sp:id>``.
+SHOP_REPLY_MIXED_LIVE = (
+    "Upgrade bonuses given by ouroperks. These bonuses are applied to ALL characters. "
+    "Use $shoprefund to refund spheres. Type **$oo** for fragments.\n"
+    "Each bonus has 10 levels (cost increased by **+4,000** per level).\n"
+    "You have **15,660** <:sp:1437140700604137554>\n"
+    "[**LVL 5**]  A part of the spawn chance bonus applied by **perk 1** is also applied to the character upgraded. Part: 50% > **60%**\n"
+    "\u200b\n"
+    "[**LVL 5**]  A megasphere has 1/50 to appear when you roll any of your claimed characters. 1 megasphere per day (increased with **perk 2**, see $s megasphere). Number of rewards per megasphere: 15 > **18**\n"
+    "\u200b\n"
+    "[**LVL 0**]  The additional kakera button spawned by **perk 3** has a chance to never include blue kakera (or yellow if Sapphire IV): 0% > **10%**\n"
+    "\u200b\n"
+    "[**LVL 5**]  When you get a key thanks to **perk 4**, there is a chance to get an Omega key. These keys can be added to any character of your collection (see $ok). Chance: 25% > **30%**\n"
+    "\u200b\n"
+    "[**MAX**]  When a kakera button gives spheres thanks to **perk 5**, there is a slight chance to get +1 $ot. Chance for each sphere earned (multiplied by the number of spheres given by the perk 5 level, the value displayed with $op): **0.14%**\n"
+    "[**LVL 5**]  The wish spawned from **perk 6** has a chance to be an unclaimed wish from your wishlist if there is any. This claim is **free** and indicated with a green background (limited to one time per day). Chance: 5% > **6%**\n"
+    "Claimed wishes that you own spawned from perk 6 have a chance to give +1 Omega key: 250% > **300%**\n"
+    "\u200b\n"
+    "[**LVL 0**]  All chaos kakera spawned by **perk 7** have a chance to give double rewards (except for special character spawns and discount), indicated with a blue background: 0% > **2%**\n"
+    "\u200b\n"
+    "[**LVL 6**]  On characters fully upgraded, the kakera buttons of **perk 8** give more kakera. Boost (additive with $bk): 30% > **35%**\n"
+    "\u200b\n"
+    "[**MAX**]  More sphere buttons spawned by **perk 9** can be clicked per day: **+10**\n"
+    "Spheres clicked from **perk 9** give more spheres: **100% **\n"
+    "\u200b\n"
+    "[**LVL 8**]  The first $oh of the day has a chance to give 1 $ot for each character you have fully upgraded (120 characters max): +2% > **+2.25%**"
+)

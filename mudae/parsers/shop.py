@@ -17,12 +17,20 @@ from typing import Any
 
 from mudae.message_text import snapshot_visible_text
 from mudae.parsers.shop_catalog import perk9_click_max
+from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
 _ZW_RE = re.compile(r"[\u200b\u200c\u200d\ufeff]")
-_HEAD_RE = re.compile(r"^\[(?:LVL\s+(\d+)|MAX)\]\s*(.*)$", re.IGNORECASE)
+_CUSTOM_EMOJI_RE = re.compile(r"<a?:(\w+):\d+>")
+_HEAD_RE = re.compile(
+    r"^\[\s*(?:\*\*)?\s*(?:LVL\s+(\d+)|MAX)\s*(?:\*\*)?\s*\]\s*(.*)$",
+    re.IGNORECASE,
+)
 _PERK_RE = re.compile(r"\bperk\s+(\d+)\b", re.IGNORECASE)
-_SPHERES_RE = re.compile(r"You have\s+([\d,]+)\s*:sp:", re.IGNORECASE)
+_SPHERES_RE = re.compile(
+    r"You have\s+([\d,]+)\s*(?::sp:|sp\b)?",
+    re.IGNORECASE,
+)
 _COST_RE = re.compile(
     r"cost increased by \+?([\d,]+)\s*per level",
     re.IGNORECASE,
@@ -35,6 +43,14 @@ _TAIL_RE = re.compile(r":\s*([+\-]?\d[\d,]*(?:\.\d+)?)(%)?\s*$")
 
 SHOP_MAX_LEVEL = 10
 SHOP_LEVEL_COST_STEP = 4000
+
+
+def _normalize_shop_text(content: str) -> str:
+    """Strip Discord chrome so ``[**LVL 5**]`` and ``**15,660** <:sp:id>`` parse."""
+    text = _ZW_RE.sub("", content or "").replace("\r\n", "\n")
+    text = strip_markdown(text)
+    text = _CUSTOM_EMOJI_RE.sub(r":\1:", text)
+    return text
 
 
 def is_shop_response(content: str) -> bool:
@@ -183,7 +199,7 @@ def _perk_payload(
 
 
 def parse_shop(content: str) -> ParseResult:
-    text = _ZW_RE.sub("", content or "").replace("\r\n", "\n")
+    text = _normalize_shop_text(content)
     fields: dict[str, Any] = {}
     warnings: list[str] = []
 

@@ -378,11 +378,17 @@ class ChannelMonitor:
 
         @self._client.event
         async def on_message(message: discord.Message) -> None:
-            await self._handle_message(message, edited=False)
+            try:
+                await self._handle_message(message, edited=False)
+            except Exception:
+                logging.exception("Failed to capture message %s", getattr(message, "id", "?"))
 
         @self._client.event
         async def on_message_edit(_before: discord.Message, after: discord.Message) -> None:
-            await self._handle_message(after, edited=True)
+            try:
+                await self._handle_message(after, edited=True)
+            except Exception:
+                logging.exception("Failed to capture edit %s", getattr(after, "id", "?"))
 
         @self._client.event
         async def on_reaction_add(reaction: discord.Reaction, user: discord.User | discord.Member) -> None:
