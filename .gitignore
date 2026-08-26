@@ -20,7 +20,3 @@ docs/archive/MUDAE_SETTINGS_COMMANDS.md
 __pycache__/
 *.pyc
 .pytest_cache/
-
-# Tracker (listen-only collector; local only, not deployed with the macro)
-tracker/
-tests/test_tracker.py
