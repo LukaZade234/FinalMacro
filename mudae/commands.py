@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import AbstractSet, Callable
+from collections.abc import Callable, Set
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -210,7 +210,7 @@ def resolve_command(
     user_input: str | None,
     content: str,
     *,
-    known_parsers: AbstractSet[str],
+    known_parsers: Set[str],
     snapshot: MudaeMessageSnapshot | None = None,
 ) -> ResolvedCommand | None:
     """
