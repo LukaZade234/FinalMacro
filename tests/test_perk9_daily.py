@@ -5,6 +5,7 @@ from __future__ import annotations
 from macro.perk9_daily import (
     PERK9_CLICK_MAX_DEFAULT,
     Perk9DailyRecord,
+    apply_perk9_click_from_parse,
     count_perk9_clicks,
     is_perk9_sphere_click,
     sync_perk9_clicks_from_log,
@@ -53,6 +54,28 @@ def test_record_and_rollover_perk9_clicks(monkeypatch):
     assert state.perk9_clicks_today == 1
     state.record_perk9_click(2)
     assert state.perk9_clicks_today == 3
+
+
+def test_apply_perk9_click_uses_mudae_daily_counter():
+    state = AccountState()
+    state.perk9_clicks_today = 19
+    state.perk9_click_max = 20
+    assert apply_perk9_click_from_parse(
+        state,
+        {"sphere_type": "spD", "daily_used": 20, "daily_max": 20},
+    )
+    assert state.perk9_clicks_today == 20
+    assert apply_perk9_click_from_parse(
+        state,
+        {"sphere_type": "spB", "daily_used": 18, "daily_max": 20},
+    )
+    assert state.perk9_clicks_today == 18
+    before = state.perk9_clicks_today
+    assert apply_perk9_click_from_parse(
+        state,
+        {"sphere_type": "spM", "daily_used": 20, "daily_max": 20},
+    ) is False
+    assert state.perk9_clicks_today == before
 
 
 def test_sync_perk9_clicks_from_log(monkeypatch):

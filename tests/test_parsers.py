@@ -328,6 +328,47 @@ def test_parse_sphere_click_megasphere():
     assert result.fields["daily_max"] == 15
 
 
+def test_parse_sphere_click_dark_turns_into_rainbow():
+    from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
+
+    short = (
+        ":spD:  turns into :spW: \n"
+        ":spW: lukazade234 +2,072  (20/20)"
+    )
+    custom = (
+        "<:spD:1>  turns into <a:spW:2>\n"
+        "<a:spW:2> **lukazade234 +2,072**  (20/20)"
+    )
+    assert is_sphere_click_message(short) is True
+    assert is_sphere_click_message(custom) is True
+    # Two sphere emojis on adjacent lines match the $p grid heuristic.
+    assert detect_command_from_response(short) == "p"
+    for content in (short, custom):
+        parsed = parse_sphere_click(content)
+        assert parsed.fields["sphere_type"] == "spW"
+        assert parsed.fields["claimed_by"] == "lukazade234"
+        assert parsed.fields["amount"] == 2072
+        assert parsed.fields["daily_used"] == 20
+        assert parsed.fields["daily_max"] == 20
+        snapshot = MudaeMessageSnapshot(
+            message_id=103,
+            channel_id=99,
+            channel_name="mudae",
+            guild_id=1,
+            guild_name="srv",
+            author_id=MUDAE_ALT_ID,
+            author_name="Mudae",
+            is_mudae=True,
+            content=content,
+            embeds=[],
+            buttons=[],
+            created_at="01:05:00",
+        )
+        result = parse_message(snapshot)
+        assert result.kind == MessageKind.SPHERE_CLICK
+        assert result.fields["daily_used"] == 20
+
+
 def test_parse_kakera_claim():
     content = "<:kakeraT:123> TestUser +546 ($k)"
     result = parse_kakera_claim(content)

@@ -37,6 +37,32 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
+def apply_perk9_click_from_parse(state: Any, fields: dict[str, Any]) -> bool:
+    """Update the Run-tab perk 9 counter from a parsed roll-button confirmation.
+
+    Mudae's ``(used/max)`` is the source of truth, so a missed or extra local
+    increment is corrected on the next parsed click. Megasphere is ignored.
+    Returns True when the persisted counter should be saved.
+    """
+    if not is_perk9_sphere_click(fields.get("sphere_type")):
+        return False
+    cap = _coerce_int(fields.get("daily_max"))
+    used = _coerce_int(fields.get("daily_used"))
+    rollover = getattr(state, "rollover_perk9_if_needed", None)
+    if callable(rollover):
+        rollover()
+    if cap is not None:
+        state.perk9_click_max = cap
+    if used is not None:
+        state.perk9_clicks_today = used
+        return True
+    record = getattr(state, "record_perk9_click", None)
+    if callable(record):
+        record()
+        return True
+    return False
+
+
 def is_perk9_sphere_click(sphere_type: str | None) -> bool:
     """True when a sphere-button click should consume perk 9 (not megasphere)."""
     if not sphere_type:

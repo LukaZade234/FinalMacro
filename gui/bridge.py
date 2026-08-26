@@ -2215,10 +2215,9 @@ class AppBridge(QObject):
         ):
             return False
         record_sphere_earning(snapshot, parsed.fields, source="sphere_click")
-        from macro.perk9_daily import is_perk9_sphere_click
+        from macro.perk9_daily import apply_perk9_click_from_parse
 
-        if is_perk9_sphere_click(parsed.fields.get("sphere_type")):
-            self._macro_state.record_perk9_click()
+        if apply_perk9_click_from_parse(self._macro_state, parsed.fields):
             self._persist_perk9_progress()
         return True
 

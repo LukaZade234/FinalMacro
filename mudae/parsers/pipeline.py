@@ -18,7 +18,7 @@ from mudae.parsers.claim import parse_claim
 from mudae.parsers.marriage import parse_marriage
 from mudae.parsers.settings import parse_settings
 from mudae.parsers.shop import parse_shop, parse_shop_snapshot
-from mudae.parsers.sphere import parse_sphere_click
+from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.minigame_exhausted import (
@@ -158,10 +158,16 @@ def parse_mudae_message(
 
     from mudae.parsers.classify import snapshot_is_kakera_claim, snapshot_text
 
+    visible = snapshot_text(snapshot)
     # Chaos kakera claims can include "rolls stacked" (kakeraloot) and must not
     # be treated as a bare ``$us`` reply.
     if snapshot_is_kakera_claim(snapshot):
-        return parse_kakera_claim(snapshot_text(snapshot))
+        return parse_kakera_claim(visible)
+    # Dark/light roll buttons print two sphere emojis on adjacent lines
+    # (``spD turns into spW`` then the payout). That matches the $p grid
+    # heuristic, so take sphere clicks before command detection.
+    if is_sphere_click_message(visible):
+        return parse_sphere_click(visible)
 
     resolved = resolve_command(
         reply_to_command,
@@ -214,7 +220,7 @@ def parse_mudae_message(
     if kind == MessageKind.KAKERA_CLAIM:
         return parse_kakera_claim(snapshot.content)
     if kind == MessageKind.SPHERE_CLICK:
-        return parse_sphere_click(snapshot.content)
+        return parse_sphere_click(visible or snapshot.content)
     if kind == MessageKind.MARRIAGE:
         return parse_marriage(snapshot.content)
     if kind == MessageKind.CLAIM:
@@ -308,7 +314,9 @@ def _parse_command_response(
         elif kind == MessageKind.KAKERA_CLAIM:
             result = parse_kakera_claim(snapshot.content)
         elif kind == MessageKind.SPHERE_CLICK:
-            result = parse_sphere_click(snapshot.content)
+            from mudae.parsers.classify import snapshot_text as _visible
+
+            result = parse_sphere_click(_visible(snapshot) or snapshot.content)
         elif kind == MessageKind.MARRIAGE:
             result = parse_marriage(snapshot.content)
         elif kind == MessageKind.CLAIM:
