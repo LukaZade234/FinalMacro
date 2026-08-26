@@ -5,10 +5,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mudae.constants import SPHERE_EMOJI_NAME_PATTERN, canonical_sphere_emoji
 from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
-_SPHERE_EMOJI_RE = re.compile(r"<:(sp[A-Za-z]?):\d+>", re.IGNORECASE)
+_SPHERE_EMOJI_RE = re.compile(
+    rf"<:({SPHERE_EMOJI_NAME_PATTERN}):\d+>",
+    re.IGNORECASE,
+)
 _USER_AMOUNT_PATTERNS = (
     re.compile(
         r"\*\*([^*+]+?)\s*\+([\d,]+)\*\*",
@@ -37,7 +41,7 @@ def parse_sphere_click(content: str) -> ParseResult:
 
     type_match = _SPHERE_EMOJI_RE.search(content)
     if type_match:
-        fields["sphere_type"] = type_match.group(1)
+        fields["sphere_type"] = canonical_sphere_emoji(type_match.group(1))
 
     claimed_by: str | None = None
     amount: int | None = None

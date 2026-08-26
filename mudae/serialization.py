@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from mudae.buttons import classify_button_kind
+from mudae.buttons import button_styles_from_raw, classify_button_kind, normalize_button_style
 from mudae.constants import BOT_NAME, MUDAE_BOT_IDS
 from mudae.message_text import flatten_component_text
 from mudae.types import MudaeMessageSnapshot
@@ -79,7 +79,11 @@ def _button_kind(button: discord.Button) -> str:
     )
 
 
-def _components_to_buttons(message: discord.Message) -> list[dict[str, Any]]:
+def _components_to_buttons(
+    message: discord.Message,
+    raw_components: Any = None,
+) -> list[dict[str, Any]]:
+    raw_styles = button_styles_from_raw(raw_components)
     buttons: list[dict[str, Any]] = []
     for row in message.components or []:
         if not isinstance(row, discord.ActionRow):
@@ -88,13 +92,18 @@ def _components_to_buttons(message: discord.Message) -> list[dict[str, Any]]:
             if not isinstance(child, discord.Button):
                 continue
             emoji = child.emoji
+            custom_id = child.custom_id or ""
+            style = normalize_button_style(getattr(child, "style", None))
+            if custom_id and raw_styles.get(custom_id):
+                style = raw_styles[custom_id]
             buttons.append(
                 {
                     "label": child.label or "",
                     "emoji": getattr(emoji, "name", None) or (str(emoji) if emoji else ""),
-                    "custom_id": child.custom_id or "",
+                    "custom_id": custom_id,
                     "kind": _button_kind(child),
                     "disabled": child.disabled,
+                    "style": style,
                 }
             )
     return buttons
@@ -128,7 +137,7 @@ def snapshot_from_message(
         is_mudae=mudae,
         content=content,
         embeds=[_embed_to_dict(e) for e in message.embeds],
-        buttons=_components_to_buttons(message),
+        buttons=_components_to_buttons(message, raw_components),
         created_at=message.created_at.strftime("%H:%M:%S"),
         edited=edited,
         components=raw_components,

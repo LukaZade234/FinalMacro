@@ -172,6 +172,14 @@ Button emoji names are `sp` + a color letter:
 | `spW` | Rainbow — highest paid |
 | `spU` | Hidden / face-down in `$oh` |
 
+**Colour-blind variants:** some servers (or `$settings`) use a second emoji
+set with a small letter in the corner. Discord names them with a trailing
+digit: `spB2` is still **blue**, `spT2` is still **teal**. The same suffix
+can appear on other colours. `canonical_sphere_emoji` /
+`normalize_sphere_emoji` strip it, so spawn-rate tables, perk-9 filters,
+`$oh` skip-blue/teal, `$oc`/`$oq` solvers, and the sphere-click parser all
+treat `spB2` as `spB`. Never log `spB2` as its own colour.
+
 There is no chaos sphere. Rank order for paid `$oh` clicks (low → high):
 blue, teal, green, yellow, dark, light, orange, red, rainbow
 (`SPHERE_VALUE_RANK`).

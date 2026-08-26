@@ -1,5 +1,9 @@
 """Mudae bot constants."""
 
+from __future__ import annotations
+
+import re
+
 BOT_NAME = "Mudae"
 # Official Mudae bot + common alternate application IDs (servers may differ).
 TARGET_BOT_ID = 432618578496954900
@@ -11,7 +15,11 @@ MUDAE_BOT_IDS = frozenset({
 CLAIM_EMOJIS = frozenset({"💍", "💖", "💝", "\U0001f498"})
 
 # Sphere button emoji names (sp + color letter, e.g. spY).
+# Optional trailing digits are colour-blind variants (``spB2`` = blue with a
+# letter in the corner). Same colour as the unsuffixed name.
 SPHERE_EMOJI_PREFIX = "sp"
+SPHERE_EMOJI_NAME_PATTERN = r"sp[A-Za-z]?\d*"
+_COLORBLIND_SPHERE_RE = re.compile(r"^(sp)([A-Za-z])\d+$", re.IGNORECASE)
 # Roll react buttons use bare ``:sp:`` when recognizable sphere buttons are off.
 SPHERE_ROLL_DEFAULT_EMOJI = "sp"
 # Filter ids that should match a bare ``:sp:`` roll react button.
@@ -88,8 +96,24 @@ SPHERE_BASE_SP: dict[str, int] = {
 SPHERE_WIN_EMOJIS = frozenset({"sp", "spR", "spW"})
 
 
-def sphere_base_sp(emoji: str | None) -> int:
+def canonical_sphere_emoji(emoji: str | None) -> str:
+    """``spB2`` / ``spT2`` (colour-blind letter-in-corner) → ``spB`` / ``spT``.
+
+    Mudae ships a second emoji set for colour-blind players. The name is the
+    usual ``sp`` + colour letter plus a digit. Treat them as the base colour
+    in logs, spawn rates, ``$oh`` skip rules, and perk-9 filters.
+    """
     key = str(emoji or "").strip()
+    match = _COLORBLIND_SPHERE_RE.match(key)
+    if match:
+        return "sp" + match.group(2).upper()
+    return key
+
+
+def sphere_base_sp(emoji: str | None) -> int:
+    key = canonical_sphere_emoji(emoji)
+    if key == "sp":
+        key = "spR"
     return int(SPHERE_BASE_SP.get(key, 0))
 
 

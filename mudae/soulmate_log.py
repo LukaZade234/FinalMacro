@@ -237,6 +237,7 @@ def dedupe_stored_events() -> int:
 
 
 def get_soulmate_events() -> list[dict[str, Any]]:
+    event_log.ensure_loaded()
     return [dict(entry) for entry in _events]
 
 

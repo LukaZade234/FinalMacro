@@ -17,7 +17,7 @@ from typing import Any
 
 import macro.oq_worlds as oq_worlds
 from macro.oq_worlds import GRID_CELLS, ensure_built
-from mudae.constants import SPHERE_BASE_SP
+from mudae.constants import SPHERE_BASE_SP, canonical_sphere_emoji
 
 # Colblitz overlay ``(1,1)`` is 0-based (inner 3×3). Same cell MIXED picks
 # on an empty board (highest Gini, lowest index).
@@ -74,7 +74,7 @@ class OqPhase(str, Enum):
 
 
 def emoji_to_oq_state(emoji: str) -> str | None:
-    key = (emoji or "").strip()
+    key = canonical_sphere_emoji(emoji)
     if not key or key == "spU":
         return None
     if key == "sp":
@@ -408,7 +408,7 @@ def _mine_indices(
     mines: set[int] = set()
     spheres = _sphere_buttons_only(buttons)
     for index, button in enumerate(spheres[:GRID_CELLS]):
-        emoji = (button.get("emoji") or "").strip()
+        emoji = _grid_emoji(button)
         if emoji in OQ_MINE_EMOJIS:
             mines.add(index)
     for index, state in observations.items():
@@ -538,12 +538,16 @@ def recommend_oq_cell(
     return best, f"expectimax d{depth} EV={_ev:.0f} · {reason}"
 
 
+def _grid_emoji(button: dict[str, Any]) -> str:
+    return canonical_sphere_emoji(button.get("emoji"))
+
+
 def observations_from_buttons(buttons: list[dict[str, Any]]) -> dict[int, str]:
     obs: dict[int, str] = {}
     for index, button in enumerate(_sphere_buttons_only(buttons)):
         if index >= GRID_CELLS:
             break
-        state = emoji_to_oq_state((button.get("emoji") or "").strip())
+        state = emoji_to_oq_state(_grid_emoji(button))
         if state:
             obs[index] = state
     return obs
@@ -601,12 +605,12 @@ def _revealed_collectible_indices(
     return [
         index
         for index, button in enumerate(spheres[:GRID_CELLS])
-        if _is_clickable(button) and (button.get("emoji") or "").strip() in emojis
+        if _is_clickable(button) and _grid_emoji(button) in emojis
     ]
 
 
 def _is_hidden_clickable(button: dict[str, Any]) -> bool:
-    emoji = (button.get("emoji") or "").strip()
+    emoji = _grid_emoji(button)
     return (
         bool(button.get("custom_id"))
         and not button.get("disabled")

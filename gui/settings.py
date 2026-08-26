@@ -3,7 +3,10 @@
 This file is never committed; each machine keeps its own copy. Loaded on startup
 and written by ``save_app_settings()`` from ``gui/bridge.py``. While the app is
 running, ``AppBridge`` watches this file and reloads stores when it changes on
-disk (external editor, sync tool, second instance, etc.).
+disk (external editor, sync tool, second instance, etc.). Kakera / key / sphere
+/ soulmate stats live in ``data/events.jsonl`` (not the old ``*_log.json``
+backups); the same watcher reloads that file so a Syncthing peer's Statistics
+tab updates without a restart.
 
 Typical top-level keys:
 

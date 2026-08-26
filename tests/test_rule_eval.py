@@ -410,6 +410,14 @@ def test_sphere_reaction_always_clicks_megasphere():
     assert emojis == {"spM", "spY"}
 
 
+def test_sphere_reaction_colorblind_blue_matches_blue_filter():
+    fields = {"buttons": _sphere_buttons("spB2", "spT2"), "keys": []}
+    rules = SphereReactionRules(enabled=True, types_allowed=["spB"])
+    decision = passes_sphere_reaction(fields, rules, AccountState())
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "spB2"
+
+
 def test_kakera_perk_8_types_allowed_separate_from_normal_filter():
     fields = _kakera_fields(_kakera_buttons("kakeraR", "kakeraO"), perk_8=True)
     rules = KakeraReactionRules(

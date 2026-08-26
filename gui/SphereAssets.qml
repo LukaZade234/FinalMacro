@@ -52,10 +52,20 @@ QtObject {
         { id: "spW", label: "Rainbow",    color: "#c0caf5", icon: assetBase + "SpW.webp" }
     ]
 
-    function iconUrl(sphereId) {
+    function canonicalId(sphereId) {
         if (sphereId === undefined || sphereId === null || sphereId === "")
             return ""
         var id = String(sphereId)
+        var match = id.match(/^(sp)([A-Za-z])\d+$/i)
+        if (match)
+            return "sp" + match[2].toUpperCase()
+        return id
+    }
+
+    function iconUrl(sphereId) {
+        var id = canonicalId(sphereId)
+        if (!id)
+            return ""
         var letter = ""
         if (id === "sp")
             letter = "R"
@@ -67,16 +77,16 @@ QtObject {
     }
 
     function label(sphereId) {
-        if (!sphereId)
+        var id = canonicalId(sphereId)
+        if (!id)
             return "—"
-        var id = String(sphereId)
         return _labels[id] || id
     }
 
     function color(sphereId) {
-        if (!sphereId)
+        var id = canonicalId(sphereId)
+        if (!id)
             return "#565f89"
-        var id = String(sphereId)
         return _colors[id] || "#565f89"
     }
 }

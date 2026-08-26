@@ -74,6 +74,7 @@ from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 _UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 _UPDATE_STARTUP_DELAY_MS = 4000
 _SETTINGS_RELOAD_DEBOUNCE_MS = 400
+_STATS_RELOAD_DEBOUNCE_MS = 800
 _RUN_SUMMARY_THROTTLE_MS = 1000
 
 _DEFAULT_UI_LAYOUT = "classic"
@@ -254,6 +255,14 @@ class AppBridge(QObject):
         self._settings_watcher.fileChanged.connect(self._on_settings_file_changed)
         self._settings_watcher.directoryChanged.connect(self._on_settings_directory_changed)
         self._ensure_settings_watch()
+        self._stats_reload_timer = QTimer(self)
+        self._stats_reload_timer.setSingleShot(True)
+        self._stats_reload_timer.setInterval(_STATS_RELOAD_DEBOUNCE_MS)
+        self._stats_reload_timer.timeout.connect(self._reload_stats_from_disk)
+        self._stats_watcher = QFileSystemWatcher(self)
+        self._stats_watcher.fileChanged.connect(self._on_stats_file_changed)
+        self._stats_watcher.directoryChanged.connect(self._on_stats_directory_changed)
+        self._ensure_stats_watch()
         self._tray_available = False
         self._tray: Any = None
 
@@ -689,6 +698,49 @@ class AppBridge(QObject):
         """Force-reload ``data/settings.json`` (also used by the file watcher)."""
         self._settings_file_mtime = None
         self._reload_settings_from_disk()
+
+    def _stats_watch_paths(self) -> list[Path]:
+        from mudae.event_log import jsonl_path
+        from mudae.minigame_log import log_path
+
+        return [jsonl_path(), log_path()]
+
+    def _ensure_stats_watch(self) -> None:
+        paths = self._stats_watch_paths()
+        for path in paths:
+            text = str(path)
+            if path.is_file() and text not in self._stats_watcher.files():
+                self._stats_watcher.addPath(text)
+            directory = str(path.parent)
+            if path.parent.is_dir() and directory not in self._stats_watcher.directories():
+                self._stats_watcher.addPath(directory)
+
+    def _schedule_stats_reload(self) -> None:
+        self._ensure_stats_watch()
+        self._stats_reload_timer.start()
+
+    def _on_stats_file_changed(self, _path: str) -> None:
+        self._ensure_stats_watch()
+        self._schedule_stats_reload()
+
+    def _on_stats_directory_changed(self, _path: str) -> None:
+        self._schedule_stats_reload()
+
+    def _reload_stats_from_disk(self) -> None:
+        from mudae import event_log
+        from mudae import minigame_log
+
+        self._ensure_stats_watch()
+        events_changed = event_log.refresh_from_disk()
+        minigames_changed = minigame_log.refresh_from_disk()
+        if events_changed:
+            self.kakeraChanged.emit()
+            self.spheresChanged.emit()
+            self.keysChanged.emit()
+            self.soulmatesChanged.emit()
+            self._notify_run_summary()
+        if minigames_changed:
+            self.minigamesChanged.emit()
 
     def _notify_servers(self) -> None:
         # Defer to the next event-loop tick so a value-returning Slot (e.g.

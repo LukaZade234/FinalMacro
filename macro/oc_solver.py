@@ -31,7 +31,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from mudae.constants import SPHERE_VALUE_RANK
+from mudae.constants import SPHERE_VALUE_RANK, canonical_sphere_emoji
 
 GRID_SIZE = 5
 GRID_CELLS = GRID_SIZE * GRID_SIZE
@@ -151,7 +151,7 @@ def filter_boards(observations: dict[int, str]) -> list[dict[int, str]]:
 
 
 def emoji_to_oc_color(emoji: str) -> str | None:
-    key = (emoji or "").strip()
+    key = canonical_sphere_emoji(emoji)
     if not key or key == "spU":
         return None
     return _EMOJI_TO_OC.get(key)

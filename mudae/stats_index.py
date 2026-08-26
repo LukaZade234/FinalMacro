@@ -12,6 +12,7 @@ from typing import Any
 
 from mudae.account_context import defaults_from_store, resolve_log_account
 from mudae.clock import parse_iso_datetime, utc_date_key
+from mudae.constants import canonical_sphere_emoji
 
 PAGE_SIZE = 80
 KINDS = ("kakera", "sphere", "key", "soulmate")
@@ -74,6 +75,9 @@ def payload(
     now: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Filtered summary plus one page of enriched events (newest first)."""
+    from mudae import event_log
+
+    event_log.ensure_loaded()
     if kind not in _cells:
         raise ValueError(f"unknown event kind {kind!r}")
     main_id, main_name, account_by_id = defaults_from_store(accounts_store)
@@ -217,7 +221,10 @@ def _method_and_type(kind: str, entry: dict[str, Any]) -> tuple[str, str]:
         return method or "unknown", str(entry.get("kakera_type") or "").strip()
     if kind == "sphere":
         method = str(entry.get("source") or entry.get("earn_method") or "").strip()
-        return method or "unknown", str(entry.get("sphere_type") or "").strip()
+        sphere_type = str(entry.get("sphere_type") or "").strip()
+        if sphere_type:
+            sphere_type = canonical_sphere_emoji(sphere_type)
+        return method or "unknown", sphere_type
     if kind == "key":
         method = str(entry.get("source") or "").strip() or "unknown"
         type_id = str(entry.get("key_type") or "unknown").strip().lower() or "unknown"

@@ -66,3 +66,39 @@ def test_kakera_log_flush_writes_pending_events(tmp_path):
     lines = (tmp_path / "events.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert json.loads(lines[0])["amount"] == 7
     assert json.loads(lines[0])["kind"] == "kakera"
+
+
+def test_jsonl_log_appends_instead_of_rewriting(tmp_path):
+    from mudae.log_store import DebouncedJsonlLog
+
+    path = tmp_path / "events.jsonl"
+    events = [{"kind": "kakera", "amount": 1}]
+    writer = DebouncedJsonlLog(lambda: path, lambda: events, delay_sec=60.0)
+    writer.mark_dirty(rewrite=True)
+    writer.flush()
+    first_inode = path.stat().st_ino
+
+    events.append({"kind": "sphere", "amount": 2})
+    writer.mark_dirty()
+    writer.flush()
+
+    assert path.stat().st_ino == first_inode
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["amount"] for line in lines] == [1, 2]
+
+
+def test_jsonl_log_rewrite_replaces_file(tmp_path):
+    from mudae.log_store import DebouncedJsonlLog
+
+    path = tmp_path / "events.jsonl"
+    events = [{"kind": "kakera", "amount": 1}, {"kind": "kakera", "amount": 2}]
+    writer = DebouncedJsonlLog(lambda: path, lambda: events, delay_sec=60.0)
+    writer.mark_dirty(rewrite=True)
+    writer.flush()
+
+    events[:] = [{"kind": "kakera", "amount": 9}]
+    writer.mark_dirty(rewrite=True)
+    writer.flush()
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["amount"] for line in lines] == [9]

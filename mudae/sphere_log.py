@@ -8,6 +8,7 @@ from typing import Any
 
 from mudae.account_context import resolve_log_account
 from mudae.clock import utc_date_key
+from mudae.constants import canonical_sphere_emoji
 from mudae import event_log
 from mudae.types import MessageKind, MudaeMessageSnapshot
 
@@ -144,6 +145,9 @@ def record_sphere_earning(
     ).strip() or "Main"
     value = int(amount if amount is not None else fields["amount"])
     src = str(source).strip()
+    sphere_type = fields.get("sphere_type") or fields.get("kakera_type")
+    if sphere_type:
+        sphere_type = canonical_sphere_emoji(str(sphere_type))
     entry = {
         "guild_id": snapshot.guild_id,
         "guild_name": snapshot.guild_name,
@@ -153,7 +157,7 @@ def record_sphere_earning(
         "account_name": acc_name,
         "amount": value,
         "source": src,
-        "sphere_type": fields.get("sphere_type") or fields.get("kakera_type"),
+        "sphere_type": sphere_type,
         "character_name": fields.get("character_name"),
         "claimed_by": fields.get("claimed_by"),
         "recorded_at": stamp.isoformat(),
@@ -357,6 +361,7 @@ def client_payload(
 
 
 def get_sphere_events() -> list[dict[str, Any]]:
+    event_log.ensure_loaded()
     return [dict(entry) for entry in _events]
 
 

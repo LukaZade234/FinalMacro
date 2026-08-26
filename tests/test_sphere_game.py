@@ -20,6 +20,7 @@ from macro.sphere_game import (
     new_reward_line_types,
     new_reward_outcome_types,
     parse_clicks_allowed,
+    parse_reward_clicks,
     purple_free_outcome,
     reward_has_entries,
     reward_line_types,
@@ -188,6 +189,15 @@ def test_is_free_oh_click():
     assert is_free_oh_click(_btn(0, "spY")) is False
 
 
+def test_choose_skips_colorblind_blue_and_teal_like_normal():
+    buttons = [_btn(i, "spU") for i in range(25)]
+    buttons[0]["emoji"] = "spB2"
+    buttons[1]["emoji"] = "spT2"
+    choice = choose_oh_click(buttons, rng=random.Random(1))
+    assert choice is not None
+    assert choice["emoji"] == "spU"
+
+
 def test_choose_prefers_free_purple_over_value_sphere():
     buttons = [_btn(i, "spU") for i in range(25)]
     buttons[2]["emoji"] = "spR"
@@ -335,9 +345,71 @@ def test_reward_parses_light_breaks_down_into():
     assert reward_outcome_types(compact) == ["spB", "spB", "spT"]
 
 
+def test_parse_reward_clicks_groups_light_dark_and_bare_red():
+    oh = (
+        ":spP: (Free) +84\n"
+        ":spL: breaks down into :spB: + :spT: + :spB: + :spB:  => +264\n"
+        ":spT: +144\n"
+        ":spG: +204\n"
+        ":spT: +144\n"
+        ":spD:  turns into :spY: \n"
+        ":spY: +284\n"
+    )
+    clicks = parse_reward_clicks(oh)
+    assert [row["emoji"] for row in clicks] == ["spP", "spL", "spT", "spG", "spT", "spD"]
+    assert clicks[0]["paid"] is False
+    assert clicks[1]["resolved"] == ["spB", "spT", "spB", "spB"]
+    assert clicks[-1]["resolved"] == ["spY"]
+
+    oc = ":spO: +212\n:spY: +142\n:spT: +72\n:sp: +332\n:spG: +102\n"
+    assert [row["emoji"] for row in parse_reward_clicks(oc)] == [
+        "spO", "spY", "spT", "spR", "spG",
+    ]
+
+    oq = (
+        ":spP: (Free) +42\n"
+        ":spG: +102\n"
+        ":spT: +72\n"
+        ":spG: +102\n"
+        ":spG: +102\n"
+        ":spP: (Free) +42\n"
+        ":spP: (Free) +42\n"
+        ":sp: +332\n"
+        ":spY: +142\n"
+        ":spG: +102\n"
+    )
+    assert [row["emoji"] for row in parse_reward_clicks(oq)] == [
+        "spP", "spG", "spT", "spG", "spG", "spP", "spP", "spR", "spY", "spG",
+    ]
+
+
+def test_parse_reward_clicks_colorblind_blue_and_teal():
+    content = ":spB2: +100\n:spT2: +144\n"
+    assert [row["emoji"] for row in parse_reward_clicks(content)] == ["spB", "spT"]
+
+
+def test_parse_reward_clicks_dark_free_payout_is_same_click():
+    content = (
+        "<:spO:1> **+216**\n"
+        "<:spD:2> turns into <:spP:3>\n"
+        "<:spP:3> (Free) **+46**\n"
+        "<:spY:4> **+146**\n"
+    )
+    clicks = parse_reward_clicks(content)
+    assert [row["emoji"] for row in clicks] == ["spO", "spD", "spY"]
+    assert clicks[1]["resolved"] == ["spP"]
+
+
 def test_grid_signature_detects_disabled_change():
     before = [_btn(0, "spD")]
     after = [_btn(0, "spD", disabled=True)]
+    assert grid_signature(before) != grid_signature(after)
+
+
+def test_grid_signature_detects_style_change():
+    before = [_btn(0, "spT", disabled=True)]
+    after = [_btn(0, "spT", disabled=True)]
+    after[0]["style"] = "primary"
     assert grid_signature(before) != grid_signature(after)
 
 

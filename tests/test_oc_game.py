@@ -110,6 +110,8 @@ def test_emoji_to_oc_color():
     assert emoji_to_oc_color("sp") == "R"
     assert emoji_to_oc_color("spY") == "Y"
     assert emoji_to_oc_color("spU") is None
+    assert emoji_to_oc_color("spB2") == "B"
+    assert emoji_to_oc_color("spT2") == "T"
 
 
 def test_red_at_8_still_viable_red_position():

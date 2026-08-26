@@ -15,14 +15,24 @@ from macro.minigame_board import spawn_cell_emojis
 from mudae.account_context import defaults_from_store, resolve_log_account
 from mudae.clock import utc_date_key
 from mudae.constants import sphere_base_sp
-from mudae.log_store import DebouncedJsonLog
+from mudae.log_store import DebouncedJsonLog, FileSignature, file_signature
 
 _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "minigame_log.json"
 _events: list[dict[str, Any]] = []
 _recording_account_id: str = ""
 _recording_account_name: str = ""
+_disk_sig: FileSignature | None = None
 
-_writer = DebouncedJsonLog(lambda: _LOG_PATH, lambda: _events)
+_writer = DebouncedJsonLog(
+    lambda: _LOG_PATH,
+    lambda: _events,
+    on_written=lambda: _capture_disk_sig(),
+)
+
+
+def _capture_disk_sig() -> None:
+    global _disk_sig
+    _disk_sig = file_signature(_LOG_PATH)
 
 
 def log_path() -> Path:
@@ -75,16 +85,32 @@ def game_label(game: str | None) -> str:
     return GAME_LABELS.get(key, f"${key}")
 
 
-def _load_disk_log() -> None:
+def _load_disk_log() -> bool:
     global _events
     if not _LOG_PATH.is_file():
-        return
+        return False
     try:
         raw = json.loads(_LOG_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return
-    if isinstance(raw, list):
-        _events = [entry for entry in raw if isinstance(entry, dict)]
+        return False
+    if not isinstance(raw, list):
+        return False
+    _events = [entry for entry in raw if isinstance(entry, dict)]
+    return True
+
+
+def refresh_from_disk() -> bool:
+    """Re-read the minigame JSON if Syncthing (or another process) changed it."""
+    global _disk_sig
+    if _writer.is_dirty():
+        return False
+    sig = file_signature(_LOG_PATH)
+    if sig is None or sig == _disk_sig:
+        return False
+    if not _load_disk_log():
+        return False
+    _disk_sig = sig
+    return True
 
 
 def _save_disk_log() -> None:
@@ -335,6 +361,7 @@ def build_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def client_payload(accounts_store: Any) -> dict[str, Any]:
+    refresh_from_disk()
     main_id, main_name, account_by_id = defaults_from_store(accounts_store)
     enriched = [
         enrich_entry(
@@ -357,7 +384,9 @@ def client_payload(accounts_store: Any) -> dict[str, Any]:
 
 
 def get_minigame_events() -> list[dict[str, Any]]:
+    refresh_from_disk()
     return [dict(entry) for entry in _events]
 
 
 _load_disk_log()
+_capture_disk_sig()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mudae.constants import SPHERE_WIN_EMOJIS, sphere_base_sp
+from mudae.constants import SPHERE_WIN_EMOJIS, canonical_sphere_emoji, sphere_base_sp
 
 GRID_CELLS = 25
 HIDDEN_EMOJIS = frozenset({"", "spU"})
@@ -52,8 +52,7 @@ def board_emojis(buttons: list[dict[str, Any]]) -> list[str]:
         if index >= len(spheres):
             board.append("spU")
             continue
-        emoji = str(spheres[index].get("emoji") or "").strip()
-        board.append(emoji if emoji else "spU")
+        board.append(normalize_sphere_emoji(spheres[index].get("emoji")))
     return board
 
 
@@ -115,7 +114,7 @@ def spawn_cell_emojis(
 
 
 def normalize_sphere_emoji(emoji: str | None) -> str:
-    key = str(emoji or "").strip()
+    key = canonical_sphere_emoji(emoji)
     if key in _OC_LETTER_TO_EMOJI:
         return _OC_LETTER_TO_EMOJI[key]
     if key in _OQ_STATE_TO_EMOJI:

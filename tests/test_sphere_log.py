@@ -93,6 +93,35 @@ def test_record_sphere_sources(tmp_path, monkeypatch):
     assert sources["perk10"] == 5600
 
 
+def test_record_sphere_click_colorblind_type_is_base_colour(tmp_path, monkeypatch):
+    import mudae.sphere_log as sphere_log
+
+    sphere_log._events.clear()
+    set_recording_account("acc1", "Main")
+    now = dt.datetime(2026, 7, 3, 14, 30, tzinfo=dt.timezone.utc)
+    snapshot = MudaeMessageSnapshot(
+        message_id=2,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=42,
+        guild_name="Guild",
+        author_id=1,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[],
+        buttons=[],
+        created_at="14:30:00",
+    )
+    entry = record_sphere_earning(
+        snapshot,
+        {"amount": 72, "claimed_by": "me", "sphere_type": "spT2"},
+        source="sphere_click",
+        now=now,
+    )
+    assert entry["sphere_type"] == "spT"
+
+
 def test_build_stats_by_source():
     entries = [
         {

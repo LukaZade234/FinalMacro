@@ -290,6 +290,33 @@ def test_parse_sphere_click():
     assert result.fields["amount"] == 72
 
 
+def test_parse_sphere_click_colorblind_blue_and_teal():
+    from mudae.parsers.classify import classify_message
+    from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
+
+    blue = "<:spB2:1541956653295865988> **player +72**  (1/15)"
+    teal = "<:spT2:1541956834171166761> **player +96**  (2/15)"
+    assert is_sphere_click_message(blue) is True
+    assert is_sphere_click_message(teal) is True
+    snapshot = MudaeMessageSnapshot(
+        message_id=102,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content=blue,
+        embeds=[],
+        buttons=[],
+        created_at="01:05:00",
+    )
+    assert classify_message(snapshot) == MessageKind.SPHERE_CLICK
+    assert parse_sphere_click(blue).fields["sphere_type"] == "spB"
+    assert parse_sphere_click(teal).fields["sphere_type"] == "spT"
+
+
 def test_parse_sphere_click_megasphere():
     from mudae.parsers.sphere import parse_sphere_click
 

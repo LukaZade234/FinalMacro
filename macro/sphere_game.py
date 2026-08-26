@@ -33,10 +33,12 @@ from collections.abc import Callable
 from typing import Any
 
 from mudae.constants import (
+    SPHERE_EMOJI_NAME_PATTERN,
     SPHERE_FREE_EMOJIS,
     SPHERE_HIDDEN_EMOJI,
     SPHERE_REVEAL_EMOJIS,
     SPHERE_VALUE_RANK,
+    canonical_sphere_emoji,
 )
 from mudae.parsers.ohu import parse_oh_invested_bonus
 
@@ -54,12 +56,13 @@ from macro.minigame_board import (
     cell_index,
     classify_oh_click,
     make_click,
+    normalize_sphere_emoji,
 )
 
 
 def sphere_value_rank(emoji: str) -> int:
     """Paid-click value for a revealed sphere emoji (higher = click first)."""
-    return SPHERE_VALUE_RANK.get(emoji.strip(), 0)
+    return SPHERE_VALUE_RANK.get(canonical_sphere_emoji(emoji), 0)
 
 
 def _button_sort_key(buttons: list[dict[str, Any]], button: dict[str, Any]) -> tuple[int, int]:
@@ -73,11 +76,11 @@ def _button_sort_key(buttons: list[dict[str, Any]], button: dict[str, Any]) -> t
 _CLICKS_ALLOWED_RE = re.compile(r"click\s*\*{0,2}(\d+)\*{0,2}\s*times", re.IGNORECASE)
 # Custom <:spY:id> or bare :spY: (copy-paste from the Discord client).
 _SPHERE_CUSTOM_RE = re.compile(r"<:([^:>]+):\d+>")
-_SPHERE_BARE_RE = re.compile(r"(?<!<):(sp[A-Za-z]*):")
+_SPHERE_BARE_RE = re.compile(rf"(?<!<):({SPHERE_EMOJI_NAME_PATTERN}):")
 _TURNS_INTO_RE = re.compile(
-    r"(?:<:(?P<src1>[^:>]+):\d+>|:(?P<src2>sp[A-Za-z]*):)"
+    rf"(?:<:(?P<src1>[^:>]+):\d+>|:(?P<src2>{SPHERE_EMOJI_NAME_PATTERN}):)"
     r"\s*turns\s+into\s*"
-    r"(?:<:(?P<dst1>[^:>]+):\d+>|:(?P<dst2>sp[A-Za-z]*):)",
+    rf"(?:<:(?P<dst1>[^:>]+):\d+>|:(?P<dst2>{SPHERE_EMOJI_NAME_PATTERN}):)",
     re.IGNORECASE,
 )
 _BREAKS_DOWN_RE = re.compile(r"breaks\s+down\s+into", re.IGNORECASE)
@@ -87,7 +90,7 @@ _ARROW_AMOUNT_RE = re.compile(
 )
 # "<:spP:id> (Free) **+46**", "<:spY:id> **+59**", ":spO: +216".
 _PAYOUT_RE = re.compile(
-    r"(?:<:(?P<emoji1>[^:>]+):\d+>|:(?P<emoji2>sp[A-Za-z]*):)"
+    rf"(?:<:(?P<emoji1>[^:>]+):\d+>|:(?P<emoji2>{SPHERE_EMOJI_NAME_PATTERN}):)"
     r"(?:\s*\([^)]*\))?"
     r"\s*(?:\*\*)?\+\s*(?:\*\*)?(?P<amount>[\d,]+)",
 )
@@ -101,7 +104,10 @@ FIRST_CLICK_DELAY_SEC = 1.0
 
 
 def _emoji(button: dict[str, Any]) -> str:
-    return (button.get("emoji") or "").strip()
+    raw = (button.get("emoji") or "").strip()
+    if not raw:
+        return ""
+    return normalize_sphere_emoji(raw)
 
 
 def _sphere_buttons(buttons: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -231,6 +237,75 @@ def reward_outcome_types(content: str) -> list[str]:
     return [emoji for _kind, emoji in _reward_events(content)]
 
 
+def parse_reward_clicks(content: str) -> list[dict[str, Any]]:
+    """Group tracker lines into one click each, matching Mudae's list.
+
+    Light ``breaks down into`` is one click. ``turns into`` plus the following
+    payout of that colour is one dark click, not a second press.
+    """
+    clicks: list[dict[str, Any]] = []
+    skip_payout = ""
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if "turns into" in lower:
+            match = _TURNS_INTO_RE.search(line)
+            dest = ""
+            if match:
+                dest = (match.group("dst1") or match.group("dst2") or "").strip()
+            if not dest:
+                emojis = _sphere_emojis_in(line)
+                if len(emojis) >= 2:
+                    dest = emojis[-1]
+            dest = normalize_sphere_emoji(dest) if dest else ""
+            clicks.append(
+                {
+                    "emoji": "spD",
+                    "resolved": [dest] if dest else [],
+                    "paid": True,
+                    "oc_bonus": 0,
+                }
+            )
+            skip_payout = dest
+            continue
+        if "breaks down into" in lower:
+            fragments = [
+                normalize_sphere_emoji(item) for item in _breakdown_fragments(line)
+            ]
+            clicks.append(
+                {
+                    "emoji": "spL",
+                    "resolved": [item for item in fragments if item],
+                    "paid": True,
+                    "oc_bonus": 0,
+                }
+            )
+            skip_payout = ""
+            continue
+        match = _PAYOUT_RE.search(line)
+        if not match:
+            continue
+        emoji = normalize_sphere_emoji(
+            (match.group("emoji1") or match.group("emoji2") or "").strip()
+        )
+        if skip_payout and emoji == skip_payout:
+            skip_payout = ""
+            continue
+        skip_payout = ""
+        if emoji == SPHERE_HIDDEN_EMOJI:
+            clicks.append(
+                {"emoji": "spU", "resolved": [], "paid": True, "oc_bonus": 1}
+            )
+            continue
+        paid = emoji not in SPHERE_FREE_EMOJIS and "(free)" not in lower
+        clicks.append(
+            {"emoji": emoji, "resolved": [], "paid": paid, "oc_bonus": 0}
+        )
+    return clicks
+
+
 def _click_outcome_note(classified: dict[str, Any], kind: str) -> str:
     """Activity-log fragment: identity plus what light/dark / hidden became."""
     oc_grant = int(classified.get("oc_bonus") or 0)
@@ -273,14 +348,15 @@ def disabled_count(buttons: list[dict[str, Any]]) -> int:
     return sum(1 for b in buttons if b.get("disabled"))
 
 
-def grid_signature(buttons: list[dict[str, Any]]) -> tuple[tuple[str, str, bool], ...]:
+def grid_signature(buttons: list[dict[str, Any]]) -> tuple[tuple[str, str, bool, str], ...]:
     """Stable fingerprint of the grid for detecting Mudae edits."""
-    sig: list[tuple[str, str, bool]] = []
+    sig: list[tuple[str, str, bool, str]] = []
     for button in _sphere_buttons(buttons):
         sig.append((
             str(button.get("custom_id") or ""),
             _emoji(button),
             bool(button.get("disabled")),
+            str(button.get("style") or ""),
         ))
     return tuple(sig)
 

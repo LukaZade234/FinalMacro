@@ -43,6 +43,7 @@ from mudae.constants import (
     SPHERE_ROLL_DEFAULT_EMOJI,
     SPHERE_ROLL_DEFAULT_FILTER_IDS,
     SPHERE_ROLL_FREE_EMOJIS,
+    canonical_sphere_emoji,
 )
 
 
@@ -100,7 +101,7 @@ def _kakera_emoji(button: dict[str, Any]) -> str:
 
 
 def _sphere_emoji(button: dict[str, Any]) -> str:
-    emoji = _kakera_emoji(button)
+    emoji = canonical_sphere_emoji(_kakera_emoji(button))
     if emoji == SPHERE_ROLL_DEFAULT_EMOJI:
         return emoji
     if emoji.startswith("sp") and len(emoji) >= 3:
@@ -111,10 +112,12 @@ def _sphere_emoji(button: dict[str, Any]) -> str:
 def _sphere_matches_filter(emoji: str, types_allowed: list[str]) -> bool:
     if not types_allowed:
         return True
-    if emoji in types_allowed:
+    key = canonical_sphere_emoji(emoji)
+    allowed = {canonical_sphere_emoji(item) for item in types_allowed}
+    if key in allowed:
         return True
-    if emoji == SPHERE_ROLL_DEFAULT_EMOJI:
-        return bool(SPHERE_ROLL_DEFAULT_FILTER_IDS & set(types_allowed))
+    if key == SPHERE_ROLL_DEFAULT_EMOJI:
+        return bool(SPHERE_ROLL_DEFAULT_FILTER_IDS & allowed)
     return False
 
 

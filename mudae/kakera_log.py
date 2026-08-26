@@ -355,6 +355,7 @@ def client_payload(
 
 
 def get_kakera_events() -> list[dict[str, Any]]:
+    event_log.ensure_loaded()
     return [dict(entry) for entry in _events]
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 from gui.accounts import AccountProfile
 from macro.minigame_board import build_session, classify_oh_click, make_click
@@ -22,6 +23,12 @@ def test_make_click_uses_base_sp_not_chat_amount():
     assert click["base_sp"] == 5
     click = make_click(15, "spR", paid=True)
     assert click["base_sp"] == 150
+    click = make_click(3, "spB2", paid=True)
+    assert click["emoji"] == "spB"
+    assert click["base_sp"] == 10
+    click = make_click(4, "spT2", paid=True)
+    assert click["emoji"] == "spT"
+    assert click["base_sp"] == 20
 
 
 def test_session_won_on_red_click():
@@ -328,3 +335,30 @@ def test_record_and_stats(tmp_path, monkeypatch):
     assert spawn["spR"] == 1
     stats = build_stats(payload["entries"])
     assert stats["by_game"][0]["id"] == "oq"
+
+
+def test_payload_reloads_when_file_changes(tmp_path, monkeypatch):
+    import mudae.minigame_log as minigame_log
+
+    path = tmp_path / "minigame_log.json"
+    monkeypatch.setattr(minigame_log, "_LOG_PATH", path)
+    minigame_log._events = []
+    minigame_log._disk_sig = None
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "game": "oh",
+                    "won": False,
+                    "base_value": 10,
+                    "board": ["spB"] * 25,
+                    "clicks": [],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    store = type("S", (), {"accounts": [AccountProfile(id="acc1", name="Main", type="Main")]})()
+    payload = client_payload(store)
+    assert payload["totals"]["games"] == 1
+    assert payload["totals"]["base_value"] == 10

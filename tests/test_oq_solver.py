@@ -88,6 +88,8 @@ def test_emoji_to_oq_state():
     assert emoji_to_oq_state("spY") == "3"
     assert emoji_to_oq_state("spO") == "4"
     assert emoji_to_oq_state("spU") is None
+    assert emoji_to_oq_state("spB2") == "0"
+    assert emoji_to_oq_state("spT2") == "1"
 
 
 def test_observations_from_red_sp_emoji():

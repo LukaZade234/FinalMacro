@@ -76,3 +76,51 @@ def test_new_events_append_to_jsonl_not_legacy_json(tmp_path):
             amounts.append(row["amount"])
     assert amounts == [420, 7]
     assert [row["amount"] for row in kakera_log._events] == [420, 7]
+
+
+def test_reload_picks_up_external_jsonl_append(tmp_path):
+    from mudae.stats_index import payload
+
+    event_log.append(
+        "kakera",
+        {"amount": 1, "earn_method": "kakera_click", "date_key": "2026-08-26"},
+    )
+    event_log.flush()
+    with (tmp_path / "events.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "kind": "kakera",
+                    "amount": 99,
+                    "earn_method": "kakera_click",
+                    "date_key": "2026-08-26",
+                }
+            )
+            + "\n"
+        )
+
+    store = type("S", (), {"accounts": [], "active_account_id": ""})()
+    data = payload("kakera", store)
+    assert [row["amount"] for row in event_log.events("kakera")] == [1, 99]
+    assert data["totals"]["all_time"] == 100
+    assert data["event_count"] == 2
+
+
+def test_reload_skips_unflushed_local_events(tmp_path):
+    event_log.append(
+        "kakera",
+        {"amount": 1, "earn_method": "kakera_click", "date_key": "2026-08-26"},
+    )
+    (tmp_path / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "kind": "kakera",
+                "amount": 99,
+                "earn_method": "kakera_click",
+                "date_key": "2026-08-26",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert [row["amount"] for row in event_log.events("kakera")] == [1]

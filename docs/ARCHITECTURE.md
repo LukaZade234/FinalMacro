@@ -90,7 +90,7 @@ changes.
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
 | `sphere_game.py` / `oc_game.py` / `oq_game.py` | Individual minigames |
 | `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
-| `minigame_board.py` | 5×5 board / click helpers for the minigame log |
+| `minigame_board.py` | 5×5 board / click helpers for the minigame log. ``normalize_sphere_emoji`` folds colour-blind ``spB2`` / ``spT2`` into ``spB`` / ``spT``. |
 | `settings_apply.py` | Push a settings preset to the server |
 | `state.py` | `AccountState`, `MacroPhase` |
 | `activity_log.py` / `session_log.py` | In-app log + on-disk session |
@@ -105,7 +105,7 @@ changes.
 | `clock.py` | UTC `date_key` (Mudae dailies); local HH:MM:SS for the live feed |
 | `discord_reader.py` | `ChannelMonitor` — user-token client, one channel |
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
-| `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP** |
+| `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP**. Colour-blind ``spB2`` / ``spT2`` collapse via ``canonical_sphere_emoji``. |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere) |
 | `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets) |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
@@ -170,11 +170,16 @@ Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
 
 Also in that file: tray / update prefs, `ui_layout`, `ui_palette`. Session
 logs go under `data/session_logs/`. Kakera / key / sphere / soulmate events
-are `data/events.jsonl`. Statistics cards/charts use an in-memory daily cube
-(`mudae/stats_index.py`); QML only receives a page of `recent` rows.
-On first launch after that file is missing, the old `data/*_log.json` arrays
-are imported and then left untouched. Minigame boards stay in
+are `data/events.jsonl` (append-only JSONL; the old `kakera_log.json` /
+`sphere_log.json` / `key_log.json` / `soulmate_log.json` are a one-time
+import backup and are not updated). Statistics cards/charts use an in-memory
+daily cube (`mudae/stats_index.py`); QML only receives a page of `recent`
+rows. Opening a Statistics tab (and a file watcher, same idea as
+`settings.json`) re-reads `events.jsonl` when Syncthing updates it, unless
+this process still has unflushed rows. Minigame boards stay in
 `data/minigame_log.json`; chaos capture stays in `data/chaos_log.json`.
+Syncthing on `data/` should sync `events.jsonl` for kakera/sphere/key stats;
+turning the folder's filesystem watcher on helps.
 
 ---
 

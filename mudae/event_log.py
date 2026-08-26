@@ -5,6 +5,10 @@ into ``data/events.jsonl``. Those JSON files are left on disk as a backup and
 are never deleted or overwritten. If ``events.jsonl`` already exists, it is
 the source of truth (re-import would duplicate rows).
 
+While the app is running, Statistics re-reads the JSONL when the file changes
+on disk (Syncthing, another instance) unless this process still has unflushed
+rows.
+
 Minigame boards and chaos capture stay in their own files.
 """
 
@@ -16,7 +20,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from mudae.log_store import DebouncedJsonlLog
+from mudae.log_store import DebouncedJsonlLog, FileSignature, file_signature
 
 KINDS = ("kakera", "sphere", "key", "soulmate")
 
@@ -37,8 +41,31 @@ _all: list[dict[str, Any]] = []
 _by_kind: dict[str, list[dict[str, Any]]] = {kind: [] for kind in KINDS}
 _loaded = False
 _imported_legacy = False
+_watch_disk = False
+_disk_sig: FileSignature | None = None
 
-_writer = DebouncedJsonlLog(lambda: _path, lambda: list(_all))
+_writer = DebouncedJsonlLog(
+    lambda: _path,
+    lambda: list(_all),
+    on_written=lambda: _capture_disk_sig(),
+)
+
+
+def _capture_disk_sig() -> None:
+    global _disk_sig
+    _disk_sig = file_signature(_path)
+
+
+def _should_reload_unlocked() -> bool:
+    """True when the JSONL on disk changed and this process has nothing unflushed."""
+    if not _watch_disk:
+        return False
+    if _writer.is_dirty() or _writer.synced_count() != len(_all):
+        return False
+    sig = file_signature(_path)
+    if sig is None or sig == _disk_sig:
+        return False
+    return True
 
 
 def jsonl_path() -> Path:
@@ -84,29 +111,51 @@ def _notify_index_rebuild_kind(kind: str) -> None:
 
 
 def ensure_loaded() -> None:
-    global _loaded, _imported_legacy
+    global _loaded, _imported_legacy, _watch_disk
     should_rebuild = False
     with _lock:
         if _loaded:
-            return
-        _loaded = True
-        if "pytest" in sys.modules:
-            # Collection/import must not touch the user's data/ folder.
-            return
-        if _path.is_file() and _path.stat().st_size > 0:
-            _load_jsonl(_path)
-            _imported_legacy = False
-            should_rebuild = True
+            already = True
         else:
-            imported = _import_legacy_files(_data_dir)
-            _imported_legacy = imported > 0
-            if imported:
-                _writer.reset_sync()
-                _writer.mark_dirty(rewrite=True)
-                _writer.flush()
+            already = False
+            _loaded = True
+            if "pytest" in sys.modules:
+                # Collection/import must not touch the user's data/ folder.
+                return
+            _watch_disk = True
+            if _path.is_file() and _path.stat().st_size > 0:
+                _load_jsonl(_path)
+                _imported_legacy = False
+            else:
+                imported = _import_legacy_files(_data_dir)
+                _imported_legacy = imported > 0
+                if imported:
+                    _writer.reset_sync()
+                    _writer.mark_dirty(rewrite=True)
+                    _writer.flush()
+            _capture_disk_sig()
             should_rebuild = True
     if should_rebuild:
         _notify_index_rebuild()
+        return
+    if already:
+        refresh_from_disk()
+
+
+def refresh_from_disk() -> bool:
+    """Re-read JSONL if another process (e.g. Syncthing) changed it.
+
+    Skips when this process has unflushed rows so a viewer machine can pick up
+    synced stats without the writer clobbering live clicks. Returns True when
+    the in-memory log (and Statistics cube) was replaced from disk.
+    """
+    with _lock:
+        if not _loaded or not _should_reload_unlocked():
+            return False
+        _load_jsonl(_path)
+        _capture_disk_sig()
+    _notify_index_rebuild()
+    return True
 
 
 def append(kind: str, entry: dict[str, Any]) -> dict[str, Any]:
@@ -157,7 +206,7 @@ def cancel_pending() -> None:
 
 def reset_for_tests(path: Path | None = None) -> None:
     """Empty the store and optionally point it at a temp JSONL (tests only)."""
-    global _loaded, _imported_legacy, _path, _data_dir
+    global _loaded, _imported_legacy, _path, _data_dir, _watch_disk
     _writer.cancel_pending()
     with _lock:
         _all.clear()
@@ -165,16 +214,18 @@ def reset_for_tests(path: Path | None = None) -> None:
             _by_kind[kind].clear()
         _loaded = True
         _imported_legacy = False
+        _watch_disk = True
         if path is not None:
             _path = Path(path)
             _data_dir = _path.parent
         _writer.reset_sync()
+        _capture_disk_sig()
     _notify_index_rebuild()
 
 
 def load_from_data_dir(directory: Path) -> None:
     """Load JSONL or import legacy JSON arrays from ``directory`` (tests)."""
-    global _loaded, _imported_legacy, _path, _data_dir
+    global _loaded, _imported_legacy, _path, _data_dir, _watch_disk
     _writer.cancel_pending()
     directory = Path(directory)
     with _lock:
@@ -184,6 +235,7 @@ def load_from_data_dir(directory: Path) -> None:
         for kind in KINDS:
             _by_kind[kind].clear()
         _loaded = True
+        _watch_disk = True
         jsonl = _path
         if jsonl.is_file() and jsonl.stat().st_size > 0:
             _load_jsonl(jsonl)
@@ -195,6 +247,7 @@ def load_from_data_dir(directory: Path) -> None:
                 _writer.reset_sync()
                 _writer.mark_dirty(rewrite=True)
                 _writer.flush()
+        _capture_disk_sig()
     _notify_index_rebuild()
 
 
