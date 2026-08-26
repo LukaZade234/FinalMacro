@@ -43,6 +43,19 @@ def test_seconds_until_rolls_reset_never_negative():
     assert seconds_until_rolls_reset(-10, buffer_sec=0.0) == 0.0
 
 
+def test_seconds_until_rolls_reset_uses_deadline_not_stale_minutes():
+    """Rolling the hour must not restart the $tu countdown from now."""
+    from macro.live_clock import iso_deadline
+
+    tu_at = _at(10, 0)
+    reset_at = iso_deadline(60, now=tu_at)
+    later = _at(10, 3)
+    got = seconds_until_rolls_reset(60, reset_at=reset_at, now=later)
+    assert got == 57 * 60 + ROLLS_RESET_BUFFER_SEC
+    stale = seconds_until_rolls_reset(60, now=later)
+    assert stale == 60 * 60 + ROLLS_RESET_BUFFER_SEC
+
+
 # --- perk-8 refill boundary ---------------------------------------------------
 
 

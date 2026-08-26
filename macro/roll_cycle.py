@@ -1808,7 +1808,10 @@ class RollCycleEngine:
         return True, roll_timeouts
 
     def _seconds_until_rolls_reset(self) -> float:
-        return seconds_until_rolls_reset(self._state.rolls_reset_minutes)
+        return seconds_until_rolls_reset(
+            self._state.rolls_reset_minutes,
+            reset_at=self._state.rolls_reset_at,
+        )
 
     def _seconds_until_perk8_refresh(self) -> float | None:
         return self._perk8.seconds_until_refill()
@@ -1935,7 +1938,10 @@ class RollCycleEngine:
                 return True
             wait_for = seconds_until_window_start(start, end)
             if reset_m is not None:
-                until_reset = seconds_until_rolls_reset(reset_m)
+                until_reset = seconds_until_rolls_reset(
+                    reset_m,
+                    reset_at=self._state.rolls_reset_at,
+                )
                 if until_reset > 0:
                     wait_for = min(wait_for, until_reset)
             wait_for = max(1.0, wait_for)
@@ -1963,14 +1969,14 @@ class RollCycleEngine:
                 self._log("Notification mode: disconnect failed — stopping")
                 return False
 
+            until = self._seconds_until_rolls_reset()
+            wait_m = int(until // 60)
             self._log(
-                f"No rolls remaining — waiting {reset_m}m until hourly refill"
+                f"No rolls remaining — waiting {wait_m}m until hourly refill"
             )
             self._waiting_for_hourly_refill = True
             try:
-                woke = await self._wait_for_scheduled_wake(
-                    self._seconds_until_rolls_reset()
-                )
+                woke = await self._wait_for_scheduled_wake(until)
             finally:
                 self._waiting_for_hourly_refill = False
             if not woke:

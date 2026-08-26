@@ -33,13 +33,26 @@ _WAKE_REQUEUE_SEC = 0.05
 def seconds_until_rolls_reset(
     reset_minutes: int | None,
     *,
+    reset_at: str | None = None,
+    now: dt.datetime | None = None,
     buffer_sec: float = ROLLS_RESET_BUFFER_SEC,
 ) -> float:
-    """Seconds until the next hourly rolls reset reported by the last ``$tu``.
+    """Seconds until the next hourly rolls reset.
+
+    Prefer ``reset_at`` (absolute deadline from ``$tu``). Falling back to
+    ``reset_minutes * 60`` from *now* restarts the whole countdown and lands
+    several minutes late if the hour's rolls already took time.
 
     Returns ``0.0`` when the reset time is unknown, so the caller re-checks
     rather than sleeping blind.
     """
+    stamp = now or dt.datetime.now(dt.timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=dt.timezone.utc)
+    deadline = parse_iso(reset_at or "")
+    if deadline is not None:
+        remaining = (deadline - stamp).total_seconds()
+        return max(0.0, remaining + buffer_sec)
     if reset_minutes is None:
         return 0.0
     return max(0.0, reset_minutes * 60.0 + buffer_sec)
