@@ -83,10 +83,6 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.ROLL_LIMIT
     if is_minigame_exhausted_message(content):
         return MessageKind.MINIGAME_EXHAUSTED
-    if is_daily_cooldown_response(content):
-        return MessageKind.DAILY
-    if is_p_response(content):
-        return MessageKind.P
 
     if snapshot.embeds and is_character_embed(snapshot.embeds[0]):
         if has_kakera_buttons(snapshot):
@@ -94,6 +90,11 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         if has_claim_buttons(snapshot):
             return MessageKind.CLAIM_BUTTONS
         return MessageKind.CHARACTER_EMBED
+
+    if is_daily_cooldown_response(content):
+        return MessageKind.DAILY
+    if is_p_response(content):
+        return MessageKind.P
 
     if has_kakera_buttons(snapshot):
         return MessageKind.KAKERA_BUTTONS

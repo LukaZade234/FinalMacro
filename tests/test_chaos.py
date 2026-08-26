@@ -63,6 +63,14 @@ def test_parse_rolls_this_hour_from_log():
     assert "+5 rolls" in result.summary
 
 
+def test_parse_rolls_this_hour_without_kakera_on_same_line():
+    content = (
+        "<:kakeraC:1>**user +100** ($k)\n"
+        "**+5 rolls** this hour."
+    )
+    assert parse_chaos_rewards(content).rolls_this_hour == 5
+
+
 def test_parse_ten_and_fifteen_rolls_same_line():
     for n in (10, 15):
         content = (
@@ -147,6 +155,21 @@ def test_parse_kakeraloot_ten_example():
     assert rewards.minigames == {}
 
 
+def test_chaos_kakera_with_stacked_rolls_is_not_us():
+    from mudae.parsers.pipeline import parse_mudae_message
+
+    content = (
+        "<:kakeraC:1>**user +100** ($k)\n"
+        "<:kakeraC:1>A **kakeraloot** spawned!\n"
+        "<:rollstack:1> **+2** rolls stacked (Stock: 22,946.4)\n"
+    )
+    result = parse_mudae_message(_snap(1, content=content))
+    assert result.kind == MessageKind.KAKERA_CLAIM
+    assert result.fields["chaos_kakeraloots"] == 1
+    assert result.fields.get("chaos_kakeraloot_stacked") == 2.0
+    assert "us_stacked" not in result.fields
+
+
 def test_parse_power_discount_percentages():
     for pct in (50, 20, 35):
         content = (
@@ -210,10 +233,11 @@ def test_apply_chaos_hourly_rolls_tracks_extras():
     state = AccountState(rolls_left=2)
     assert apply_chaos_hourly_rolls(state, 5) == 7
     assert state.chaos_rolls_left == 5
-    assert original_hourly_rolls(state) == 2
+    assert state.rolls_left == 7
     merge_tu_hourly_rolls(state, 7)
     assert state.rolls_left == 7
     assert chaos_extra_rolls(state) == 0
+    assert original_hourly_rolls(state) == 7
     state.chaos_rolls_left = 5
     state.rolls_left = 5
     merge_tu_hourly_rolls(state, 0)
@@ -523,12 +547,38 @@ def test_hourly_loop_spends_chaos_extra_rolls_before_refill():
 
     actions = _FakeActions(
         tu_script=[_tu(1, 30), _tu(0, 30)],
-        roll_script=[_roll(1, 0), _roll(2, 0), _roll(3, 0)],
+        roll_script=[_roll(1, 0), _roll(2, 1), _roll(3, 0)],
     )
     engine, state = _make_engine(actions)
     with patch("macro.kakera_reactor.KakeraReactor.react", new=_add_extras):
         _run_normal(engine)
 
     assert len(actions.roll_commands()) == 3
-    assert any("extra hourly roll" in entry.text for entry in state.activity_log)
     assert any("waiting 30m until hourly refill" in entry.text for entry in state.activity_log)
+
+
+def test_hourly_loop_rolls_chaos_extras_with_stop_at_two():
+    """+N chaos rolls join the ordinary pool so the 2-left footer can fire."""
+    from tests.test_roll_cycle import _FakeActions, _make_engine, _roll, _run_normal, _tu
+
+    actions = _FakeActions(
+        tu_script=[_tu(7, 30), _tu(0, 30)],
+        roll_script=[
+            _roll(1, 6),
+            _roll(2, 5),
+            _roll(3, 4),
+            _roll(4, 3),
+            _roll(5, 2),
+            _roll(6, 1),
+            _roll(7, 0),
+        ],
+    )
+    engine, state = _make_engine(actions)
+    state.chaos_rolls_left = 5
+
+    _run_normal(engine)
+
+    assert len(actions.roll_commands()) == 7
+    assert any("Parsed 2 rolls left" in entry.text for entry in state.activity_log)
+    assert any("Finished rolls after warning" in entry.text for entry in state.activity_log)
+    assert not any("extra hourly roll" in entry.text for entry in state.activity_log)

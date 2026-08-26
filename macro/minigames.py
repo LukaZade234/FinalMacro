@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from macro.minigame_daily import (
+    PLAYABLE_MINIGAMES,
     availability_from_record,
     load_minigame_record,
     mark_game_exhausted,
@@ -101,9 +102,18 @@ class PlayAllMinigames:
             for kind in ("left", "stored", "total")
         }
 
-    async def play(self, *, prefix: str = "$") -> dict[str, Any]:
+    async def play(
+        self,
+        *,
+        prefix: str = "$",
+        ignore_daily_skip: bool = False,
+    ) -> dict[str, Any]:
         cached = self._load_refreshed_record()
-        if cached is not None and should_skip_playable_minigames(cached):
+        if (
+            not ignore_daily_skip
+            and cached is not None
+            and should_skip_playable_minigames(cached)
+        ):
             availability = availability_from_record(cached)
             self.availability = availability
             eta = cached.refill_at or "unknown"
@@ -261,8 +271,18 @@ class PlayAllMinigames:
     def _load_refreshed_record(self):
         if not self._daily_get:
             return None
-        record = refresh_minigames_if_refill_passed(load_minigame_record(self._daily_get()))
-        return record
+        daily = dict(self._daily_get())
+        record = load_minigame_record(daily)
+        was_exhausted = any(
+            record.entry(game).exhausted for game in PLAYABLE_MINIGAMES
+        )
+        refreshed = refresh_minigames_if_refill_passed(record)
+        now_exhausted = any(
+            refreshed.entry(game).exhausted for game in PLAYABLE_MINIGAMES
+        )
+        if was_exhausted and not now_exhausted:
+            self._persist_daily(save_minigame_record(daily, refreshed))
+        return refreshed
 
     def _persist_daily(self, daily: dict[str, Any]) -> None:
         if self._daily_save:

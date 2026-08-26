@@ -521,6 +521,77 @@ def test_wait_for_scheduled_wake_defers_ohu8_when_disconnected():
     asyncio.run(run())
 
 
+def test_scheduled_wake_reconnects_for_daily_minigames():
+    """Minigame refill during notification idle must reconnect before autoplay."""
+    from macro.minigame_daily import (
+        MinigameDailyEntry,
+        MinigameDailyRecord,
+        save_minigame_record,
+    )
+
+    now = dt.datetime.now(dt.timezone.utc)
+    store = {
+        "value": save_minigame_record(
+            {},
+            MinigameDailyRecord(
+                refill_at=(now - dt.timedelta(seconds=5)).isoformat(),
+                games={
+                    "oh": MinigameDailyEntry(exhausted=True, total=0),
+                    "oc": MinigameDailyEntry(exhausted=True, total=0),
+                    "oq": MinigameDailyEntry(exhausted=True, total=0),
+                },
+            ),
+        )
+    }
+    reconnects: list[str] = []
+    disconnects: list[str] = []
+    played: list[bool] = []
+
+    async def reconnect() -> bool:
+        reconnects.append("reconnect")
+        monitor.is_connected = True
+        return True
+
+    async def disconnect() -> bool:
+        disconnects.append("disconnect")
+        monitor.is_connected = False
+        return True
+
+    async def play() -> None:
+        played.append(bool(monitor.is_connected))
+
+    actions = _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
+    config = MacroConfig(
+        notification_mode=True,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    monitor = SimpleNamespace(is_connected=False, macro_active=False)
+    engine = RollCycleEngine(
+        actions,
+        config,
+        AccountState(),
+        monitor,
+        daily_resets_get=lambda: store["value"],
+        daily_resets_save=lambda daily: store.__setitem__("value", daily),
+        notification_disconnect=disconnect,
+        notification_reconnect=reconnect,
+        play_daily_minigames=play,
+    )
+    engine._stop.clear()
+    engine._waiting_for_hourly_refill = True
+
+    async def run() -> None:
+        with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+            ok = await engine._wait_for_scheduled_wake(2.0)
+        assert ok is True
+        assert reconnects == ["reconnect"]
+        assert played == [True]
+        assert disconnects == ["disconnect"]
+        assert monitor.is_connected is False
+
+    asyncio.run(run())
+
+
 def test_maybe_refresh_perk8_defers_without_connection():
     actions = _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
 

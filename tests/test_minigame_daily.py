@@ -12,6 +12,7 @@ from macro.minigame_daily import (
     mark_game_exhausted,
     refresh_minigames_if_refill_passed,
     save_minigame_record,
+    seconds_until_minigame_refill,
     should_skip_game,
     should_skip_playable_minigames,
     update_record_from_ohu,
@@ -79,3 +80,24 @@ def test_mark_game_exhausted_sets_refill():
     assert record.entry("oh").exhausted is True
     assert should_skip_game(record, "oh", now=now) is True
     assert should_skip_playable_minigames(record, now=now) is False
+
+
+def test_seconds_until_minigame_refill_none_when_not_exhausted():
+    now = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
+    record = MinigameDailyRecord(refill_at="2026-08-25T18:00:00+00:00")
+    assert seconds_until_minigame_refill(record, now=now) is None
+
+
+def test_seconds_until_minigame_refill_counts_down():
+    now = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
+    record = mark_game_exhausted(
+        MinigameDailyRecord(),
+        "oh",
+        now=now,
+        refill_minutes=90,
+    )
+    mark_game_exhausted(record, "oc", now=now, refill_minutes=90)
+    mark_game_exhausted(record, "oq", now=now, refill_minutes=90)
+    remaining = seconds_until_minigame_refill(record, now=now)
+    assert remaining is not None
+    assert 89 * 60 <= remaining <= 90 * 60

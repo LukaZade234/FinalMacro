@@ -26,6 +26,8 @@ WakeCallback = Callable[[], Awaitable[object]]
 ROLLS_RESET_BUFFER_SEC = 5.0
 # Wake interval during long waits so Stop stays responsive.
 STOP_CHECK_SEC = 1.0
+# After on_wake, leftover sub-slice hints are ignored until a later deadline.
+_WAKE_REQUEUE_SEC = 0.05
 
 
 def seconds_until_rolls_reset(
@@ -129,12 +131,25 @@ async def wait_for_scheduled_wake(
     through a long wait is still honoured. Returns False if stopped.
     """
     remaining = max(0.0, seconds)
+    # After a wake, ignore leftover 0s / sub-slice hints until a later deadline
+    # appears. Otherwise a 0.02s remainder re-fires on_wake (reconnect spam).
+    wake_handled = False
     while remaining > 0:
         if ctx.stop_requested:
             return False
         hint = wake_hint() if wake_hint is not None else None
-        if on_wake is not None and hint is not None and hint <= 0:
+        if hint is None:
+            wake_handled = False
+        elif wake_handled and hint > _WAKE_REQUEUE_SEC:
+            wake_handled = False
+        if (
+            on_wake is not None
+            and hint is not None
+            and hint <= 0
+            and not wake_handled
+        ):
             await on_wake()
+            wake_handled = True
         step = next_wake_step(
             remaining,
             wake_seconds=hint,
@@ -143,6 +158,12 @@ async def wait_for_scheduled_wake(
         await ctx.sleep(step)
         remaining -= step
         # The step above was shortened to land on the hint, so it is due now.
-        if on_wake is not None and hint is not None and 0 < hint <= step:
+        if (
+            on_wake is not None
+            and hint is not None
+            and 0 < hint <= step
+            and not wake_handled
+        ):
             await on_wake()
+            wake_handled = True
     return True

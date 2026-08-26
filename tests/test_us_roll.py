@@ -343,6 +343,32 @@ def test_us_mode_spends_leftovers_before_stacking_more():
     assert len(actions.roll_commands()) == 7
 
 
+def test_us_mode_spends_chaos_extras_as_ordinary_hourly():
+    """$tu already includes +N chaos rolls; they are ordinary stop-at-2 rolls."""
+    actions = _FakeActions(
+        tu_script=[_tu(7, 30), _tu(0, 30)],
+        roll_script=[
+            _roll(1, 6),
+            _roll(2, 5),
+            _roll(3, 4),
+            _roll(4, 3),
+            _roll(5, 2),
+            _roll(6, 1),
+            _roll(7, 0),
+        ],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+    state.chaos_rolls_left = 5
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 7
+    assert actions.us_adds() == []
+    assert any("Parsed 2 rolls left" in entry.text for entry in state.activity_log)
+    assert not any("extra hourly roll" in entry.text for entry in state.activity_log)
+
+
 def test_roll_counts_tick_down_between_tu_polls():
     """Mudae prints a footer count only near the end of a pool.
 

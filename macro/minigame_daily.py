@@ -192,6 +192,25 @@ def should_skip_game(
     return now < refill_at
 
 
+def seconds_until_minigame_refill(
+    record: MinigameDailyRecord,
+    *,
+    now: dt.datetime | None = None,
+) -> float | None:
+    """Seconds until playable minigames refill, or ``0.0`` if that already passed.
+
+    ``None`` means no timed wake is needed — daily uses are not marked spent.
+    """
+    now = now or _utc_now()
+    if not any(record.entry(game).exhausted for game in PLAYABLE_MINIGAMES):
+        return None
+    refill_at = parse_iso(record.refill_at)
+    if refill_at is None:
+        return None
+    remaining = (refill_at - now).total_seconds()
+    return max(0.0, remaining)
+
+
 def should_skip_playable_minigames(
     record: MinigameDailyRecord,
     *,

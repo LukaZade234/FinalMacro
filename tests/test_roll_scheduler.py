@@ -219,6 +219,21 @@ def test_scheduled_wake_fires_immediately_for_an_overdue_hint():
     assert calls == [1]
 
 
+def test_scheduled_wake_overdue_hint_fires_once():
+    """A 0s hint must not re-run on_wake every stop-check slice."""
+    ctx, _slept = _ctx()
+    calls: list[int] = []
+
+    async def on_wake() -> None:
+        calls.append(1)
+
+    asyncio.run(
+        wait_for_scheduled_wake(2.0, ctx=ctx, wake_hint=lambda: 0.0, on_wake=on_wake)
+    )
+
+    assert calls == [1]
+
+
 def test_scheduled_wake_rereads_a_hint_that_appears_mid_wait():
     """Nothing scheduled at first; a refill deadline shows up partway through."""
     ctx, _slept = _ctx()

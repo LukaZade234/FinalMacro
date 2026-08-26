@@ -33,7 +33,7 @@ def discounted_reaction_cost(cost: float, discount_pct: float | None) -> float:
 
 
 def apply_chaos_hourly_rolls(state: Any, extra: int) -> int:
-    """Add ``+N rolls this hour`` to the spendable hourly pool. Returns new total."""
+    """Add ``+N rolls this hour`` to the ordinary hourly pool. Returns new total."""
     added = max(0, int(extra))
     pending = int(getattr(state, "chaos_rolls_left", 0) or 0)
     if added > 0:
@@ -53,24 +53,24 @@ def chaos_extra_rolls(state: Any) -> int:
 
 
 def original_hourly_rolls(state: Any) -> int:
-    """Hourly pool remaining, excluding chaos extras the footer does not list."""
-    total = int(getattr(state, "rolls_left", 0) or 0)
-    return max(0, total - chaos_extra_rolls(state))
+    """Hourly pool remaining. Chaos extras are ordinary rolls in ``rolls_left``."""
+    return max(0, int(getattr(state, "rolls_left", 0) or 0))
 
 
 def merge_tu_hourly_rolls(state: Any, tu_rolls: int) -> None:
-    """Apply ``$tu`` rolls without double-counting unspent chaos extras.
+    """Apply ``$tu`` rolls, folding unspent chaos extras into the ordinary pool.
 
-    ``$tu`` is source of truth when it already includes extras (``tu >= extras``).
-    Otherwise keep extras on top of the footer ``$tu`` reported.
+    ``$tu`` usually already includes ``+N rolls this hour``. When it is smaller
+    than the tagged extras (footer omitted them), add extras on top. Either way
+    the result is one hourly pool — stop-at-2 runs on the combined count.
     """
     extras = chaos_extra_rolls(state)
     tu = int(tu_rolls)
-    if tu >= extras:
-        state.rolls_left = tu
-        state.chaos_rolls_left = 0
-    else:
+    if extras > 0 and tu < extras:
         state.rolls_left = tu + extras
+        return
+    state.rolls_left = tu
+    state.chaos_rolls_left = 0
 
 
 def is_chaos_followup_embed(

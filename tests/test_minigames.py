@@ -327,6 +327,52 @@ def test_play_all_skips_ohu_when_playable_games_exhausted():
     assert MINIGAME_DAILY_KEY in store["value"]
 
 
+def test_play_all_ignore_daily_skip_queries_ohu():
+    from macro.minigame_daily import (
+        MinigameDailyEntry,
+        MinigameDailyRecord,
+        save_minigame_record,
+    )
+
+    store = {"value": {}}
+    record = MinigameDailyRecord(
+        refill_at="2099-01-01T00:00:00+00:00",
+        games={
+            "oh": MinigameDailyEntry(exhausted=True, total=0),
+            "oc": MinigameDailyEntry(exhausted=True, total=0),
+            "oq": MinigameDailyEntry(exhausted=True, total=0),
+        },
+    )
+    store["value"] = save_minigame_record({}, record)
+    actions = _FakeActions(
+        {
+            "oh_total": 0,
+            "oc_total": 0,
+            "oq_total": 0,
+            "ot_total": 0,
+            "oh_left": 0,
+            "oh_stored": 0,
+            "oc_left": 0,
+            "oc_stored": 0,
+            "oq_left": 0,
+            "oq_stored": 0,
+            "ot_left": 0,
+            "ot_stored": 0,
+        }
+    )
+    runner = PlayAllMinigames(
+        actions,
+        SimpleNamespace(),
+        log=lambda _t: None,
+        between_games_sec=0,
+        daily_get=lambda: store["value"],
+        daily_save=lambda daily: store.__setitem__("value", daily),
+    )
+    result = asyncio.run(runner.play(ignore_daily_skip=True))
+    assert ("ohu", "$") in actions.sent
+    assert result["reason"] == "done"
+
+
 def test_play_all_persists_ohu_totals(monkeypatch):
     monkeypatch.setattr(
         "macro.minigames.OhSphereGame",

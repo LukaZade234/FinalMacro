@@ -157,11 +157,11 @@ def _classify_line(line: str, rewards: ChaosRewards) -> bool:
     if _SHOP5_OT_RE.search(line):
         rewards.shop_perk5_ot += 1
         return True
+    hour = _ROLLS_HOUR_RE.search(line)
+    if hour:
+        rewards.rolls_this_hour += int(hour.group(1))
+        return True
     if _KAKERA_C_RE.search(line):
-        hour = _ROLLS_HOUR_RE.search(line)
-        if hour:
-            rewards.rolls_this_hour += int(hour.group(1))
-            return True
         stored = _STORED_RE.search(line)
         if stored:
             key = stored.group(1).lower()

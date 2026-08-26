@@ -45,7 +45,7 @@ from macro.us_stop import (
 from mudae.discord_errors import is_fatal_runtime_error
 from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
 from macro.kakera_reactor import KakeraReactor
-from macro.chaos_followup import chaos_extra_rolls, merge_tu_hourly_rolls, original_hourly_rolls
+from macro.chaos_followup import chaos_extra_rolls, merge_tu_hourly_rolls
 from macro.perk8_runtime import Perk8Runtime
 from macro.post_roll import PostRollHandler, RollRecord
 from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
@@ -112,6 +112,7 @@ class RollCycleEngine:
         on_priority_pause: Callable[[], Any] | None = None,
         priority_wake_hint: Callable[[], float | None] | None = None,
         play_daily_minigames: Callable[[], Awaitable[None]] | None = None,
+        notification_connection_held: Callable[[], bool] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -123,6 +124,7 @@ class RollCycleEngine:
         self._on_priority_pause = on_priority_pause
         self._priority_wake_hint = priority_wake_hint
         self._play_daily_minigames = play_daily_minigames
+        self._notification_connection_held = notification_connection_held
         self._daily_get = daily_resets_get
         self._daily_save = daily_resets_save
         self._channel_settings: dict[str, Any] = {}
@@ -135,7 +137,6 @@ class RollCycleEngine:
         self._us_schedule_wait_logged = False
         self._us_halt_reason: str | None = None
         self._waiting_for_hourly_refill = False
-        self._spending_chaos_extras = False
         self._activity = ActivityLog(self._state, on_update=self._notify)
         self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
@@ -368,9 +369,25 @@ class RollCycleEngine:
             await result
 
     async def _on_scheduled_wake(self) -> None:
-        await self._run_priority_pause()
-        await self._perk8.maybe_refresh()
-        await self._maybe_play_daily_minigames()
+        """Run $p/$daily, perk-8, and daily minigames when a wait is interrupted.
+
+        Notification mode drops the gateway during the hourly wait, so reconnect
+        first. After the work, disconnect again if we are still waiting for rolls.
+        """
+        if not await self._restore_connection_for_notifications():
+            self._log("Notification mode: reconnect failed — deferring scheduled work")
+            return
+        try:
+            await self._run_priority_pause()
+            await self._perk8.maybe_refresh()
+            await self._maybe_play_daily_minigames()
+        finally:
+            held = False
+            cb = self._notification_connection_held
+            if cb is not None:
+                held = bool(cb())
+            if self._waiting_for_hourly_refill and not held:
+                await self._release_connection_for_notifications()
 
     async def _maybe_refresh_perk8_status(self) -> None:
         await self._perk8.maybe_refresh()
@@ -379,6 +396,8 @@ class RollCycleEngine:
         """Spend remaining ``$oh`` / ``$oc`` / ``$oq`` once per daily cycle."""
         cb = self._play_daily_minigames
         if cb is None or self._stop.is_set():
+            return
+        if self._discord_commands_blocked():
             return
         await cb()
 
@@ -612,9 +631,8 @@ class RollCycleEngine:
                     await self._maybe_refresh_perk8_status()
                     await self._maybe_play_daily_minigames()
 
-                    original = original_hourly_rolls(self._state)
-                    extras = chaos_extra_rolls(self._state)
-                    if original <= 0 and extras <= 0:
+                    pool = int(self._state.rolls_left or 0)
+                    if pool <= 0:
                         if not await self._wait_for_hourly_refill():
                             break
                         tu_fresh = True
@@ -624,40 +642,37 @@ class RollCycleEngine:
                     # segment, and keeping every hour's records would grow forever
                     # on multi-day runs.
                     session_records: list[RollRecord] = []
-                    claimed = False
-                    done = 0
-                    if original > 0:
-                        done, claimed, roll_index = (
-                            await self._roll_hourly_normal_segment(
-                                cmd,
-                                session_records,
-                                roll_index,
-                                normal_rolls=original,
-                            )
+                    done, claimed, roll_index = (
+                        await self._roll_hourly_normal_segment(
+                            cmd,
+                            session_records,
+                            roll_index,
+                            normal_rolls=pool,
                         )
-                        if done == 0 and extras <= 0:
-                            self._log("Roll failed — stopping")
-                            break
-                    extra_done, extra_claimed = await self._spend_chaos_extra_rolls(
-                        cmd,
-                        session_records,
-                        roll_index,
                     )
-                    roll_index += extra_done
-                    claimed = claimed or extra_claimed
-                    if original > 0 and done == 0 and extra_done == 0:
+                    remaining = int(self._state.rolls_left or 0)
+                    if done == 0 and not claimed and remaining <= 0:
+                        if not await self._wait_for_hourly_refill():
+                            break
+                        tu_fresh = True
+                        continue
+                    if done == 0 and not claimed:
                         self._log("Roll failed — stopping")
                         break
-                    if claimed or (original > 0 and done < original):
+                    if claimed:
                         if self._stop.is_set():
                             break
-                        remaining = max(0, original - done)
                         if remaining:
                             self._log(
                                 f"{remaining} roll(s) left this hour — "
                                 "continuing after claim"
                             )
                         tu_fresh = True
+                        continue
+                    if remaining > 0:
+                        # Chaos +N (or a missed footer) grew the pool after this
+                        # pass. Keep rolling — do not $tu, which can omit extras.
+                        tu_fresh = False
                         continue
 
                     if not await self._wait_for_hourly_refill():
@@ -876,13 +891,15 @@ class RollCycleEngine:
             )
 
         kakera_rules = self._config.kakera_rules_for_roll(us_roll=us_roll)
+        extras_before = chaos_extra_rolls(self._state)
         await self._make_kakera_reactor().react(
             message_id=snapshot.message_id,
             fields=fields,
             roll_index=roll_index,
             rules=kakera_rules,
         )
-        if chaos_extra_rolls(self._state) > 0:
+        if chaos_extra_rolls(self._state) > extras_before:
+            # Pool just grew — abandon a stop-at-2 tail so the new rolls are spent.
             self._reset_roll_stop_tracker()
         await self._make_sphere_reactor().react(
             message_id=snapshot.message_id,
@@ -1129,16 +1146,9 @@ class RollCycleEngine:
             if bonus is not None and bonus > 0:
                 self._state.rolls_us_bonus = bonus - 1
                 return
-        if self._spending_chaos_extras:
-            extras = chaos_extra_rolls(self._state)
-            if extras > 0:
-                self._state.chaos_rolls_left = extras - 1
-            left = self._state.rolls_left
-            if left is not None and left > 0:
-                self._state.rolls_left = left - 1
-            if self._persist_tu_state_enabled():
-                self._save_runtime_state()
-            return
+        extras = chaos_extra_rolls(self._state)
+        if extras > 0:
+            self._state.chaos_rolls_left = extras - 1
         left = self._state.rolls_left
         if left is not None and left > 0:
             self._state.rolls_left = left - 1
@@ -1154,8 +1164,6 @@ class RollCycleEngine:
 
     def _should_roll_normal_in_us_mode(self) -> bool:
         """True while normal hourly rolls still need the standard macro pass."""
-        if chaos_extra_rolls(self._state) > 0:
-            return True
         rl = self._state.rolls_left
         if rl is None or int(rl) <= 0:
             return False
@@ -1170,9 +1178,8 @@ class RollCycleEngine:
         """Map Mudae's low-roll footer to the pool it actually refers to.
 
         During ``$us`` rolls the footer tracks the ``$us`` usable pool, not hourly
-        rolls. Chaos extras (``+N rolls this hour``) are tracked separately —
-        Mudae's roll footer often omits them — and added back so they are spent
-        before the hourly reset instead of waiting for the next ``$tu``.
+        rolls. Chaos ``+N rolls this hour`` are ordinary hourly rolls and are
+        already in this footer when Mudae prints it.
         """
         if us_roll and (self._state.rolls_us_bonus or 0) > 0:
             self._state.rolls_us_bonus = count
@@ -1180,10 +1187,9 @@ class RollCycleEngine:
         if us_roll:
             return
         extras = chaos_extra_rolls(self._state)
-        if self._spending_chaos_extras and extras > 0:
-            extras -= 1
-            self._state.chaos_rolls_left = extras
-        self._state.rolls_left = count + extras
+        self._state.rolls_left = count
+        if extras > 0:
+            self._state.chaos_rolls_left = min(extras, count)
 
     def _clear_phantom_bonus_normal_rolls(self, *, attempted: int | None = None) -> None:
         """Drop a bogus ``rolls_left`` count after Mudae rejects a normal roll."""
@@ -1212,9 +1218,6 @@ class RollCycleEngine:
         unused. Spend exactly what ``$tu`` reports, then resume ``$us``.
         """
         self._sync_roll_stop_config()
-        extras = chaos_extra_rolls(self._state)
-        if extras > 0 and original_hourly_rolls(self._state) <= 0:
-            return extras
         rl = self._state.rolls_left
         if rl is None or int(rl) <= 0:
             return None
@@ -1281,44 +1284,6 @@ class RollCycleEngine:
         if halt == "stop":
             return "break"
         return ""
-
-    async def _spend_chaos_extra_rolls(
-        self,
-        cmd: str,
-        session_records: list[RollRecord],
-        start_index: int,
-    ) -> tuple[int, bool]:
-        """Spend ``+N rolls this hour`` from chaos before they expire at refill."""
-        claimed = False
-        done = 0
-        while chaos_extra_rolls(self._state) > 0 and not self._stop.is_set():
-            remaining = chaos_extra_rolls(self._state)
-            self._reset_roll_stop_tracker()
-            self._log(
-                f"{remaining} extra hourly roll(s) from chaos — "
-                "spending before they reset"
-            )
-            segment_start = len(session_records)
-            self._spending_chaos_extras = True
-            try:
-                extra, extra_claimed, limit = await self._run_normal_roll_segment(
-                    cmd,
-                    session_records,
-                    start_index + done,
-                    respect_roll_stop=False,
-                    max_rolls=remaining,
-                )
-            finally:
-                self._spending_chaos_extras = False
-            done += extra
-            claimed = claimed or extra_claimed
-            await self._claim_best_at_session_end(
-                session_records[segment_start:],
-                extra_claimed,
-            )
-            if extra == 0 or extra_claimed or limit:
-                break
-        return done, claimed
 
     async def _run_normal_roll_segment(
         self,
@@ -1471,19 +1436,18 @@ class RollCycleEngine:
                     else:
                         skip_tu = False
 
-                    normal_rolls = original_hourly_rolls(self._state)
-                    extras = chaos_extra_rolls(self._state)
+                    hourly_left = int(self._state.rolls_left or 0)
                     us_bonus = self._state.rolls_us_bonus or 0
                     reset_m = self._state.rolls_reset_minutes
 
                     if reset_m is not None and reset_m <= margin:
-                        if normal_rolls > 0 or extras > 0 or us_bonus > 0:
+                        if hourly_left > 0 or us_bonus > 0:
                             self._log(
                                 f"$us mode: rolls reset in {reset_m}m — rolling out "
-                                f"{normal_rolls + extras + us_bonus} usable roll(s) "
+                                f"{hourly_left + us_bonus} usable roll(s) "
                                 "before they reset"
                             )
-                            if normal_rolls > 0:
+                            if hourly_left > 0:
                                 self._reset_roll_stop_tracker()
                                 segment_start = len(session_records)
                                 done, claimed, roll_limit_hit = (
@@ -1492,7 +1456,7 @@ class RollCycleEngine:
                                         session_records,
                                         roll_index,
                                         respect_roll_stop=False,
-                                        max_rolls=normal_rolls,
+                                        max_rolls=hourly_left,
                                     )
                                 )
                                 roll_index += done
@@ -1503,32 +1467,25 @@ class RollCycleEngine:
                                 )
                                 if roll_limit_hit and done == 0 and not claimed:
                                     self._clear_phantom_bonus_normal_rolls(
-                                        attempted=normal_rolls,
+                                        attempted=hourly_left,
                                     )
                                 elif done == 0 and not claimed:
                                     keep, roll_timeouts = (
                                         await self._handle_us_roll_timeout(
-                                            done, normal_rolls, roll_timeouts
+                                            done, hourly_left, roll_timeouts
                                         )
                                     )
                                     if not keep:
                                         break
-                                elif done < normal_rolls:
+                                elif done < hourly_left:
                                     keep, roll_timeouts = (
                                         await self._handle_us_roll_timeout(
-                                            done, normal_rolls, roll_timeouts
+                                            done, hourly_left, roll_timeouts
                                         )
                                     )
                                     if not keep:
                                         break
                                     continue
-                            extra_done, extra_claimed = await self._spend_chaos_extra_rolls(
-                                cmd,
-                                session_records,
-                                roll_index,
-                            )
-                            roll_index += extra_done
-                            claimed_any = claimed_any or extra_claimed
                             if us_bonus > 0:
                                 done, claimed, halt = await self._roll_us_batch(
                                     cmd,
@@ -1559,11 +1516,8 @@ class RollCycleEngine:
 
                     if self._should_roll_normal_in_us_mode():
                         leftover = self._leftover_normal_rolls()
-                        spend_extras = (
-                            leftover is not None
-                            and leftover > 0
-                            and leftover == chaos_extra_rolls(self._state)
-                        )
+                        hourly_left = int(self._state.rolls_left or 0)
+                        max_rolls = leftover
                         if leftover is not None:
                             self._log(
                                 f"$us mode: {leftover} bonus normal roll(s) — "
@@ -1571,23 +1525,19 @@ class RollCycleEngine:
                             )
                         else:
                             self._log(
-                                f"$us mode: {normal_rolls} normal roll(s) — "
+                                f"$us mode: {hourly_left} normal roll(s) — "
                                 "standard macro rules"
                             )
                         segment_start = len(session_records)
-                        self._spending_chaos_extras = spend_extras
-                        try:
-                            done, claimed, roll_limit_hit = (
-                                await self._run_normal_roll_segment(
-                                    cmd,
-                                    session_records,
-                                    roll_index,
-                                    respect_roll_stop=leftover is None,
-                                    max_rolls=leftover,
-                                )
+                        done, claimed, roll_limit_hit = (
+                            await self._run_normal_roll_segment(
+                                cmd,
+                                session_records,
+                                roll_index,
+                                respect_roll_stop=leftover is None,
+                                max_rolls=max_rolls,
                             )
-                        finally:
-                            self._spending_chaos_extras = False
+                        )
                         roll_index += done
                         claimed_any = claimed_any or claimed
                         if roll_limit_hit and done == 0 and not claimed:
@@ -1863,14 +1813,21 @@ class RollCycleEngine:
     def _seconds_until_perk8_refresh(self) -> float | None:
         return self._perk8.seconds_until_refill()
 
+    def _seconds_until_minigame_refill(self) -> float | None:
+        from macro.minigame_daily import load_minigame_record, seconds_until_minigame_refill
+
+        if not self._daily_get:
+            return None
+        return seconds_until_minigame_refill(load_minigame_record(self._daily_get()))
+
     async def _sleep_interruptible(self, seconds: float) -> bool:
         return await sleep_interruptible(seconds, ctx=self._ctx)
 
     async def _wait_for_scheduled_wake(self, seconds: float) -> bool:
-        """Sleep until a deadline, waking early for a perk-8 refresh if one is due.
+        """Sleep until a deadline, waking early for $p/$daily, perk-8, or minigames.
 
-        A refresh that lands while the gateway is down is deferred inside
-        ``Perk8Runtime.maybe_refresh``, so this loop needs no connection check.
+        Notification mode reconnects inside ``_on_scheduled_wake`` so those
+        commands are not sent with the gateway down.
         """
         return await wait_for_scheduled_wake(
             seconds,
@@ -1878,6 +1835,7 @@ class RollCycleEngine:
             wake_hint=earliest_wake_seconds(
                 self._perk8.seconds_until_refill,
                 self._priority_wake_hint,
+                self._seconds_until_minigame_refill,
             ),
             on_wake=self._on_scheduled_wake,
         )

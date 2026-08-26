@@ -156,6 +156,13 @@ def parse_mudae_message(
     if is_minigame_exhausted_message(content):
         return parse_minigame_exhausted(content)
 
+    from mudae.parsers.classify import snapshot_is_kakera_claim, snapshot_text
+
+    # Chaos kakera claims can include "rolls stacked" (kakeraloot) and must not
+    # be treated as a bare ``$us`` reply.
+    if snapshot_is_kakera_claim(snapshot):
+        return parse_kakera_claim(snapshot_text(snapshot))
+
     resolved = resolve_command(
         reply_to_command,
         snapshot.content,
@@ -165,7 +172,15 @@ def parse_mudae_message(
     if resolved is not None:
         resolved = replace(resolved, part=reply_part, parts=reply_parts)
     if resolved is not None and resolved.parser in _KNOWN_PARSERS:
-        return _parse_command_response(snapshot, resolved)
+        # Two custom emojis in a roll embed match the $p grid heuristic.
+        steal_p_daily = (
+            resolved.user_input is None
+            and resolved.parser in {"p", "daily"}
+            and snapshot.embeds
+            and is_character_embed(snapshot.embeds[0])
+        )
+        if not steal_p_daily:
+            return _parse_command_response(snapshot, resolved)
 
     kind = classify_message(snapshot)
 

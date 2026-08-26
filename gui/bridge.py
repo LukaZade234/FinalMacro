@@ -2285,22 +2285,6 @@ class AppBridge(QObject):
         self._persist_minigame_exhausted(result)
         self._set_status(format_exhausted_activity(result))
 
-    def _minigame_skip_message(self, game: str) -> str | None:
-        from macro.minigame_daily import (
-            load_minigame_record,
-            refresh_minigames_if_refill_passed,
-            should_skip_game,
-        )
-
-        daily = self._get_daily_resets_for(
-            self._run_account_id, self._run_channel_profile_id
-        )
-        record = refresh_minigames_if_refill_passed(load_minigame_record(daily))
-        if not should_skip_game(record, game):
-            return None
-        eta = record.refill_at or "unknown"
-        return f"${game}: skipped until refill ({eta})"
-
     def _persist_minigame_exhausted(self, result: dict[str, Any] | None) -> None:
         if not result:
             return
@@ -2555,6 +2539,7 @@ class AppBridge(QObject):
                 self._us_schedule_wake_seconds,
             ),
             play_daily_minigames=self._play_daily_minigames_from_engine,
+            notification_connection_held=self._minigames_busy,
         )
         if channel_settings is not None:
             self._engine.update_run_target(
@@ -2803,6 +2788,45 @@ class AppBridge(QObject):
             or self._oq_running
             or self._minigames_running
         )
+
+    def _manual_minigame_blocked_status(self, *, game: str | None) -> str | None:
+        """Refuse GUI minigames while the engine is mid-roll (idle wait is ok)."""
+        if not self._loop or not self._actions or not self._monitor:
+            return "Connect first"
+        if self._minigames_busy():
+            if game is None:
+                return "Stop the minigame before playing all"
+            return f"Stop the minigame before playing ${game}"
+        engine = self._engine
+        if engine and engine.is_running and not engine.waiting_for_hourly_refill:
+            if game is None:
+                return "Stop the macro before playing minigames"
+            return f"Stop the macro before playing ${game}"
+        return None
+
+    async def _ensure_gateway_for_manual_minigame(self) -> str | None:
+        """Reconnect when the hourly loop is sitting in notification idle."""
+        engine = self._engine
+        if engine is None or not engine.is_running:
+            if not (self._monitor and self._monitor.is_connected):
+                return "Connect first"
+            return None
+        if not engine.waiting_for_hourly_refill:
+            return "Stop the macro before playing minigames"
+        if not await self._notification_reconnect():
+            return "Reconnect failed — cannot play minigame"
+        return None
+
+    async def _release_gateway_after_manual_minigame(self) -> None:
+        engine = self._engine
+        if not (
+            engine
+            and engine.is_running
+            and engine.waiting_for_hourly_refill
+            and self._macro_config.notification_mode
+        ):
+            return
+        await self._notification_disconnect()
 
     def _apply_sheet_caps_to_run_state(self, channel_profile_id: str = "") -> None:
         from macro.sheet_caps import apply_sheet_caps
@@ -3250,19 +3274,9 @@ class AppBridge(QObject):
 
     @Slot()
     def playOhSphere(self) -> None:
-        if not self._loop or not self._actions or not self._monitor:
-            self._set_status("Connect first")
-            return
-        if self._engine and self._engine.is_running:
-            self._set_status("Stop the macro before playing $oh")
-            return
-        if self._minigames_busy():
-            self._set_status("Stop the minigame before playing $oh")
-            return
-        skip = self._minigame_skip_message("oh")
-        if skip:
-            self._set_status(skip)
-            self._append_activity_log(skip)
+        blocked = self._manual_minigame_blocked_status(game="oh")
+        if blocked:
+            self._set_status(blocked)
             return
 
         activity, recorder = self._begin_minigame_session("oh")
@@ -3273,6 +3287,12 @@ class AppBridge(QObject):
         async def _run() -> None:
             reason = "finished"
             try:
+                gate = await self._ensure_gateway_for_manual_minigame()
+                if gate:
+                    reason = "error"
+                    activity.write(gate)
+                    self._set_status(gate)
+                    return
                 result = await game.play(prefix=self._macro_config.prefix)
                 self._apply_minigame_play_status(result)
                 self._record_minigame_session(
@@ -3286,6 +3306,7 @@ class AppBridge(QObject):
                 reason = "error"
                 activity.write(f"$oh error: {exc}")
             finally:
+                await self._release_gateway_after_manual_minigame()
                 self._finish_minigame_session(activity, recorder, reason)
                 self._oh_running = False
                 QMetaObject.invokeMethod(
@@ -3298,19 +3319,9 @@ class AppBridge(QObject):
 
     @Slot()
     def playOcSphere(self) -> None:
-        if not self._loop or not self._actions or not self._monitor:
-            self._set_status("Connect first")
-            return
-        if self._engine and self._engine.is_running:
-            self._set_status("Stop the macro before playing $oc")
-            return
-        if self._minigames_busy():
-            self._set_status("Stop the minigame before playing $oc")
-            return
-        skip = self._minigame_skip_message("oc")
-        if skip:
-            self._set_status(skip)
-            self._append_activity_log(skip)
+        blocked = self._manual_minigame_blocked_status(game="oc")
+        if blocked:
+            self._set_status(blocked)
             return
 
         activity, recorder = self._begin_minigame_session("oc")
@@ -3321,6 +3332,12 @@ class AppBridge(QObject):
         async def _run() -> None:
             reason = "finished"
             try:
+                gate = await self._ensure_gateway_for_manual_minigame()
+                if gate:
+                    reason = "error"
+                    activity.write(gate)
+                    self._set_status(gate)
+                    return
                 result = await game.play(prefix=self._macro_config.prefix)
                 self._apply_minigame_play_status(result)
                 self._record_minigame_session(
@@ -3334,6 +3351,7 @@ class AppBridge(QObject):
                 reason = "error"
                 activity.write(f"$oc error: {exc}")
             finally:
+                await self._release_gateway_after_manual_minigame()
                 self._finish_minigame_session(activity, recorder, reason)
                 self._oc_running = False
                 QMetaObject.invokeMethod(
@@ -3346,19 +3364,9 @@ class AppBridge(QObject):
 
     @Slot()
     def playOqSphere(self) -> None:
-        if not self._loop or not self._actions or not self._monitor:
-            self._set_status("Connect first")
-            return
-        if self._engine and self._engine.is_running:
-            self._set_status("Stop the macro before playing $oq")
-            return
-        if self._minigames_busy():
-            self._set_status("Stop the minigame before playing $oq")
-            return
-        skip = self._minigame_skip_message("oq")
-        if skip:
-            self._set_status(skip)
-            self._append_activity_log(skip)
+        blocked = self._manual_minigame_blocked_status(game="oq")
+        if blocked:
+            self._set_status(blocked)
             return
 
         activity, recorder = self._begin_minigame_session("oq")
@@ -3369,6 +3377,12 @@ class AppBridge(QObject):
         async def _run() -> None:
             reason = "finished"
             try:
+                gate = await self._ensure_gateway_for_manual_minigame()
+                if gate:
+                    reason = "error"
+                    activity.write(gate)
+                    self._set_status(gate)
+                    return
                 result = await game.play(prefix=self._macro_config.prefix)
                 self._apply_minigame_play_status(result)
                 self._record_minigame_session(
@@ -3382,6 +3396,7 @@ class AppBridge(QObject):
                 reason = "error"
                 activity.write(f"$oq error: {exc}")
             finally:
+                await self._release_gateway_after_manual_minigame()
                 self._finish_minigame_session(activity, recorder, reason)
                 self._oq_running = False
                 QMetaObject.invokeMethod(
@@ -3394,14 +3409,9 @@ class AppBridge(QObject):
 
     @Slot()
     def playAllMinigames(self) -> None:
-        if not self._loop or not self._actions or not self._monitor:
-            self._set_status("Connect first")
-            return
-        if self._engine and self._engine.is_running:
-            self._set_status("Stop the macro before playing minigames")
-            return
-        if self._minigames_busy():
-            self._set_status("Stop the minigame before playing all")
+        blocked = self._manual_minigame_blocked_status(game=None)
+        if blocked:
+            self._set_status(blocked)
             return
 
         activity, recorder = self._begin_minigame_session("minigames")
@@ -3433,7 +3443,16 @@ class AppBridge(QObject):
         async def _run() -> None:
             reason = "finished"
             try:
-                result = await runner.play(prefix=self._macro_config.prefix)
+                gate = await self._ensure_gateway_for_manual_minigame()
+                if gate:
+                    reason = "error"
+                    activity.write(gate)
+                    self._set_status(gate)
+                    return
+                result = await runner.play(
+                    prefix=self._macro_config.prefix,
+                    ignore_daily_skip=True,
+                )
                 self._minigame_availability = dict(result.get("availability") or {})
                 if result.get("reason") == "ohu failed":
                     reason = "error"
@@ -3447,6 +3466,7 @@ class AppBridge(QObject):
                 reason = "error"
                 activity.write(f"play-all error: {exc}")
             finally:
+                await self._release_gateway_after_manual_minigame()
                 self._finish_minigame_session(activity, recorder, reason)
                 self._minigames_running = False
                 QMetaObject.invokeMethod(
