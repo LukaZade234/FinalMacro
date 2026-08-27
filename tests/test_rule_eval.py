@@ -286,7 +286,7 @@ def test_kakera_low_power_inactive_above_threshold():
     assert len(decision.buttons) == 2
 
 
-def test_kakera_perk_8_budget_blocks_when_exhausted_and_not_perk_8():
+def test_kakera_perk_8_budget_equal_clicking_when_quota_used():
     fields = _kakera_fields(_kakera_buttons("kakeraR"))
     rules = KakeraReactionRules(
         enabled=True, perk_8_budget_mode=True
@@ -295,8 +295,8 @@ def test_kakera_perk_8_budget_blocks_when_exhausted_and_not_perk_8():
     state.rollover_kakera_budget_if_needed()
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
-    assert decision.buttons == []
-    assert "budget" in decision.reason.lower()
+    assert len(decision.buttons) == 1
+    assert decision.buttons[0].emoji == "kakeraR"
 
 
 def test_kakera_perk_8_budget_allows_perk_8_when_exhausted():
@@ -310,7 +310,7 @@ def test_kakera_perk_8_budget_allows_perk_8_when_exhausted():
     assert len(decision.buttons) == 1
 
 
-def test_kakera_perk_8_budget_allows_purple_when_exhausted():
+def test_kakera_perk_8_budget_clicks_main_filter_when_quota_used():
     fields = _kakera_fields(_kakera_buttons("kakeraP", "kakeraR"), perk_8=False)
     rules = KakeraReactionRules(
         enabled=True,
@@ -318,10 +318,10 @@ def test_kakera_perk_8_budget_allows_purple_when_exhausted():
         perk_8_budget_mode=True,
     )
     state = AccountState(perk8_priority_mode="active", perk8_click_max=2)
+    state.rollover_kakera_budget_if_needed()
     state.kakera_clicks_today = 2
     decision = passes_kakera_reaction(fields, rules, state)
-    assert len(decision.buttons) == 1
-    assert decision.buttons[0].emoji == "kakeraP"
+    assert sorted(b.emoji for b in decision.buttons) == ["kakeraP", "kakeraR"]
 
 
 def test_account_state_daily_budget_rollover():
@@ -418,7 +418,7 @@ def test_sphere_reaction_colorblind_blue_matches_blue_filter():
     assert decision.buttons[0].emoji == "spB2"
 
 
-def test_kakera_perk_8_types_allowed_separate_from_normal_filter():
+def test_kakera_perk_8_types_only_while_saving():
     fields = _kakera_fields(_kakera_buttons("kakeraR", "kakeraO"), perk_8=True)
     rules = KakeraReactionRules(
         enabled=True,
@@ -426,10 +426,30 @@ def test_kakera_perk_8_types_allowed_separate_from_normal_filter():
         perk_8_types_allowed=["kakeraO"],
         perk_8_budget_mode=True,
     )
-    state = AccountState(perk8_priority_mode="active")
-    decision = passes_kakera_reaction(fields, rules, state)
-    assert len(decision.buttons) == 1
-    assert decision.buttons[0].emoji == "kakeraO"
+    saving = AccountState(perk8_priority_mode="active", perk8_click_max=40)
+    saving.rollover_kakera_budget_if_needed()
+    saving.kakera_clicks_today = 1
+    decision = passes_kakera_reaction(fields, rules, saving)
+    assert [b.emoji for b in decision.buttons] == ["kakeraO"]
+
+    done = AccountState(perk8_priority_mode="active", perk8_click_max=40)
+    done.rollover_kakera_budget_if_needed()
+    done.kakera_clicks_today = 40
+    decision = passes_kakera_reaction(fields, rules, done)
+    assert [b.emoji for b in decision.buttons] == ["kakeraR"]
+
+
+def test_counts_toward_perk8_budget_includes_bypass_on_perk8():
+    from macro.rule_eval import counts_toward_perk8_budget
+
+    rules = KakeraReactionRules(
+        perk_8_budget_mode=True,
+        perk_8_budget_bypass_types=["kakeraP", "kakeraW", "kakeraR"],
+    )
+    assert counts_toward_perk8_budget(emoji="kakeraR", perk8=True, rules=rules)
+    assert not counts_toward_perk8_budget(emoji="kakeraR", perk8=False, rules=rules)
+    assert not counts_toward_perk8_budget(emoji="kakeraP", perk8=True, rules=rules)
+    assert counts_toward_perk8_budget(emoji="kakeraO", perk8=False, rules=rules)
 
 
 def test_kakera_normal_filter_after_budget_on_non_perk_8():

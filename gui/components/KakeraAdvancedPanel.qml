@@ -116,7 +116,7 @@ ColumnLayout {
 
             ThemedCheckBox {
                 Layout.fillWidth: true
-                text: "Skip non-perk-8 once the daily budget is hit"
+                text: "Save daily clicks for perk-8 rolls, then click equally"
                 checked: rules.kakera_reaction ? !!rules.kakera_reaction.perk_8_budget_mode : false
                 onToggled: onPatch("kakera_reaction", "perk_8_budget_mode", checked)
             }

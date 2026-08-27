@@ -34,9 +34,11 @@ from macro.reaction_power import (
 from macro.rule_eval import (
     ButtonChoice,
     _has_chaos_key,
+    counts_toward_perk8_budget,
     passes_kakera_reaction,
     perk8_budget_bypass_types,
     perk8_click_budget,
+    perk8_is_saving,
     perk8_mode_from_state,
 )
 from macro.state import AccountState
@@ -103,7 +105,14 @@ class KakeraReactor:
         mode = perk8_mode_from_state(self.state)
         budget = perk8_click_budget(self.state, rules)
         bypass = perk8_budget_bypass_types(rules)
-        if rules.perk_8_budget_mode and perk8_budget_applies(mode):
+        if (
+            rules.perk_8_budget_mode
+            and perk8_budget_applies(mode)
+            and not perk8_is_saving(self.state, rules)
+            and self.on_perk8_exhausted
+        ):
+            self.on_perk8_exhausted()
+        if perk8_is_saving(self.state, rules):
             remaining = self.state.remaining_kakera_budget(budget)
             bypass_candidates = [
                 c for c in candidates if (c.emoji or "") in bypass
@@ -111,17 +120,7 @@ class KakeraReactor:
             paid_candidates = [
                 c for c in candidates if (c.emoji or "") not in bypass
             ]
-            if remaining <= 0 and not paid_candidates:
-                candidates = bypass_candidates
-            elif remaining <= 0:
-                self._debug(
-                    f"kakera skip {character}: daily budget "
-                    f"{self.state.kakera_clicks_today}/{budget} reached"
-                )
-                return 0
-            else:
-                candidates = bypass_candidates + paid_candidates[:remaining]
-
+            candidates = bypass_candidates + paid_candidates[:remaining]
             if not candidates:
                 self._debug(
                     f"kakera skip {character}: daily budget "
@@ -152,7 +151,11 @@ class KakeraReactor:
             )
             if clicked:
                 clicks += 1
-                if (choice.emoji or "") not in bypass:
+                if counts_toward_perk8_budget(
+                    emoji=choice.emoji or "",
+                    perk8=has_perk_8,
+                    rules=rules,
+                ):
                     budget_clicks += 1
                 if len(candidates) > 1 and clicks < len(candidates):
                     await asyncio.sleep(_KAKERA_BETWEEN_CLICKS_SEC)
@@ -163,7 +166,7 @@ class KakeraReactor:
             if self.on_click_progress and budget_clicks:
                 self.on_click_progress()
             budget_note = ""
-            if rules.perk_8_budget_mode and perk8_budget_applies(mode):
+            if rules.perk_8_budget_mode and perk8_is_saving(self.state, rules):
                 budget_note = (
                     f" · budget {self.state.kakera_clicks_today}/{budget}"
                 )
@@ -181,7 +184,6 @@ class KakeraReactor:
             )
             if (
                 rules.perk_8_budget_mode
-                and perk8_budget_applies(mode)
                 and budget_clicks
                 and self.state.kakera_clicks_today >= budget
                 and self.on_perk8_exhausted

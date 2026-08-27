@@ -261,12 +261,11 @@ def passes_kakera_reaction(
     has_perk_8 = bool(fields.get("perk_8"))
     power_display = display_reaction_power(state.power_percent)
 
-    # Determine which color filter applies. Perk-8 characters use the perk-8 list
-    # (from Reactions) even on $us rolls where ``types_allowed`` is a narrower override.
-    if (
-        rules.perk_8_budget_mode
-        and bool(fields.get("perk_8"))
-    ):
+    # Perk-8 color list is only for the saving window. After 40/40 (or remaining
+    # 0), everyone uses the main filter so leftover power is not stuck on the
+    # bypass colours (red / rainbow).
+    saving = perk8_is_saving(state, rules)
+    if saving and bool(fields.get("perk_8")):
         types_allowed = list(rules.perk_8_types_allowed)
     else:
         types_allowed = list(rules.types_allowed)
@@ -313,21 +312,15 @@ def passes_kakera_reaction(
         )
     selected = affordable
 
-    # Perk-8 budget mode: while active, skip non-perk-8 rolls to save clicks — except
-    # configured bypass types (purple is free by default).
-    if rules.perk_8_budget_mode and perk8_budget_applies(perk8_mode_from_state(state)):
-        remaining = state.remaining_kakera_budget(perk8_click_budget(state, rules))
-        if not fields.get("perk_8"):
-            bypass = perk8_budget_bypass_types(rules)
-            bypass_selected = [b for b in selected if _kakera_emoji(b) in bypass]
-            if bypass_selected:
-                selected = bypass_selected
-            elif remaining > 0:
-                return ReactionDecision(reason="saving perk-8 kakera budget")
-            else:
-                return ReactionDecision(
-                    reason="daily kakera budget exhausted (perk-8 only)"
-                )
+    # While clicks remain, skip non-perk-8 rolls except bypass types (purple by
+    # default). Once the daily quota is used, fall through to equal clicking.
+    if saving and not fields.get("perk_8"):
+        bypass = perk8_budget_bypass_types(rules)
+        bypass_selected = [b for b in selected if _kakera_emoji(b) in bypass]
+        if bypass_selected:
+            selected = bypass_selected
+        else:
+            return ReactionDecision(reason="saving perk-8 kakera budget")
 
     if power_save_enabled(rules):
         selected = _filter_perk8_power_reserve(
@@ -348,7 +341,7 @@ def passes_kakera_reaction(
         )
     elif types_allowed:
         reason_parts.append(f"filter [{','.join(types_allowed)}]")
-    if rules.perk_8_budget_mode and perk8_budget_applies(perk8_mode_from_state(state)):
+    if saving:
         bypass = perk8_budget_bypass_types(rules)
         if not fields.get("perk_8") and any(
             _kakera_emoji(b) in bypass for b in (fields.get("buttons") or [])
@@ -370,6 +363,40 @@ def perk8_mode_from_state(state: AccountState) -> Perk8PriorityMode:
         return Perk8PriorityMode(state.perk8_priority_mode)
     except ValueError:
         return Perk8PriorityMode.INACTIVE
+
+
+def perk8_is_saving(state: AccountState, rules: KakeraReactionRules) -> bool:
+    """True while budget mode should hoard clicks for perk-8 characters.
+
+    Red/rainbow bypass clicks on perk-8 still consume Mudae's daily quota, so
+    remaining 0 (or mode ``done``) must switch to equal clicking — otherwise the
+    macro keeps skipping teal/orange/etc. with a full power bar.
+    """
+    if not rules.perk_8_budget_mode:
+        return False
+    if not perk8_budget_applies(perk8_mode_from_state(state)):
+        return False
+    return state.remaining_kakera_budget(perk8_click_budget(state, rules)) > 0
+
+
+def counts_toward_perk8_budget(
+    *,
+    emoji: str,
+    perk8: bool,
+    rules: KakeraReactionRules,
+) -> bool:
+    """Paid reacts that spend Mudae's perk-8 daily quota (or the local stand-in).
+
+    Bypass types on *non*-perk-8 rolls are free of the quota. The same emoji on
+    a perk-8 character still uses a daily click, so it must increment the count.
+    """
+    from macro.reaction_power import KAKERA_FREE_REACT_EMOJIS
+
+    if (emoji or "") in KAKERA_FREE_REACT_EMOJIS:
+        return False
+    if perk8:
+        return True
+    return (emoji or "") not in perk8_budget_bypass_types(rules)
 
 
 def _filter_perk8_power_reserve(
