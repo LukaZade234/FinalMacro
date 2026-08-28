@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,6 +71,7 @@ class KakeraReactor:
     log: Callable[[str], None]
     on_perk8_exhausted: Callable[[], None] | None = None
     on_click_progress: Callable[[], None] | None = None
+    on_click_timeout: Callable[[], Awaitable[None] | None] | None = None
     on_state: Callable[[], None] | None = None
     on_keys: Callable[[], None] | None = None
     debug_log: Callable[[str], None] | None = None
@@ -312,6 +313,7 @@ class KakeraReactor:
                         )
                 else:
                     self._log_kakera_timeout(character)
+                    await self._resync_after_timeout()
                     return False
                 if outcome.kind == MessageKind.KAKERA_REACT_DENIED:
                     cooldown = int(outcome.fields.get("kakera_cooldown_minutes") or 0)
@@ -502,6 +504,14 @@ class KakeraReactor:
             )
         else:
             self.log(f"kakera click timeout {character}: no Mudae response seen")
+
+    async def _resync_after_timeout(self) -> None:
+        cb = self.on_click_timeout
+        if cb is None:
+            return
+        result = cb()
+        if asyncio.iscoroutine(result):
+            await result
 
     async def _wait_for_kakera_outcome(self, *, timeout: float) -> ParseResult | None:
         collect = getattr(self.actions, "collect_queued", None)

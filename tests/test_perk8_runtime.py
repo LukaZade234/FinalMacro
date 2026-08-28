@@ -322,6 +322,31 @@ def test_apply_mode_clamps_clicked_count_to_daily_cap():
     assert ctx.state.perk8_priority_mode == Perk8PriorityMode.DONE.value
 
 
+def test_apply_mode_does_not_rewind_live_click_count():
+    runtime, ctx, _actions, _logs, _store = _make_runtime()
+    ctx.state.rollover_kakera_budget_if_needed()
+    ctx.state.kakera_clicks_today = 38
+    ctx.state.perk8_click_max = 40
+    record = Perk8DailyRecord(last_clicked=36, last_click_max=40)
+
+    runtime.apply_mode(Perk8PriorityMode.ACTIVE, record)
+
+    assert ctx.state.kakera_clicks_today == 38
+    assert ctx.state.perk8_priority_mode == Perk8PriorityMode.ACTIVE.value
+
+
+def test_apply_mode_catches_up_and_marks_done_when_ohu8_ahead():
+    runtime, ctx, _actions, _logs, _store = _make_runtime()
+    ctx.state.rollover_kakera_budget_if_needed()
+    ctx.state.kakera_clicks_today = 38
+    record = Perk8DailyRecord(last_clicked=40, last_click_max=40)
+
+    runtime.apply_mode(Perk8PriorityMode.ACTIVE, record)
+
+    assert ctx.state.kakera_clicks_today == 40
+    assert ctx.state.perk8_priority_mode == Perk8PriorityMode.DONE.value
+
+
 def test_mark_exhausted_ignored_when_not_active():
     runtime, ctx, _actions, _logs, store = _make_runtime()
     ctx.state.perk8_priority_mode = Perk8PriorityMode.DONE.value
@@ -331,6 +356,30 @@ def test_mark_exhausted_ignored_when_not_active():
     assert store["value"] == {}
 
 
+def test_resync_after_timeout_queries_ohu8_when_active():
+    runtime, ctx, actions, logs, _store = _make_runtime(reply=_ohu8(40, 40))
+    ctx.state.perk8_priority_mode = Perk8PriorityMode.ACTIVE.value
+    ctx.state.rollover_kakera_budget_if_needed()
+    ctx.state.kakera_clicks_today = 38
+    ctx.state.perk8_click_max = 40
+
+    asyncio.run(runtime.resync_after_uncertain_click())
+
+    assert actions.sent == ["ohu8"]
+    assert ctx.state.kakera_clicks_today == 40
+    assert ctx.state.perk8_priority_mode == Perk8PriorityMode.DONE.value
+    assert any("timeout" in line and "$ohu8" in line for line in logs)
+
+
+def test_resync_after_timeout_skips_when_already_done():
+    runtime, ctx, actions, _logs, _store = _make_runtime(reply=_ohu8(40, 40))
+    ctx.state.perk8_priority_mode = Perk8PriorityMode.DONE.value
+
+    asyncio.run(runtime.resync_after_uncertain_click())
+
+    assert actions.sent == []
+
+
 def test_persist_click_progress_writes_current_count():
     runtime, ctx, _actions, _logs, store = _make_runtime()
     ctx.state.kakera_clicks_today = 12
@@ -338,6 +387,7 @@ def test_persist_click_progress_writes_current_count():
     runtime.persist_click_progress()
 
     assert store["value"][PERK8_DAILY_KEY]["last_clicked"] == 12
+    assert store["value"][PERK8_DAILY_KEY]["updated_at"]
 
 
 def test_sync_refill_from_tu_records_the_deadline():

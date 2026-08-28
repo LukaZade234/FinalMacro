@@ -162,3 +162,38 @@ def test_kakera_click_settle_runs_before_wait():
         assert _KAKERA_CLICK_SETTLE_SEC in sleeps
 
     asyncio.run(_case())
+
+
+def test_kakera_timeout_calls_resync_hook():
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(
+            prefix="$",
+            kakera_reaction=KakeraReactionRules(
+                enabled=True,
+                types_allowed=["kakeraR"],
+            ),
+        )
+        actions = _FakeActionsWithQueue()
+        actions._outcomes.extend([None, None])
+        logs: list[str] = []
+        called: list[bool] = []
+
+        async def _resync() -> None:
+            called.append(True)
+
+        reactor = KakeraReactor(
+            actions,
+            config,
+            state,
+            log=logs.append,
+            on_click_timeout=_resync,
+        )
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            clicks = await reactor.react(message_id=4, fields=_fields())
+
+        assert clicks == 0
+        assert called == [True]
+        assert any("click timeout" in line for line in logs)
+
+    asyncio.run(_case())

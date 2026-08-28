@@ -320,9 +320,11 @@ class RollCycleEngine:
     def _make_kakera_reactor(self) -> KakeraReactor:
         on_exhausted = None
         on_progress = None
+        on_timeout = None
         if self._config.kakera_reaction.perk_8_budget_mode:
             on_exhausted = self._mark_perk8_exhausted
             on_progress = self._persist_perk8_click_progress
+            on_timeout = self._resync_perk8_after_kakera_timeout
         return KakeraReactor(
             actions=self._actions,
             config=self._config,
@@ -331,6 +333,7 @@ class RollCycleEngine:
             debug_log=self._log_debug,
             on_perk8_exhausted=on_exhausted,
             on_click_progress=on_progress,
+            on_click_timeout=on_timeout,
             on_state=self._notify,
             on_keys=self._notify_keys,
         )
@@ -352,6 +355,9 @@ class RollCycleEngine:
 
     def _persist_perk8_click_progress(self) -> None:
         self._perk8.persist_click_progress()
+
+    async def _resync_perk8_after_kakera_timeout(self) -> None:
+        await self._perk8.resync_after_uncertain_click()
 
     def _sync_perk8_refill_from_tu(self, fields: dict[str, Any]) -> None:
         self._perk8.sync_refill_from_tu(fields)

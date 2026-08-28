@@ -73,9 +73,9 @@ def query_decision(record: Perk8DailyRecord, *, force: bool) -> Perk8Action:
     """
     if should_skip_ohu8_until_refill(record):
         return Perk8Action.SKIP_UNTIL_REFILL
-    if not force and not should_query_ohu8_on_refill(record):
-        return Perk8Action.USE_CACHED
-    return Perk8Action.QUERY
+    if force or should_query_ohu8_on_refill(record):
+        return Perk8Action.QUERY
+    return Perk8Action.USE_CACHED
 
 
 def opportunistic_decision(
@@ -166,13 +166,24 @@ class Perk8Runtime:
 
     def apply_mode(self, mode: Perk8PriorityMode, record: Perk8DailyRecord) -> None:
         state = self._ctx.state
-        state.perk8_priority_mode = mode.value
         if record.last_click_max is not None:
             state.perk8_click_max = record.last_click_max
         if record.last_clicked is not None:
             state.rollover_kakera_budget_if_needed()
-            state.kakera_clicks_today = record.last_clicked
+            # Never rewind a live count if ``$ohu8`` is behind; catch up when it
+            # is ahead (local 38, Mudae 40).
+            state.kakera_clicks_today = max(
+                int(state.kakera_clicks_today), int(record.last_clicked)
+            )
             state.clamp_kakera_clicks_to_perk8_cap()
+        cap = state.perk8_click_max
+        if (
+            cap is not None
+            and int(state.kakera_clicks_today) >= int(cap)
+            and mode is Perk8PriorityMode.ACTIVE
+        ):
+            mode = Perk8PriorityMode.DONE
+        state.perk8_priority_mode = mode.value
 
     def _set_inactive(self) -> None:
         self._ctx.state.perk8_priority_mode = Perk8PriorityMode.INACTIVE.value
@@ -217,7 +228,23 @@ class Perk8Runtime:
         daily = self.load_daily()
         record = load_perk8_record(daily)
         record.last_clicked = self._ctx.state.kakera_clicks_today
+        from mudae.clock import utc_now
+
+        record.updated_at = utc_now().isoformat()
         self.save_daily(save_perk8_record(daily, record))
+
+    async def resync_after_uncertain_click(self) -> None:
+        """Live ``$ohu8`` after a kakera timeout — Mudae may have counted the click."""
+        if not self.budget_mode:
+            return
+        try:
+            mode = Perk8PriorityMode(self._ctx.state.perk8_priority_mode)
+        except ValueError:
+            return
+        if mode is not Perk8PriorityMode.ACTIVE:
+            return
+        self._ctx.log("kakera timeout — checking $ohu8 to sync perk-8 clicks")
+        await self.refresh(force=True)
 
     # --- $tu integration ---
 
@@ -330,7 +357,7 @@ class Perk8Runtime:
         ctx.notify()
 
     async def maybe_refresh(self) -> Perk8Action:
-        """Re-query ``$ohu8`` only when the refill window passed or one is pending."""
+        """Re-query ``$ohu8`` on refill or a deferred refresh."""
         if not self.budget_mode:
             return Perk8Action.DISABLED
 
