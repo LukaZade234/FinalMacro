@@ -309,6 +309,97 @@ Each finished `$oh` / `$oc` / `$oq` writes one row to `data/minigame_log.json`
 whether we hit red/rainbow, and **base SP** from `SPHERE_BASE_SP` — not the
 chat `+N`, which includes bonuses. `$oq` hunt uses MIXED (`P(purple)+0.1×Gini`).
 
+### `$oh` — sphere spawn rates
+
+Per-cell spawn chance on an `$oh` grid, from Colblitz and **confirmed against
+96 logged boards** (2,317 revealed cells). "Logged" is each colour's share of
+all 25 cells:
+
+| Colour | Base SP | Published | Logged | On click |
+|---|---|---|---|---|
+| White (`spW`) | 500 | 0.04% | 0.04% | extremely rare |
+| Red (`spR`) | 150 | 0.22% | 0.21% | |
+| Dark (`spD`) | ~104 | 1.46% | 1.17% | transforms into a random sphere |
+| Orange (`spO`) | 90 | 0.97% | 0.88% | |
+| Light (`spL`) | ~76 | 2.96% | 3.12% | breaks into component spheres |
+| Yellow (`spY`) | 55 | 2.57% | 2.79% | |
+| Green (`spG`) | 35 | 7.88% | 7.21% | |
+| Teal (`spT`) | 20 | 23.48% | 21.83% | reveals 1 covered cell |
+| Blue (`spB`) | 10 | 54.49% | 55.38% | reveals 3 covered cells |
+| Purple (`spP`) | 5 | 3.93% | 3.92% | **free** — always click first |
+
+The table sums to **98%**. The missing **2% is an `$oc` spawn**: it is
+indistinguishable from an unclicked cell, so it can only be hit by luck and
+stays `spU` on the logged board. That is confirmed — across 94 completed
+games the leftover unrevealed cells run at **2.13% per cell**, matching the
+2.00% residual. Both the rates and this residual are pinned by
+`tests/test_minigame_log_models.py`.
+
+`$oh` play is still greedy (`macro/sphere_game.py`): never click a revealed
+blue/teal, otherwise take the highest revealed paid sphere, else a random
+face-down. There is no `$oh` solver or simulator yet — the counts DP that
+would replace the greedy rule was blocked on exactly this table, and is now
+unblocked.
+
+### `$oq` — the world model, validated
+
+The 12,650 enumerated purple placements (`macro/oq_worlds.py`) were checked
+against 64 logged boards: every board has exactly 4 mines, every non-mine
+cell's colour equals its adjacent-mine count (0 mismatches in 1,344 cells),
+every real placement appears in the enumeration, and per-cell mine frequency
+is consistent with the uniform prior the solver assumes (χ² = 16.7, critical
+36.4). The model is exact.
+
+One caveat on its *scoring*: once 3 purples are found Mudae auto-reveals the
+4th, and **12.5% of the time it is a rainbow (500 SP), not a red (150 SP)** —
+7 of 56 logged auto-reveals. The world model cannot tell which, so the replay
+paints it red and `avg_base_sp` understates real SP by ~38/game. Use
+`avg_base_sp` to compare two policies (the offset is shared) and
+`avg_base_sp_rainbow_adjusted` to compare against live play.
+
+### `$oc` — the geometric model, measured
+
+`$oc` (`macro/oc_solver.py`) hunts red by geometric compatibility and never
+enumerates full boards. **On 100 fully-revealed logged boards the geometric
+rules hold exactly**: zero violations, the true red always survives
+`constraint_red_candidates`, and every board is exactly 1 red / 2 orange /
+3 yellow / 4 green with red never at the centre. The long-standing caveat
+that the published generator "disagrees with Mudae for some red positions"
+did not reproduce — the constraint layer can be trusted.
+
+What is *not* determined by the rules is which eligible cell gets which
+colour. Measured over those 100 boards:
+
+| Region (relative to red) | Colour mix | True EV |
+|---|---|---|
+| orthogonally adjacent | orange 63%, **green 22%**, teal 15% | 67.6 SP |
+| on the diagonal | yellow 64%, teal 36% | 42.4 SP |
+| same row/column only | green 68%, teal 32% | 30.2 SP |
+| everything else | blue 97%, (centre yellow) 2%, teal 1% | 11.0 SP |
+
+Two things fall out of this. **Greens do sit on orthogonally adjacent
+cells** (22%), so the orange and green regions genuinely overlap — a cell
+next to red may be orange, green or teal. And the **centre** is an ordinary
+cell: yellow 23%, green 16%, orange 8%. It is only special in that red is
+never there.
+
+Once red is known the solver spends leftover clicks by
+**remaining-need-aware** EV rather than a fixed orange→yellow→green
+priority: a region already fully found (e.g. both oranges) stops looking
+like it might still pay off. With `clicks_left <= 3` hunting also widens
+its "guess red directly" threshold from `≤2` candidates to `clicks_left`,
+since brute-forcing that many candidates is guaranteed to land on red
+before the budget runs out.
+
+**Honest scale:** replaying the 100 logged boards, this is worth
+**+1.25 SP/board (335.80 vs 334.55), t = 1.41 — not significant**, and it
+changes the play on only 2 boards in 100. Confirming an effect that small
+needs ~200 boards. Score it with
+`scripts/oc_bakeoff.py --from-log docs/minigames_to_use.jsonl`, which
+replays real boards and reports paired deltas with a t-statistic; the
+default synthetic mode is calibrated against the table above but is still
+a model, so confirm anything important against the log.
+
 | Command | What it is | Engine |
 |---------|------------|--------|
 | `$oh` | 5×5 sphere grid | `macro/sphere_game.py` |

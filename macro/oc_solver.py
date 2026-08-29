@@ -16,14 +16,25 @@ Strategy
 3. Once ≤2 red candidates remain, click a **red candidate** (prefer ``(1, 1)``).
 4. When an **orange** is revealed later, click an adjacent red candidate.
 5. Otherwise → max red information gain.
+6. With ``HUNT_LOOKAHEAD_CLICKS`` (3) or fewer clicks left, that ``≤2``
+   guessing threshold widens to ``clicks_left``: guessing through that many
+   candidates one at a time is guaranteed to land on red before the budget
+   runs out (each wrong guess eliminates that candidate), so pure info gain
+   — which can spend a click gathering information there won't be time to
+   use — stops being preferred once candidates fit inside the clicks left.
 
 **Collect value (after red is known)**
 
 1. Click red if not yet revealed.
-2. Click hidden ortho neighbours only until **both oranges** adjacent to red are found.
-3. Then click hidden **diagonal-line** cells for **yellow** (up to 3).
-4. Then row/column cells for **green** (up to 4).
-5. Otherwise pick the best remaining cell by expected value.
+2. Otherwise, a depth-limited value function (``_collect_value``) over the
+   *region-need* state — oranges/yellows/greens still missing vs. still
+   hidden in each geometric region — picks whichever region is worth more
+   given ``clicks_left``, rather than always exhausting orange, then
+   yellow, then green in a fixed order. A region that's already fully
+   found stops looking like it might still pay off (see
+   ``_region_click_ev``), and a miss inside a region is scored as teal,
+   since every such cell satisfies the same row/col/diagonal rule teal
+   requires and blue forbids.
 """
 
 from __future__ import annotations
@@ -31,7 +42,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from mudae.constants import SPHERE_VALUE_RANK, canonical_sphere_emoji
+from mudae.constants import SPHERE_BASE_SP, canonical_sphere_emoji
 
 GRID_SIZE = 5
 GRID_CELLS = GRID_SIZE * GRID_SIZE
@@ -45,15 +56,30 @@ _ORANGES_PER_RED = 2
 _YELLOWS_PER_RED = 3
 _GREENS_PER_RED = 4
 
+# Shallow-lookahead horizons (TODO.md: "leftover-click lookahead ... keep the
+# geometric model"). Collect-phase state (region need counts) is small enough
+# that MAX_COLLECT_DEPTH effectively covers the whole $oc click budget rather
+# than truly truncating it. Hunt-phase lookahead only kicks in this close to
+# running out of clicks, per the TODO's explicit threshold — small enough
+# (<=3 recursion levels) to evaluate every hidden cell exactly rather than
+# pruning to a top-K, unlike oq_solver's EXPECTIMAX_TOP_K.
+MAX_COLLECT_DEPTH = 5
+HUNT_LOOKAHEAD_CLICKS = 3
+
 OC_COLORS = frozenset({"R", "O", "Y", "G", "T", "B"})
 
+# Real base SP, the same figures ``minigame_board.make_click`` scores a
+# session with. These replaced a rank x arbitrary-multiplier table that
+# overvalued blue by 31% and teal by 12.5% relative to red, so the solver
+# was maximising something the game does not pay. Measured neutral on 100
+# real logged boards (it reorders nothing), but it removes the mismatch.
 _OC_COLOR_VALUE: dict[str, int] = {
-    "R": SPHERE_VALUE_RANK.get("spR", 8) * 20,
-    "O": SPHERE_VALUE_RANK.get("spO", 7) * 13,
-    "Y": SPHERE_VALUE_RANK.get("spY", 4) * 15,
-    "G": SPHERE_VALUE_RANK.get("spG", 3) * 13,
-    "T": SPHERE_VALUE_RANK.get("spT", 2) * 12,
-    "B": SPHERE_VALUE_RANK.get("spB", 1) * 14,
+    "R": SPHERE_BASE_SP["spR"],
+    "O": SPHERE_BASE_SP["spO"],
+    "Y": SPHERE_BASE_SP["spY"],
+    "G": SPHERE_BASE_SP["spG"],
+    "T": SPHERE_BASE_SP["spT"],
+    "B": SPHERE_BASE_SP["spB"],
 }
 
 _EMOJI_TO_OC: dict[str, str] = {
@@ -192,25 +218,35 @@ def probability_red_at(observations: dict[int, str]) -> list[float]:
     return probs
 
 
-def expected_click_value(index: int, observations: dict[int, str]) -> float:
-    reds = constraint_red_candidates(observations)
+_HUNT_BUCKET_WEIGHT = {"R": 1.0, "O": 0.5, "Y": 0.4, "G": 0.35, "T": 0.25, "B": 1.0}
+
+
+def expected_click_value(
+    index: int,
+    observations: dict[int, str],
+    *,
+    reds: list[int] | None = None,
+) -> float:
+    """Average click value across candidate reds (ad hoc ambiguity weights).
+
+    ``reds`` lets a caller that already has ``constraint_red_candidates``
+    (e.g. the hunt-phase lookahead) skip recomputing it.
+
+    ``yellow_at_center=False`` keeps this function's long-standing
+    treatment of the centre, which the entropy-based
+    ``red_information_gain`` deliberately does not share — see
+    ``_hunt_outcome_buckets``.
+    """
+    if reds is None:
+        reds = constraint_red_candidates(observations)
     if not reds:
         return 0.0
-    total = 0.0
-    for red_index in reds:
-        if index == red_index:
-            total += _OC_COLOR_VALUE["R"]
-        elif index in _orthogonal_neighbours(red_index):
-            total += _OC_COLOR_VALUE["O"] * 0.5
-        elif _on_diagonal_line(red_index, index) and index != CENTER_INDEX:
-            total += _OC_COLOR_VALUE["Y"] * 0.4
-        elif _same_row(red_index, index) or _same_col(red_index, index):
-            total += _OC_COLOR_VALUE["G"] * 0.35
-        elif _blue_forbidden(red_index, index):
-            total += _OC_COLOR_VALUE["T"] * 0.25
-        else:
-            total += _OC_COLOR_VALUE["B"]
-    return total / len(reds)
+    buckets = _hunt_outcome_buckets(index, reds, yellow_at_center=False)
+    total = len(reds)
+    return sum(
+        (len(subset) / total) * _OC_COLOR_VALUE[color] * _HUNT_BUCKET_WEIGHT[color]
+        for color, subset in buckets.items()
+    )
 
 
 def _red_location_entropy_from_reds(reds: list[int]) -> float:
@@ -220,28 +256,55 @@ def _red_location_entropy_from_reds(reds: list[int]) -> float:
     return -len(reds) * p * math.log(p)
 
 
-def red_information_gain(index: int, observations: dict[int, str]) -> float:
-    """Expected reduction in red-location entropy from revealing ``index``."""
-    reds = constraint_red_candidates(observations)
-    if not reds or index == CENTER_INDEX:
-        return 0.0
+def _hunt_outcome_buckets(
+    cell: int,
+    reds: list[int],
+    *,
+    yellow_at_center: bool = True,
+) -> dict[str, list[int]]:
+    """Partition ``reds`` by the colour ``cell`` would show for each candidate.
 
+    ``yellow_at_center`` controls whether ``CENTER_INDEX`` may land in the
+    yellow bucket. ``expected_click_value`` passes ``False`` to preserve
+    the values it has always returned. The default ``True`` is the
+    geometrically honest partition — on 100 real logged boards the centre
+    is yellow 23% of the time — but note ``red_information_gain``
+    short-circuits the centre to 0.0 before it ever gets here, so today
+    the flag only changes ``expected_click_value``.
+    """
     buckets: dict[str, list[int]] = {}
     for red_index in reds:
-        if index == red_index:
+        if cell == red_index:
             color = "R"
-        elif index in _orthogonal_neighbours(red_index):
-            color = "O?"
-        elif _on_diagonal_line(red_index, index):
-            color = "Y?"
-        elif _same_row(red_index, index) or _same_col(red_index, index):
-            color = "G?"
-        elif _blue_forbidden(red_index, index):
-            color = "T?"
+        elif cell in _orthogonal_neighbours(red_index):
+            color = "O"
+        elif _on_diagonal_line(red_index, cell) and (
+            yellow_at_center or cell != CENTER_INDEX
+        ):
+            color = "Y"
+        elif _same_row(red_index, cell) or _same_col(red_index, cell):
+            color = "G"
+        elif _blue_forbidden(red_index, cell):
+            color = "T"
         else:
             color = "B"
         buckets.setdefault(color, []).append(red_index)
+    return buckets
 
+
+def red_information_gain(
+    index: int,
+    observations: dict[int, str],
+    *,
+    reds: list[int] | None = None,
+) -> float:
+    """Expected reduction in red-location entropy from revealing ``index``."""
+    if reds is None:
+        reds = constraint_red_candidates(observations)
+    if not reds or index == CENTER_INDEX:
+        return 0.0
+
+    buckets = _hunt_outcome_buckets(index, reds)
     before = _red_location_entropy_from_reds(reds)
     total = len(reds)
     after = sum(
@@ -342,37 +405,134 @@ def _hidden_among(indices: frozenset[int], hidden: list[int], observations: dict
     )
 
 
+_COLLECT_REGIONS = ("O", "Y", "G")
+
+
+def _collect_state(
+    red_index: int,
+    observations: dict[int, str],
+    hidden: list[int],
+) -> tuple[dict[str, tuple[int, int]], dict[str, list[int]]]:
+    """Per-region ``(still_needed, hidden_candidates)`` plus the cells in each.
+
+    Cells geometrically eligible for a region (orthogonal/diagonal/row-col of
+    ``red_index``) that turn out not to be that region's colour must be teal
+    — every such cell satisfies ``_blue_forbidden``, which the constraint
+    solver requires for teal and forbids for blue. Cells outside all three
+    regions must be blue. Both facts come straight from ``_red_compatible``,
+    not a guess about the board generator.
+
+    ``CENTER_INDEX`` can still be a real orange/green candidate for some red
+    positions (it's excluded only from the diagonal/yellow region) and is
+    left clickable there; it's excluded only from the catch-all "other"
+    bucket, matching how the rest of the solver treats it as uninformative
+    once no region needs it.
+    """
+    ortho = _orthogonal_neighbours(red_index)
+    diag = _diagonal_line_cells(red_index)
+    row_col = _row_col_neighbours(red_index)
+
+    cells: dict[str, list[int]] = {
+        "O": _hidden_among(ortho, hidden, observations),
+        "Y": _hidden_among(diag, hidden, observations),
+        "G": _hidden_among(row_col, hidden, observations),
+    }
+    claimed = set(cells["O"]) | set(cells["Y"]) | set(cells["G"])
+    cells["other"] = [
+        index for index in hidden if index not in claimed and index != CENTER_INDEX
+    ]
+
+    needed = {
+        "O": max(_ORANGES_PER_RED - _count_color_among(ortho, observations, "O"), 0),
+        "Y": max(_YELLOWS_PER_RED - _count_color_among(diag, observations, "Y"), 0),
+        "G": max(_GREENS_PER_RED - _count_color_among(row_col, observations, "G"), 0),
+    }
+    state = {
+        region: (min(needed[region], len(cells[region])), len(cells[region]))
+        for region in _COLLECT_REGIONS
+    }
+    state["other"] = (0, len(cells["other"]))
+    return state, cells
+
+
+def _region_click_ev(region: str, needed: int, pool: int) -> float:
+    """Single-step EV of a click in ``region`` given the true remaining need.
+
+    Replaces the old fixed 0.5/0.4/0.35 multipliers, which stayed constant
+    even after a region's colour was fully found. A miss inside a region
+    reveals teal (see ``_collect_state``); "other" is guaranteed blue.
+    """
+    if pool <= 0:
+        return 0.0
+    if region == "other":
+        return float(_OC_COLOR_VALUE["B"])
+    p = needed / pool
+    return p * _OC_COLOR_VALUE[region] + (1 - p) * _OC_COLOR_VALUE["T"]
+
+
+def _collect_value(
+    state: dict[str, tuple[int, int]],
+    clicks_left: int,
+    memo: dict[tuple, tuple[float, str | None]],
+) -> tuple[float, str | None]:
+    """Expected total SP + best region to click, over region-need state.
+
+    Branching is over which *region* to click next (cells within a region
+    are exchangeable), so the state space is a handful of small integers —
+    depth is effectively the whole leftover-click budget, not an
+    approximation of it.
+    """
+    if clicks_left <= 0:
+        return 0.0, None
+    key = (state["O"], state["Y"], state["G"], state["other"], clicks_left)
+    cached = memo.get(key)
+    if cached is not None:
+        return cached
+
+    best_value = 0.0
+    best_region: str | None = None
+    for region in (*_COLLECT_REGIONS, "other"):
+        needed, pool = state[region]
+        if pool <= 0:
+            continue
+        ev_now = _region_click_ev(region, needed, pool)
+        if region == "other":
+            next_state = {**state, "other": (0, pool - 1)}
+            future, _ = _collect_value(next_state, clicks_left - 1, memo)
+            total = ev_now + future
+        else:
+            p = needed / pool
+            hit_state = {**state, region: (needed - 1, pool - 1)}
+            miss_state = {**state, region: (needed, pool - 1)}
+            hit_future, _ = _collect_value(hit_state, clicks_left - 1, memo)
+            miss_future, _ = _collect_value(miss_state, clicks_left - 1, memo)
+            total = ev_now + p * hit_future + (1 - p) * miss_future
+        if best_region is None or total > best_value:
+            best_value = total
+            best_region = region
+
+    result = (best_value, best_region)
+    memo[key] = result
+    return result
+
+
 def _pick_collect_click(
     red_index: int,
     observations: dict[int, str],
     hidden: list[int],
+    clicks_left: int = MAX_COLLECT_DEPTH,
 ) -> int | None:
-    """Next high-value cell once red's location is known."""
+    """Next high-value cell once red's location is known (shallow lookahead)."""
     if red_index in hidden and observations.get(red_index) != "R":
         return red_index
 
-    ortho = _orthogonal_neighbours(red_index)
-    if _count_color_among(ortho, observations, "O") < _ORANGES_PER_RED:
-        orange_targets = _hidden_among(ortho, hidden, observations)
-        if orange_targets:
-            return orange_targets[0]
-
-    diag_line = _diagonal_line_cells(red_index)
-    if _count_color_among(diag_line, observations, "Y") < _YELLOWS_PER_RED:
-        yellow_targets = _hidden_among(diag_line, hidden, observations)
-        if yellow_targets:
-            return yellow_targets[0]
-
-    row_col = _row_col_neighbours(red_index)
-    if _count_color_among(row_col, observations, "G") < _GREENS_PER_RED:
-        green_targets = _hidden_among(row_col, hidden, observations)
-        if green_targets:
-            return green_targets[0]
-
-    candidates = [index for index in hidden if index != CENTER_INDEX]
-    if not candidates:
+    state, cells = _collect_state(red_index, observations, hidden)
+    if not any(pool > 0 for _, pool in state.values()):
         return None
-    return max(candidates, key=lambda index: expected_click_value(index, observations))
+
+    depth = max(min(clicks_left, MAX_COLLECT_DEPTH), 1)
+    _, best_region = _collect_value(state, depth, {})
+    return min(cells[best_region])
 
 
 def _collect_phase_targets(
@@ -457,6 +617,7 @@ def _pick_post_opening_click(
 def _pick_hunt_click(
     observations: dict[int, str],
     hidden: list[int],
+    clicks_left: int | None = None,
 ) -> int:
     reds = constraint_red_candidates(observations)
 
@@ -465,7 +626,21 @@ def _pick_hunt_click(
         if pick is not None:
             return pick
 
-    if len(reds) <= 2:
+    # Normally only guess once candidates narrow to <=2. With clicks scarce,
+    # widen that: guessing through up to `clicks_left` candidates one by one
+    # is *guaranteed* to land on red before the budget runs out — each wrong
+    # guess still eliminates that candidate (and often narrows the rest via
+    # its revealed colour), so len(reds) can only shrink at least as fast as
+    # clicks_left does. This relies only on constraint_red_candidates, the
+    # same narrowing the rest of the solver already trusts — unlike a deeper
+    # predictive lookahead, it doesn't lean on the geometric region model
+    # being exactly right, which real boards sometimes aren't (TODO.md: the
+    # published generator is "inconsistent for some reds").
+    guess_threshold = 2
+    if clicks_left is not None and clicks_left <= HUNT_LOOKAHEAD_CLICKS:
+        guess_threshold = max(guess_threshold, clicks_left)
+
+    if len(reds) <= guess_threshold:
         red_pick = _pick_red_candidate(observations, hidden)
         if red_pick is not None:
             return red_pick
@@ -486,9 +661,7 @@ def choose_oc_click(
     rng: Any | None = None,
 ) -> dict[str, Any] | None:
     """Pick the next hidden cell to click, or ``None`` when budget is spent."""
-    import random
-
-    chooser = rng or random
+    del rng  # reserved for tie-break randomness; picks are currently deterministic
     if clicks_spent >= clicks_budget:
         return None
 
@@ -500,11 +673,12 @@ def choose_oc_click(
     if not hidden:
         return None
 
+    clicks_left = clicks_budget - clicks_spent
     red_known = _known_red_index(observations)
 
     # --- Collect phase: red location pinned --------------------------------
     if red_known is not None:
-        collect_index = _pick_collect_click(red_known, observations, hidden)
+        collect_index = _pick_collect_click(red_known, observations, hidden, clicks_left)
         if collect_index is not None:
             return _button_at_index(buttons, collect_index)
 
@@ -514,14 +688,18 @@ def choose_oc_click(
 
     # --- Red hunt ----------------------------------------------------------
     if red_known is None:
-        hunt_index = _pick_hunt_click(observations, hidden)
+        hunt_index = _pick_hunt_click(observations, hidden, clicks_left)
         return _button_at_index(buttons, hunt_index)
 
     best = _pick_best_deduction_cell(observations, hidden)
     return _button_at_index(buttons, best)
 
 
-def solver_stats(observations: dict[int, str]) -> dict[str, Any]:
+def solver_stats(
+    observations: dict[int, str],
+    *,
+    clicks_left: int | None = None,
+) -> dict[str, Any]:
     reds = constraint_red_candidates(observations)
     hidden = [
         index
@@ -539,9 +717,10 @@ def solver_stats(observations: dict[int, str]) -> dict[str, Any]:
         if not observations:
             best_index = OPENING_CELL_INDEX
         elif red_known is not None:
-            best_index = _pick_collect_click(red_known, observations, hidden) or -1
+            depth = clicks_left if clicks_left is not None else MAX_COLLECT_DEPTH
+            best_index = _pick_collect_click(red_known, observations, hidden, depth) or -1
         else:
-            best_index = _pick_hunt_click(observations, hidden)
+            best_index = _pick_hunt_click(observations, hidden, clicks_left)
 
         if best_index >= 0:
             best_rig = red_information_gain(best_index, observations)
@@ -558,8 +737,12 @@ def solver_stats(observations: dict[int, str]) -> dict[str, Any]:
     }
 
 
-def format_solver_stats(observations: dict[int, str]) -> str:
-    stats = solver_stats(observations)
+def format_solver_stats(
+    observations: dict[int, str],
+    *,
+    clicks_left: int | None = None,
+) -> str:
+    stats = solver_stats(observations, clicks_left=clicks_left)
     if not stats["boards"] and observations:
         return "solver: no valid red location matches observations"
     best_index = stats["best_index"]

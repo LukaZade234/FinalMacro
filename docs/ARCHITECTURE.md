@@ -92,6 +92,7 @@ changes.
 | `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
 | `sphere_game.py` / `oc_game.py` / `oq_game.py` | Individual minigames |
+| `oc_solver.py` / `oc_replay.py` | `$oc` geometric hunt + remaining-need-aware collect lookahead; replay of **real logged boards** (preferred) or calibrated synthetic ones |
 | `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
 | `minigame_board.py` | 5×5 board / click helpers for the minigame log. ``normalize_sphere_emoji`` folds colour-blind ``spB2`` / ``spT2`` into ``spB`` / ``spT``. |
 | `settings_apply.py` | Push a settings preset to the server |
@@ -136,6 +137,7 @@ under test (`test_roll_cycle.py`, `test_parsers.py`, …).
 | `build_fonts.py` | Static Space Grotesk weights from the variable font |
 | `document_settings_commands.py` | Live `$settings` + read-only `$bonus` capture; skips 16 direct toggles unless `--include-toggles` (send+revert) |
 | `oq_bakeoff.py` | Replay MIXED vs entropy on every `$oq` world |
+| `oc_bakeoff.py` | A/B `$oc` policies. `--from-log` replays real logged boards and reports paired deltas with a t-statistic |
 | `perk9_bakeoff.py` | Score the perk-9 adaptive threshold vs static allow-lists |
 | `merge_event_logs.py` | Union diverged `events.jsonl` copies after a Syncthing outage |
 

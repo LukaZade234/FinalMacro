@@ -134,7 +134,8 @@ class OcSphereGame:
             session_clicks: list[dict[str, Any]] = []
             self._observations = observations_from_buttons(buttons)
             self._log(
-                f"{label}: grid ready · {clicks_budget} clicks · {format_solver_stats(self._observations)}"
+                f"{label}: grid ready · {clicks_budget} clicks · "
+                f"{format_solver_stats(self._observations, clicks_left=clicks_budget)}"
             )
             await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
 
@@ -168,7 +169,7 @@ class OcSphereGame:
                 self._log(
                     f"$oc: click {clicks_spent}/{clicks_budget} → cell "
                     f"{self._cell_label(clicked_index)} · "
-                    f"{format_solver_stats(self._observations)}"
+                    f"{format_solver_stats(self._observations, clicks_left=clicks_budget - clicks_spent)}"
                 )
 
                 updated, reward_content = await self._wait_for_click_resolution(
@@ -210,7 +211,9 @@ class OcSphereGame:
                 session_clicks.append(
                     make_click(clicked_index, reveal_emoji, paid=True)
                 )
-                self._log(f"$oc: {format_solver_stats(self._observations)}")
+                self._log(
+                    f"$oc: {format_solver_stats(self._observations, clicks_left=clicks_budget - clicks_spent)}"
+                )
                 await asyncio.sleep(self._click_delay)
 
             if is_oc_game_over(buttons):

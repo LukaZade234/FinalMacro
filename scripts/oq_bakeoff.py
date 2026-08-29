@@ -44,7 +44,13 @@ def main() -> None:
             f"{result['policy']:8}  wins={result['wins']:5}/{result['games']}"
             f"  red={result['win_rate'] * 100:5.1f}%"
             f"  avg_base_sp={result['avg_base_sp']:.1f}"
+            f"  (rainbow-adj {result['avg_base_sp_rainbow_adjusted']:.1f})"
         )
+    print(
+        "\navg_base_sp scores every auto-revealed 4th sphere as red; 12.5% of them"
+        "\nare really rainbow (500 SP). Compare policies on avg_base_sp, compare"
+        "\nagainst live logged play on the rainbow-adjusted figure."
+    )
 
 
 if __name__ == "__main__":

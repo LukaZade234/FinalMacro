@@ -29,6 +29,17 @@ _OQ_STATE_TO_EMOJI = {
     "4": "spO",
 }
 
+# The auto-revealed 4th sphere is red (150 SP) most of the time but rainbow
+# (500 SP) sometimes. Measured 7 of 56 auto-reveals = 12.5% across the logged
+# games in docs/minigames_to_use.jsonl.
+#
+# The world model has no notion of which, so the replay always paints it spR
+# and `avg_base_sp` therefore UNDERSTATES real SP. That is fine for comparing
+# two policies (it is a constant offset both share) but wrong as an absolute
+# figure, so `score_oq_policy` also reports a rainbow-adjusted number.
+OQ_RAINBOW_RATE = 7 / 56
+OQ_AUTO_REVEAL_EV = (1 - OQ_RAINBOW_RATE) * 150 + OQ_RAINBOW_RATE * 500
+
 
 def _btn(index: int, emoji: str = "spU", *, disabled: bool = False) -> dict[str, Any]:
     return {
@@ -150,7 +161,13 @@ def score_oq_policy(
     world_indices: list[int] | None = None,
     budget: int = CLICK_BUDGET,
 ) -> dict[str, Any]:
-    """Replay worlds and return win rate + average base SP."""
+    """Replay worlds and return win rate + average base SP.
+
+    ``avg_base_sp`` scores every auto-revealed 4th sphere as red, which is
+    what the world model knows; ``avg_base_sp_rainbow_adjusted`` credits the
+    measured 12.5% rainbow rate and is the figure to compare against live
+    logged play. Use the raw number when A/B-ing two policies.
+    """
     ensure_built()
     indices = world_indices
     if indices is None:
@@ -158,6 +175,7 @@ def score_oq_policy(
     wins = 0
     total_sp = 0
     games = 0
+    auto_reveals = 0
     for world_index in indices:
         session = simulate_oq_world(
             world_index, hunt_policy=hunt_policy, budget=budget
@@ -166,11 +184,17 @@ def score_oq_policy(
         if session["won"]:
             wins += 1
         total_sp += int(session["base_value"])
+        auto_reveals += sum(
+            1 for click in session["clicks"] if click.get("emoji") == "spR"
+        )
+    uplift = auto_reveals * OQ_RAINBOW_RATE * (500 - 150)
     return {
         "policy": hunt_policy,
         "games": games,
         "wins": wins,
         "win_rate": (wins / games) if games else 0.0,
         "avg_base_sp": (total_sp / games) if games else 0.0,
+        "avg_base_sp_rainbow_adjusted": ((total_sp + uplift) / games) if games else 0.0,
+        "auto_reveals": auto_reveals,
         "total_base_sp": total_sp,
     }

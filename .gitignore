@@ -12,6 +12,18 @@ data/**
 # Live Mudae command capture (local machine only — contains server-specific text)
 docs/archive/MUDAE_SETTINGS_COMMANDS.md
 
+# Minigame log exports used to validate the solvers. Same reason as data/:
+# they carry guild / channel ids and names. Keep them local; the solvers read
+# them through `--from-log`, nothing needs them in the repo.
+docs/minigames_to_use.jsonl
+docs/*_log.json
+docs/*_log.jsonl
+
+# Claude Code local state (scheduled_tasks.lock and friends). Nothing here is
+# shared config today — if project-wide skills/agents/settings are ever added
+# under .claude/, un-ignore those specific paths so they do get committed.
+.claude/
+
 .venv/
 __pycache__/
 *.pyc
