@@ -114,6 +114,19 @@ def test_us_stop_power_perk8_budget_active_uses_7_5_percent():
     assert us_kakera_power_exhausted(state, rules)
 
 
+def test_us_stop_power_uses_bonus_base_cost():
+    rules = KakeraReactionRules(
+        enabled=True,
+        auto_use_dk=False,
+        types_allowed=["kakeraW"],
+    )
+    state = AccountState(power_percent=12.0, dk_stock=0, kakera_base_cost=20.0)
+    # Chaos-assumed cost is 10%; 12% is enough.
+    assert not us_kakera_power_exhausted(state, rules)
+    state.power_percent = 8.0
+    assert us_kakera_power_exhausted(state, rules)
+
+
 def test_keep_draining_does_not_watch_power_unless_toggled():
     opts = UsModeStopOptions(keep_draining=True)
     rules = KakeraReactionRules(enabled=True, auto_use_dk=True)

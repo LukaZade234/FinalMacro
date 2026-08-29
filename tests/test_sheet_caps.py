@@ -51,6 +51,14 @@ def test_apply_sheet_caps_reads_bonus_cost_and_dk_cooldown():
     assert state.dk_cooldown_minutes == 10 * 60
 
 
+def test_apply_sheet_caps_resets_cost_when_bonus_missing():
+    state = SimpleNamespace(power_percent=100.0, power_max_percent=155.0, perk9_click_max=20)
+    apply_sheet_caps(state, bonus={"power_cost_per_kakera_button": 20})
+    assert state.kakera_base_cost == 20.0
+    apply_sheet_caps(state, bonus={})
+    assert state.kakera_base_cost == 30.0
+
+
 def test_rolls_max_from_sheets_prefers_bonus_net_over_setrolls():
     assert rolls_max_from_sheets(None, None) is None
     assert rolls_max_from_sheets({}, {"setrolls": 21}) == 21

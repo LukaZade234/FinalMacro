@@ -33,9 +33,10 @@ def _snapshot(message_id: int) -> MudaeMessageSnapshot:
     )
 
 
-def _fields() -> dict:
+def _fields(*, perk_8: bool = False) -> dict:
     return {
         "character_name": "TestChar",
+        "perk_8": True if perk_8 else None,
         "buttons": [
             {
                 "kind": "kakera",
@@ -190,10 +191,85 @@ def test_kakera_timeout_calls_resync_hook():
             on_click_timeout=_resync,
         )
         with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
-            clicks = await reactor.react(message_id=4, fields=_fields())
+            clicks = await reactor.react(
+                message_id=4, fields=_fields(perk_8=True)
+            )
 
         assert clicks == 0
         assert called == [True]
         assert any("click timeout" in line for line in logs)
+
+    asyncio.run(_case())
+
+
+def test_kakera_timeout_resync_skipped_on_non_perk8():
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(
+            prefix="$",
+            kakera_reaction=KakeraReactionRules(
+                enabled=True,
+                types_allowed=["kakeraR"],
+            ),
+        )
+        actions = _FakeActionsWithQueue()
+        actions._outcomes.extend([None, None])
+        called: list[bool] = []
+
+        async def _resync() -> None:
+            called.append(True)
+
+        reactor = KakeraReactor(
+            actions,
+            config,
+            state,
+            log=lambda _m: None,
+            on_click_timeout=_resync,
+        )
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            clicks = await reactor.react(message_id=5, fields=_fields())
+
+        assert clicks == 0
+        assert called == []
+
+    asyncio.run(_case())
+
+
+def test_kakera_perk8_timeout_resyncs_even_if_retry_succeeds():
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(
+            prefix="$",
+            kakera_reaction=KakeraReactionRules(
+                enabled=True,
+                types_allowed=["kakeraR"],
+            ),
+        )
+        actions = _FakeActionsWithQueue()
+        actions._outcomes.extend(
+            [
+                None,
+                ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="ok", fields={}),
+            ]
+        )
+        called: list[bool] = []
+
+        async def _resync() -> None:
+            called.append(True)
+
+        reactor = KakeraReactor(
+            actions,
+            config,
+            state,
+            log=lambda _m: None,
+            on_click_timeout=_resync,
+        )
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            clicks = await reactor.react(
+                message_id=6, fields=_fields(perk_8=True)
+            )
+
+        assert clicks == 1
+        assert called == [True]
 
     asyncio.run(_case())

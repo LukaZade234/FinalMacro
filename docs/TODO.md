@@ -176,7 +176,6 @@ Pass over the running app after the rankings above. Items already listed earlier
 - **`$oc` / `$oq` have no click retry** — `$oh` resends on ack timeout; the other two abort the batch. Play-all then stops the whole chain, so remaining `$oc`/`$oq` uses from `$ohu` are left unspent.
 - **`$us` slow-path add does not use the reconnect wrapper**; a single 503 fails the add. Reconnect retries once, then aborts.
 - **Perk-6 queue drain does not match parent character** — late spawns are serviced (good) but a stale “Akame spawned by POWER” can attach to the next `Rem` roll (bad for session records). The wait path already requires `parent_character`.
-- **Perk-8 budget: `rule_eval` vs `KakeraReactor`** — rule_eval still returns perk-8 kakera when the daily budget is 0; the reactor then skips the whole roll if any paid candidate remains. Integration-test the reactor, not only `rule_eval`.
 - **`SphereReactor` is fire-and-forget** — HTTP click success is logged as a sphere; no wait for the `(used/max)` line. `$ohu` `N/15 buttons clicked` is persisted for the Run counter; the reactor does not skip at cap (Mudae stops spawning those buttons).
 - **Resume holes** — `macro_runtime` snapshot omits perk-8 click counts; claim cooldown restore subtracts wall-clock minutes instead of using the claim-reset instant; legacy flat `daily_resets` is dropped with no migration.
 - **Quit is fire-and-forget** — `shutdown()` persists and disconnects without waiting for the reader thread or an in-flight minigame.

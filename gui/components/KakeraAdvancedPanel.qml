@@ -137,7 +137,7 @@ ColumnLayout {
             ColorChipPicker {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
-                title: "Always click during budget saving (ignore perk-8 limit)"
+                title: "Also click on non-perk-8 while saving (not counted toward 40)"
                 options: kakeraOptions
                 selected: rules.kakera_reaction
                     ? (rules.kakera_reaction.perk_8_budget_bypass_types || ["kakeraP"])
@@ -145,6 +145,15 @@ ColumnLayout {
                 onSelectionChanged: function(ids) {
                     onPatch("kakera_reaction", "perk_8_budget_bypass_types", ids)
                 }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                text: "Purple is always free. Red/rainbow (or any other colour here) still cost power on a normal character, but do not use the daily 40. On a perk-8 character those colours follow the perk-8 list and always count."
+                color: Theme.fgMuted
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
             }
 
             ThemedCheckBox {

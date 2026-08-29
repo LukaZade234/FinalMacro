@@ -123,17 +123,64 @@ guides. Dark and chaos were added later; treat `mudae/constants.py` as
 authoritative for **names**, not for exact kakera amounts (those vary with
 server bonuses).
 
-**Reaction power:** seeded from `$tu` / `$ku`. Base click costs 30% of the
-bar. A **chaos key** on the character halves the cost; **perk 8** halves it
+**Reaction power:** seeded from `$tu` / `$ku`. Base click cost comes from the
+**run channel's** `$bonus.power_cost_per_kakera_button` (fallback **30%**).
+Switching account or server reloads that channel's sheet so costs never mix.
+A **chaos key** on the character halves the cost; **perk 8** halves it
 again. Power regenerates 1% every 3 minutes. `$dk` snaps the bar to
 `$bonus.kakera_max_power` (fallback **155**). Most players have a **20h**
 `$dk` cooldown (`$bonus.dk_cooldown`; 10h only if the sheet says so).
 
-**Macro:** `KakeraReactionRules` filters by color, optional chaos-key /
-perk-8 / min-spheres gates, a low-power override list, and perk-8 daily
-budget mode. Purple is the default bypass for both the chaos-key gate and
-the perk-8 budget (it is free). `$us` rolls can use a narrower color list.
-Implemented in `macro/rule_eval.py` and `macro/kakera_reactor.py`.
+### Kakera reaction rules
+
+Source of truth for *what should be clicked*: this subsection, then
+`macro/rule_eval.py` (decision) and `macro/kakera_reactor.py` (clicks).
+Preset fields live on `KakeraReactionRules`.
+
+**Order on each roll:**
+
+1. Kakera reaction enabled, and at least one enabled kakera button.
+2. Optional `require_perk_8` (lifted after 40/40 or insufficient roll pool).
+3. Optional min-spheres.
+4. **Colour list:** perk-8 characters use `perk_8_types_allowed` whenever
+   budget mode is on (empty = any colour). Everyone else uses
+   `types_allowed` (or the `$us` override list on `$us` rolls).
+5. Low-power override, if enabled and bar is below the threshold — this
+   **replaces** the colour list, including on perk-8 characters.
+6. Chaos-key gate: without a chaos key, only `require_chaos_key_bypass_types`
+   (default purple) may click.
+7. Affordability (bar vs cost). Mudae's "can't react for N min" still wins
+   if the tracker is wrong.
+8. **Saving window** (`perk8_is_saving`): mode is `active` and local count
+   is under the `$ohu8` cap. Non-perk-8 rolls keep only **bypass** colours
+   (`perk_8_budget_bypass_types`, default purple). Perk-8 rolls keep the
+   perk-8 list.
+9. Optional smart power / `$dk` reserve on paid *non*-perk-8 clicks.
+10. Remaining-quota slice: at most N clicks that **count toward the 40**.
+    Purple never counts. Bypass colours on a **non**-perk-8 roll do not
+    count (they still cost power, except purple). Bypass colours on a
+    **perk-8** roll **do** count — they are normal perk-8 kakera.
+
+**Daily 40 (`$ohu8`):** only perk-8-character paid clicks use the quota.
+Red/rainbow on a perk-8 character count because they are on the perk-8
+list. The same colours on a normal character are bypass: still clicked
+while saving, not counted. After 40/40, non-perk-8 rolls use the main
+colour list (equal clicking); perk-8 characters **keep** the perk-8 list
+(orange/dark stay allowed).
+
+**`$ohu8` timing:** sent at session start and when the daily refill is due.
+Saving is off (`inactive`) until that reply sets `active` / `done`. That
+is intentional — the first `$ohu8` of the day is what starts the holdback.
+After **any wait timeout on a perk-8 click** (first attempt or retry,
+success or fail), send `$ohu8` again so a landed-but-unseen click cannot
+desync the 40. Non-perk-8 timeouts do not.
+
+**`$us`:** optional narrower `types_allowed` for non-perk-8 `$us` rolls.
+Perk-8 characters still use the Reactions perk-8 list. "Don't claim kakera
+on `$us` rolls" disables **all** kakera on those rolls, including perk-8.
+
+Implemented in `macro/rule_eval.py` and `macro/kakera_reactor.py`. Caps from
+`$bonus` / `$shop` are applied per run channel in `macro/sheet_caps.py`.
 
 **Chaos kakera (`kakeraC`) extras:** the `+$k` body can add `+N rolls this
 hour` (spend them now; they die at the hourly reset), store `$oh`/`$oc`/`$oq`/`$ot`
@@ -271,9 +318,13 @@ chat `+N`, which includes bonuses. `$oq` hunt uses MIXED (`P(purple)+0.1×Gini`)
 Perk 8 marks some characters and grants a **daily kakera-click budget**
 (40 clicks, `$ohu8`). The flag is consumed after the first roll of the day,
 so leftover clicks expire at **UTC midnight**. The macro can enter **budget
-mode**: spend those clicks on perk-8 characters first, still allow free
-purple on everyone else, then treat all characters equally once the 40 are
-used or the roll pool is under 10.
+mode**: spend those clicks on perk-8 characters first. Bypass colours
+(default purple; often also red/rainbow) still click on everyone else
+without using the 40; on a perk-8 character they **do** use a slot.
+Purple is free power on every roll. Once the 40 are used or the roll pool
+is under 10, treat non-perk-8 characters equally with the main colour
+list; perk-8 characters keep the perk-8 colour list. Full click-order
+rules: [Kakera reaction rules](#kakera-reaction-rules).
 
 **Power / `$dk` reserve** (`macro/perk8_power.py`) is optional on the perk-8
 budget panel. Off keeps the old click and `$dk` rules. On keeps enough bar

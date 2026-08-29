@@ -18,17 +18,42 @@ BASE_REACTION_COST = 30.0
 KAKERA_FREE_REACT_EMOJIS = frozenset({"kakeraP"})
 
 
+def kakera_base_cost_from_state(state: Any | None) -> float:
+    """Paid-kakera % cost from the run channel's ``$bonus``, else 30.
+
+    Caps live on ``AccountState.kakera_base_cost``, which is rewritten from
+    the *current* run channel's stored sheet (never a leftover from another
+    account or server).
+    """
+    if state is None:
+        return BASE_REACTION_COST
+    raw = getattr(state, "kakera_base_cost", None)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return BASE_REACTION_COST
+    return value if value > 0 else BASE_REACTION_COST
+
+
 def reaction_power_cost(
     *,
     kakera_emoji: str,
     has_chaos_key: bool,
     has_perk_8: bool,
+    base_cost: float | None = None,
 ) -> float:
     """Percent of reaction power consumed by one kakera click."""
     emoji = (kakera_emoji or "").strip()
     if emoji in KAKERA_FREE_REACT_EMOJIS:
         return 0.0
     cost = BASE_REACTION_COST
+    if base_cost is not None:
+        try:
+            parsed = float(base_cost)
+        except (TypeError, ValueError):
+            parsed = 0.0
+        if parsed > 0:
+            cost = parsed
     if has_chaos_key:
         cost /= 2.0
     if has_perk_8:

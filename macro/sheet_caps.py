@@ -76,7 +76,12 @@ def apply_sheet_caps(
     bonus: dict[str, Any] | None = None,
     shop: dict[str, Any] | None = None,
 ) -> None:
-    """Write sheet caps onto runtime state; clamp current power if the max dropped."""
+    """Write this run channel's ``$bonus`` / ``$shop`` caps onto runtime state.
+
+    Always pass the *current* run channel's sheets. An empty/missing bonus
+    resets cost and max-power to the Mudae defaults so a previous account or
+    server cannot leak into the next run.
+    """
     max_power = power_max_from_bonus(bonus)
     state.power_max_percent = max_power
     current = getattr(state, "power_percent", None)

@@ -33,6 +33,7 @@ from macro.perk8_power import (
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
+    kakera_base_cost_from_state,
     reaction_power_cost,
     refresh_reaction_power,
 )
@@ -261,11 +262,11 @@ def passes_kakera_reaction(
     has_perk_8 = bool(fields.get("perk_8"))
     power_display = display_reaction_power(state.power_percent)
 
-    # Perk-8 color list is only for the saving window. After 40/40 (or remaining
-    # 0), everyone uses the main filter so leftover power is not stuck on the
-    # bypass colours (red / rainbow).
+    # Perk-8 characters always use the perk-8 colour list (Reactions tab), even
+    # after 40/40 and on $us rolls whose types_allowed is a narrower override.
+    # Equal clicking only unblocks non-perk-8 rolls onto the main filter.
     saving = perk8_is_saving(state, rules)
-    if saving and bool(fields.get("perk_8")):
+    if rules.perk_8_budget_mode and bool(fields.get("perk_8")):
         types_allowed = list(rules.perk_8_types_allowed)
     else:
         types_allowed = list(rules.types_allowed)
@@ -301,6 +302,7 @@ def passes_kakera_reaction(
             kakera_emoji=_kakera_emoji(button),
             has_chaos_key=has_chaos,
             has_perk_8=has_perk_8,
+            base_cost=kakera_base_cost_from_state(state),
         )
         if can_afford_reaction(state, cost):
             affordable.append(button)
@@ -369,8 +371,8 @@ def perk8_is_saving(state: AccountState, rules: KakeraReactionRules) -> bool:
     """True while budget mode should hoard clicks for perk-8 characters.
 
     Red/rainbow bypass clicks on perk-8 still consume Mudae's daily quota, so
-    remaining 0 (or mode ``done``) must switch to equal clicking — otherwise the
-    macro keeps skipping teal/orange/etc. with a full power bar.
+    remaining 0 (or mode ``done``) must unblock non-perk-8 rolls. Perk-8
+    characters keep the perk-8 colour list either way.
     """
     if not rules.perk_8_budget_mode:
         return False
@@ -399,6 +401,33 @@ def counts_toward_perk8_budget(
     return (emoji or "") not in perk8_budget_bypass_types(rules)
 
 
+def slice_kakera_budget_candidates(
+    candidates: list[ButtonChoice],
+    *,
+    remaining: int,
+    perk8: bool,
+    rules: KakeraReactionRules,
+) -> list[ButtonChoice]:
+    """Keep free clicks, then at most ``remaining`` clicks that use the 40.
+
+    Bypass colours on a *non*-perk-8 roll do not use the daily quota (they
+    still cost power, except purple). The same colours on a perk-8 character
+    do use a slot, so they sit in the paid slice.
+    """
+    free: list[ButtonChoice] = []
+    paid: list[ButtonChoice] = []
+    for choice in candidates:
+        if counts_toward_perk8_budget(
+            emoji=choice.emoji or "",
+            perk8=perk8,
+            rules=rules,
+        ):
+            paid.append(choice)
+        else:
+            free.append(choice)
+    return free + paid[: max(0, int(remaining))]
+
+
 def _filter_perk8_power_reserve(
     selected: list[dict[str, Any]],
     fields: dict[str, Any],
@@ -423,6 +452,7 @@ def _filter_perk8_power_reserve(
             kakera_emoji=_kakera_emoji(button),
             has_chaos_key=True,
             has_perk_8=False,
+            base_cost=kakera_base_cost_from_state(state),
         )
         if cost <= 0:
             kept.append(button)

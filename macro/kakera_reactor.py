@@ -27,6 +27,7 @@ from macro.post_roll import PostRollHandler, RollRecord
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
+    kakera_base_cost_from_state,
     reaction_power_cost,
     spend_reaction_power,
     sync_reaction_power_from_denial,
@@ -36,10 +37,10 @@ from macro.rule_eval import (
     _has_chaos_key,
     counts_toward_perk8_budget,
     passes_kakera_reaction,
-    perk8_budget_bypass_types,
     perk8_click_budget,
     perk8_is_saving,
     perk8_mode_from_state,
+    slice_kakera_budget_candidates,
 )
 from macro.state import AccountState
 from mudae.buttons import is_claim_button, is_kakera_button
@@ -61,6 +62,12 @@ _KAKERA_CLICK_SETTLE_SEC = 0.35
 _KAKERA_BETWEEN_CLICKS_SEC = 0.5
 _MAX_KAKERA_CLICK_ATTEMPTS = 2
 _CHAOS_FOLLOWUP_WAIT_SEC = 6.0
+
+
+@dataclass(frozen=True)
+class _KakeraClickResult:
+    confirmed: bool
+    wait_timed_out: bool
 
 
 @dataclass
@@ -105,7 +112,8 @@ class KakeraReactor:
         candidates = decision.buttons
         mode = perk8_mode_from_state(self.state)
         budget = perk8_click_budget(self.state, rules)
-        bypass = perk8_budget_bypass_types(rules)
+        has_chaos = _has_chaos_key(fields)
+        has_perk_8 = bool(fields.get("perk_8"))
         if (
             rules.perk_8_budget_mode
             and perk8_budget_applies(mode)
@@ -115,13 +123,12 @@ class KakeraReactor:
             self.on_perk8_exhausted()
         if perk8_is_saving(self.state, rules):
             remaining = self.state.remaining_kakera_budget(budget)
-            bypass_candidates = [
-                c for c in candidates if (c.emoji or "") in bypass
-            ]
-            paid_candidates = [
-                c for c in candidates if (c.emoji or "") not in bypass
-            ]
-            candidates = bypass_candidates + paid_candidates[:remaining]
+            candidates = slice_kakera_budget_candidates(
+                candidates,
+                remaining=remaining,
+                perk8=has_perk_8,
+                rules=rules,
+            )
             if not candidates:
                 self._debug(
                     f"kakera skip {character}: daily budget "
@@ -129,10 +136,10 @@ class KakeraReactor:
                 )
                 return 0
 
-        has_chaos = _has_chaos_key(fields)
-        has_perk_8 = bool(fields.get("perk_8"))
         clicks = 0
         budget_clicks = 0
+        perk8_wait_timed_out = False
+        base_cost = kakera_base_cost_from_state(self.state)
         for choice in candidates:
             if not choice.custom_id:
                 continue
@@ -140,8 +147,9 @@ class KakeraReactor:
                 kakera_emoji=choice.emoji or "",
                 has_chaos_key=has_chaos,
                 has_perk_8=has_perk_8,
+                base_cost=base_cost,
             )
-            clicked = await self._click_with_power_recovery(
+            result = await self._click_with_power_recovery(
                 message_id=message_id,
                 choice=choice,
                 cost=cost,
@@ -150,7 +158,9 @@ class KakeraReactor:
                 rules=rules,
                 perk8=has_perk_8,
             )
-            if clicked:
+            if result.wait_timed_out and has_perk_8:
+                perk8_wait_timed_out = True
+            if result.confirmed:
                 clicks += 1
                 if counts_toward_perk8_budget(
                     emoji=choice.emoji or "",
@@ -192,6 +202,8 @@ class KakeraReactor:
                 self.on_perk8_exhausted()
         elif decision.should_click:
             self.log(f"kakera click failed {character}")
+        if perk8_wait_timed_out:
+            await self._resync_after_timeout()
         return clicks
 
     async def _resolve_decision(
@@ -242,12 +254,13 @@ class KakeraReactor:
         rules: KakeraReactionRules,
         perk8: bool = False,
         handle_spawns: bool = True,
-    ) -> bool:
+    ) -> _KakeraClickResult:
         chaos = (choice.emoji or "") == _CHAOS_EMOJI
         if chaos:
             bind_notify(self.log, asyncio.get_running_loop())
             begin_window(clicked_message_id=message_id, character_name=character)
         confirmed = False
+        wait_timed_out = False
         try:
             dk_attempts = 0
             while True:
@@ -277,7 +290,7 @@ class KakeraReactor:
                         f"({display_reaction_power(self.state.power_percent)}% "
                         f"need {cost:g}%)"
                     )
-                    return False
+                    return _KakeraClickResult(False, wait_timed_out)
                 for attempt in range(1, _MAX_KAKERA_CLICK_ATTEMPTS + 1):
                     ok = await self.actions.click_button(message_id, choice.custom_id)
                     if not ok:
@@ -285,7 +298,7 @@ class KakeraReactor:
                             f"kakera: button click failed {character} "
                             f"(msg {message_id})"
                         )
-                        return False
+                        return _KakeraClickResult(False, wait_timed_out)
                     await asyncio.sleep(_KAKERA_CLICK_SETTLE_SEC)
                     wait_timeout = (
                         _KAKERA_OUTCOME_TIMEOUT_SEC
@@ -305,6 +318,7 @@ class KakeraReactor:
                             f"{outcome.summary or '?'}"
                         )
                         break
+                    wait_timed_out = True
                     self._drain_stale_kakera_outcomes()
                     if attempt < _MAX_KAKERA_CLICK_ATTEMPTS:
                         self.log(
@@ -313,8 +327,7 @@ class KakeraReactor:
                         )
                 else:
                     self._log_kakera_timeout(character)
-                    await self._resync_after_timeout()
-                    return False
+                    return _KakeraClickResult(False, True)
                 if outcome.kind == MessageKind.KAKERA_REACT_DENIED:
                     cooldown = int(outcome.fields.get("kakera_cooldown_minutes") or 0)
                     sync_reaction_power_from_denial(
@@ -347,7 +360,7 @@ class KakeraReactor:
                                 f"(need {cost:g}%)"
                             )
                             continue
-                    return False
+                    return _KakeraClickResult(False, wait_timed_out)
                 paid = float(cost)
                 if chaos and outcome.kind == MessageKind.KAKERA_CLAIM:
                     paid = discounted_reaction_cost(
@@ -364,7 +377,7 @@ class KakeraReactor:
                         f"kakera claim {character} but power tracker rejected "
                         f"{paid:g}% spend"
                     )
-                    return False
+                    return _KakeraClickResult(False, wait_timed_out)
                 self._notify_state()
                 confirmed = True
                 if outcome.kind == MessageKind.KAKERA_CLAIM:
@@ -379,7 +392,7 @@ class KakeraReactor:
                             clicked_message_id=message_id,
                             outcome=outcome,
                         )
-                return True
+                return _KakeraClickResult(True, wait_timed_out)
         finally:
             if chaos and not confirmed:
                 close_open_window("click_unconfirmed")

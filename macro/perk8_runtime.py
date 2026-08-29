@@ -234,7 +234,11 @@ class Perk8Runtime:
         self.save_daily(save_perk8_record(daily, record))
 
     async def resync_after_uncertain_click(self) -> None:
-        """Live ``$ohu8`` after a kakera timeout — Mudae may have counted the click."""
+        """Live ``$ohu8`` after a perk-8 wait timeout (including a later retry).
+
+        The first click may have landed on Mudae even when the wait failed, so
+        a successful retry can mean two clicks locally counted as one.
+        """
         if not self.budget_mode:
             return
         try:

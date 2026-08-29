@@ -139,7 +139,9 @@ class KakeraReactionRules:
     min_spheres: int | None = None
     low_power: LowPowerOverride | None = None
     perk_8_budget_mode: bool = False
-    # Kakera types clicked even while saving perk-8 budget (purple is free by default).
+    # Colours still clicked on *non*-perk-8 rolls while saving the daily 40.
+    # They do not count toward the quota on those rolls (purple is free power
+    # as well). The same colours on a perk-8 character always count.
     perk_8_budget_bypass_types: list[str] = field(default_factory=lambda: ["kakeraP"])
     # Color filter for perk-8 characters while budget mode is on (empty = any).
     perk_8_types_allowed: list[str] = field(default_factory=list)

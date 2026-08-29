@@ -1,7 +1,8 @@
 # Architecture
 
 How FinalMacro is put together. Game rules live in
-[`MUDAE_LOGIC.md`](MUDAE_LOGIC.md). Open work lives in [`TODO.md`](TODO.md).
+[`MUDAE_LOGIC.md`](MUDAE_LOGIC.md) (kakera click order:
+[Kakera reaction rules](MUDAE_LOGIC.md#kakera-reaction-rules)). Open work lives in [`TODO.md`](TODO.md).
 
 ---
 
@@ -79,7 +80,7 @@ changes.
 | `chaos_followup.py` | Extra hourly rolls + discounted chaos-kakera power cost |
 | `claim_window.py` | Final-hour test (claim reset == rolls reset) |
 | `rt_manager.py` / `dk_manager.py` / `reaction_power.py` | `$rt`, `$dk`, power bar |
-| `sheet_caps.py` | `$bonus` power max + `$shop` perk 9 cap on runtime state |
+| `sheet_caps.py` | Run-channel `$bonus` power max + kakera click cost, `$shop` perk 9 cap |
 | `account_dailies.py` / `account_daily_runtime.py` | Account-global `$p` / `$daily` timing and send |
 | `roll_scheduler.py` / `roll_stop.py` / `roll_interrupts.py` | Sleep, stop, wish-claim interrupt |
 | `us_stop.py` | `$us` drain policy and stop / pause options |

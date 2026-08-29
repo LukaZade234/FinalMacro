@@ -11,6 +11,7 @@ from macro.reaction_power import (
     apply_passive_regen,
     can_afford_reaction,
     estimate_power_from_cooldown,
+    kakera_base_cost_from_state,
     reaction_power_cost,
     refresh_reaction_power,
     spend_reaction_power,
@@ -44,6 +45,30 @@ def test_reaction_power_cost_chaos_and_perk8():
     assert reaction_power_cost(kakera_emoji="kakeraR", has_chaos_key=True, has_perk_8=False) == 15
     assert reaction_power_cost(kakera_emoji="kakeraR", has_chaos_key=True, has_perk_8=True) == 7.5
     assert reaction_power_cost(kakera_emoji="kakeraR", has_chaos_key=False, has_perk_8=False) == 30
+
+
+def test_reaction_power_cost_uses_bonus_base():
+    assert (
+        reaction_power_cost(
+            kakera_emoji="kakeraR",
+            has_chaos_key=False,
+            has_perk_8=False,
+            base_cost=20,
+        )
+        == 20
+    )
+    assert (
+        reaction_power_cost(
+            kakera_emoji="kakeraR",
+            has_chaos_key=True,
+            has_perk_8=True,
+            base_cost=20,
+        )
+        == 5
+    )
+    assert kakera_base_cost_from_state(AccountState(kakera_base_cost=20)) == 20
+    assert kakera_base_cost_from_state(AccountState()) == BASE_REACTION_COST
+    assert kakera_base_cost_from_state(None) == BASE_REACTION_COST
 
 
 def test_passive_regen_one_percent_per_three_minutes():

@@ -16,6 +16,7 @@ from macro.perk8_power import (
 from macro.reaction_power import (
     KAKERA_FREE_REACT_EMOJIS,
     can_afford_reaction,
+    kakera_base_cost_from_state,
     reaction_power_cost,
     refresh_reaction_power,
 )
@@ -126,18 +127,21 @@ def _perk8_half_cost_applies(state: Any, rules: KakeraReactionRules) -> bool:
 def _minimum_kakera_cost(state: Any, rules: KakeraReactionRules) -> float:
     """Lowest non-free reaction cost among kakera types this preset could click."""
     has_perk_8 = _perk8_half_cost_applies(state, rules)
+    base_cost = kakera_base_cost_from_state(state)
     types = list(rules.types_allowed)
     if not types:
         return reaction_power_cost(
             kakera_emoji="kakeraW",
             has_chaos_key=True,
             has_perk_8=has_perk_8,
+            base_cost=base_cost,
         )
     costs = [
         reaction_power_cost(
             kakera_emoji=emoji,
             has_chaos_key=True,
             has_perk_8=has_perk_8,
+            base_cost=base_cost,
         )
         for emoji in types
         if emoji not in KAKERA_FREE_REACT_EMOJIS
