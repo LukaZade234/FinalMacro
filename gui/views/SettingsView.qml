@@ -414,6 +414,13 @@ Item {
                         }
 
                         ThemedButton {
+                            text: App.disconnecting ? "Disconnecting…" : "Disconnect"
+                            visible: App.updatePending && App.updateCanPull && App.sessionActive
+                            enabled: !App.disconnecting
+                            onClicked: App.disconnect()
+                        }
+
+                        ThemedButton {
                             text: "Restart now"
                             accent: true
                             visible: !App.updatePending && App.updatePullMessage !== "" && App.updatePullOk
