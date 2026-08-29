@@ -53,14 +53,25 @@ def apply_perk9_click_from_parse(state: Any, fields: dict[str, Any]) -> bool:
         rollover()
     if cap is not None:
         state.perk9_click_max = cap
+    log_emoji = getattr(state, "record_perk9_click_emoji", None)
+    if callable(log_emoji):
+        log_emoji(fields.get("sphere_type"))
     if used is not None:
         state.perk9_clicks_today = used
+        _resync_unknown(state)
         return True
     record = getattr(state, "record_perk9_click", None)
     if callable(record):
         record()
+        _resync_unknown(state)
         return True
     return False
+
+
+def _resync_unknown(state: Any) -> None:
+    sync = getattr(state, "sync_perk9_unknown_clicks", None)
+    if callable(sync):
+        sync()
 
 
 def is_perk9_sphere_click(sphere_type: str | None) -> bool:
@@ -85,6 +96,45 @@ def count_perk9_clicks(events: list[dict[str, Any]], *, date_key: str) -> int:
             continue
         total += 1
     return total
+
+
+def recent_perk9_click_colours(
+    limit: int,
+    *,
+    events: list[dict[str, Any]] | None = None,
+    date_key: str | None = None,
+    account_id: str | None = None,
+) -> list[str]:
+    """Today's perk-9 click colours, newest first, from the sphere earning log.
+
+    Lets the Run panel show what was actually clicked before this session
+    started, instead of a row of face-down placeholders.
+    """
+    from mudae.clock import utc_date_key
+    from mudae.sphere_log import recording_account_id
+
+    if limit <= 0:
+        return []
+    rows = get_sphere_events() if events is None else events
+    today = date_key if date_key is not None else utc_date_key()
+    account = account_id if account_id is not None else recording_account_id()
+    account = str(account or "").strip()
+
+    colours: list[str] = []
+    for entry in rows:
+        if entry.get("date_key") != today:
+            continue
+        if normalize_source(entry) != "sphere_click":
+            continue
+        sphere_type = entry.get("sphere_type")
+        if not is_perk9_sphere_click(sphere_type) or not sphere_type:
+            continue
+        # Only filter by account when both sides know one; older rows may not.
+        if account and str(entry.get("account_id") or "").strip() not in ("", account):
+            continue
+        colours.append(str(sphere_type))
+    colours.reverse()
+    return colours[:limit]
 
 
 def sync_perk9_clicks_from_log(state: Any) -> None:
@@ -114,6 +164,10 @@ class Perk9DailyRecord:
     refill_at: str = ""
     last_refill_minutes: int | None = None
     updated_at: str = ""
+    # ``$ohu9``'s ``(Perk 9) Rolled today: 44/154`` — how much of the perk-9
+    # pool is already spent, which bounds the adaptive threshold's lookahead.
+    rolled_today: int | None = None
+    roll_pool: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Perk9DailyRecord:
@@ -128,6 +182,8 @@ class Perk9DailyRecord:
             refill_at=str(data.get("refill_at") or ""),
             last_refill_minutes=_coerce_int(data.get("last_refill_minutes")),
             updated_at=str(data.get("updated_at") or ""),
+            rolled_today=_coerce_int(data.get("rolled_today")),
+            roll_pool=_coerce_int(data.get("roll_pool")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -140,6 +196,8 @@ class Perk9DailyRecord:
             "refill_at": self.refill_at,
             "last_refill_minutes": self.last_refill_minutes,
             "updated_at": self.updated_at,
+            "rolled_today": self.rolled_today,
+            "roll_pool": self.roll_pool,
         }
 
 
@@ -227,12 +285,19 @@ def update_record_from_ohu(
     )
     megasphere_left = fields.get("megasphere_left")
 
+    rolled = _coerce_int(fields.get("perk9_rolled_today"))
+    roll_pool = _coerce_int(fields.get("perk9_roll_pool"))
+
     if clicked is not None:
         record.last_clicked = clicked
     if click_max is not None:
         record.last_click_max = click_max
     if stock is not None:
         record.stock = stock
+    if rolled is not None:
+        record.rolled_today = rolled
+    if roll_pool is not None:
+        record.roll_pool = roll_pool
     if megasphere_left is False:
         record.megasphere_exhausted = True
     elif megasphere_left is True:
@@ -273,6 +338,41 @@ def persist_click_progress(
     return record
 
 
+def should_skip_ohu9_until_refill(
+    record: Perk9DailyRecord,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """True when the daily clicks are spent and the refill ETA has not passed."""
+    now = now or _utc_now()
+    record = refresh_exhausted_if_refill_passed(record, now=now)
+    if not record.clicks_exhausted:
+        return False
+    if not _clicks_at_cap(record):
+        return False
+    refill_at = parse_iso(record.refill_at)
+    if refill_at is None:
+        return True
+    return now < refill_at
+
+
+def should_query_ohu9_on_refill(
+    record: Perk9DailyRecord,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """True when the refill has passed and the cached record is stale."""
+    now = now or _utc_now()
+    record = refresh_exhausted_if_refill_passed(record, now=now)
+    refill_at = parse_iso(record.refill_at)
+    if refill_at is not None and now >= refill_at:
+        return True
+    updated = parse_iso(record.updated_at)
+    if updated is None:
+        return True
+    return mudae_daily_date(updated) < mudae_daily_date(now)
+
+
 def apply_record_to_state(
     state: Any,
     record: Perk9DailyRecord,
@@ -284,12 +384,6 @@ def apply_record_to_state(
 
     now = now or _utc_now()
     record = refresh_exhausted_if_refill_passed(record, now=now)
-    if (
-        record.last_clicked is None
-        and record.last_click_max is None
-        and not record.clicks_exhausted
-    ):
-        return
 
     updated = parse_iso(record.updated_at)
     refill_at = parse_iso(record.refill_at)
@@ -297,6 +391,18 @@ def apply_record_to_state(
         (updated is not None and mudae_daily_date(updated) < mudae_daily_date(now))
         or (refill_at is not None and now >= refill_at)
     )
+    # The pool refills with the day, so a stale ``rolled`` would understate how
+    # many perk-9 spawns are still coming.
+    state.perk9_roll_pool = record.roll_pool
+    state.perk9_rolled_today = 0 if new_day else record.rolled_today
+
+    if (
+        record.last_clicked is None
+        and record.last_click_max is None
+        and not record.clicks_exhausted
+    ):
+        return
+
     if record.last_click_max is not None:
         state.perk9_click_max = int(record.last_click_max)
     if new_day:

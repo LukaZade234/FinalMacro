@@ -15,6 +15,10 @@ import "../emptyStates.js" as Empty
 Item {
     id: page
 
+    // Run-status panels folded to their title line (session state, not persisted).
+    property bool saverFolded: false
+    property bool perk9Folded: false
+
     RunModel { id: run }
     TargetModel { id: targets }
 
@@ -470,11 +474,69 @@ Item {
 
                     ConsoleRailBlock {
                         Layout.fillWidth: true
-                        visible: run.powerSaveOn
-                        Layout.preferredHeight: run.powerSaveOn ? implicitHeight : 0
-                        Layout.maximumHeight: run.powerSaveOn ? 400 : 0
+                        Layout.preferredHeight: implicitHeight
                         title: "smart saver"
                         rows: run.powerSaveRows
+                        collapsible: run.powerSaveOn
+                        collapsed: !run.powerSaveOn || page.saverFolded
+                        stateText: run.powerSaveOn ? "on" : "off"
+                        stateOn: run.powerSaveOn
+                        onToggled: page.saverFolded = !page.saverFolded
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Theme.line
+                    }
+
+                    ConsoleRailBlock {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: implicitHeight
+                        title: "adaptive perk 9"
+                        rows: run.perk9AdaptiveRows
+                        collapsible: run.perk9AdaptiveOn
+                        collapsed: !run.perk9AdaptiveOn || page.perk9Folded
+                        stateText: run.perk9AdaptiveOn ? "on" : "off"
+                        stateOn: run.perk9AdaptiveOn
+                        onToggled: page.perk9Folded = !page.perk9Folded
+                    }
+
+                    ColumnLayout {
+                        // Nested layouts default to fillHeight, which left a tall
+                        // blank gap here whenever the sphere rows were empty.
+                        Layout.fillHeight: false
+                        Layout.fillWidth: true
+                        visible: run.perk9AdaptiveOn && !page.perk9Folded
+                        spacing: 2
+
+                        Perk9SphereRow {
+                            Layout.fillWidth: true
+                            labelWidth: 64
+                            label: "clicking"
+                            spheres: run.perk9Allowed
+                        }
+                        Perk9SphereRow {
+                            Layout.fillWidth: true
+                            labelWidth: 64
+                            label: "drops"
+                            spheres: run.perk9StricterDrops
+                            note: run.perk9StricterText
+                            sphereOpacity: 0.6
+                        }
+                        Perk9SphereRow {
+                            Layout.fillWidth: true
+                            labelWidth: 64
+                            label: "opens up"
+                            spheres: run.perk9LooserAdds
+                            note: run.perk9LooserText
+                        }
+                        Perk9SphereRow {
+                            Layout.fillWidth: true
+                            labelWidth: 64
+                            label: "clicked"
+                            spheres: run.perk9History
+                        }
                     }
 
                     Rectangle {

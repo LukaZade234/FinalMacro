@@ -70,6 +70,16 @@ def perk9_max_from_shop(shop: dict[str, Any] | None) -> int:
     return value
 
 
+def _float_or_zero(raw: Any) -> float:
+    if raw is None or raw == "":
+        return 0.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
+
+
 def apply_sheet_caps(
     state: Any,
     *,
@@ -94,3 +104,11 @@ def apply_sheet_caps(
     state.dk_cooldown_minutes = dk_cooldown_minutes_from_bonus(
         (bonus or {}).get("dk_cooldown")
     )
+    state.sphere_double_chance_pct = _float_or_zero(
+        (bonus or {}).get("sphere_double_chance_pct")
+    )
+    state.additional_spheres = _float_or_zero((bonus or {}).get("additional_spheres"))
+    state.perk9_sphere_value_pct = _float_or_zero(
+        (shop or {}).get("perk9_sphere_value_pct")
+    )
+    state.rolls_per_hour_net = rolls_max_from_sheets(bonus)

@@ -9,6 +9,9 @@ from typing import Any
 from macro.perk9_daily import PERK9_CLICK_MAX_DEFAULT
 from mudae.clock import utc_date_key
 
+# Enough click history for the Run panel; the cap is 20 on a maxed account.
+PERK9_CLICK_HISTORY_MAX = 40
+
 
 class MacroPhase(str, Enum):
     IDLE = "Idle"
@@ -53,8 +56,25 @@ class AccountState:
     perk9_clicks_today: int = 0
     perk9_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
     perk9_click_max: int = PERK9_CLICK_MAX_DEFAULT
+    # ``$ohu9``'s ``(Perk 9) Rolled today: 44/154``. ``pool - rolled`` caps how
+    # many more perk-9 sphere spawns today, which paces the adaptive threshold.
+    perk9_rolled_today: int | None = None
+    perk9_roll_pool: int | None = None
+    # Tracked between ``$ohu9`` syncs so the macro does not re-query every session.
+    perk9_spawns_today: int = 0
+    # Spawn count at the last ``$ohu9`` sync, so spawns seen since then can be
+    # subtracted from Mudae's ``pool - rolled`` between queries.
+    perk9_spawns_at_sync: int = 0
+    perk9_click_emojis: list[str] = field(default_factory=list)
+    perk9_unknown_clicks: int = 0
     kakera_base_cost: float = 30.0
     dk_cooldown_minutes: int = 20 * 60
+    # Perk-9 EV inputs from the run channel's $bonus / $shop, written by
+    # ``macro.sheet_caps.apply_sheet_caps`` like the other sheet-derived caps.
+    sphere_double_chance_pct: float = 0.0
+    additional_spheres: float = 0.0
+    perk9_sphere_value_pct: float = 0.0
+    rolls_per_hour_net: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +109,8 @@ class AccountState:
             "perk8_click_max": self.perk8_click_max,
             "perk9_clicks_today": self.perk9_clicks_today,
             "perk9_click_max": self.perk9_click_max,
+            "perk9_rolled_today": self.perk9_rolled_today,
+            "perk9_roll_pool": self.perk9_roll_pool,
         }
 
     def _today_key(self) -> str:
@@ -125,15 +147,50 @@ class AccountState:
 
     def rollover_perk9_if_needed(self) -> None:
         today = self._today_key()
+        if not self.perk9_clicks_day:
+            # No stamp yet means "not tracked this session", not "stale from
+            # another day" — clearing here would discard counts just restored
+            # from $ohu9 or the persisted record.
+            self.perk9_clicks_day = today
+            return
         if self.perk9_clicks_day != today:
             self.perk9_clicks_day = today
             self.perk9_clicks_today = 0
+            self.perk9_spawns_today = 0
+            self.perk9_spawns_at_sync = 0
+            self.perk9_click_emojis = []
+            self.perk9_unknown_clicks = 0
 
     def record_perk9_click(self, count: int = 1) -> None:
         if count <= 0:
             return
         self.rollover_perk9_if_needed()
         self.perk9_clicks_today += int(count)
+
+    def record_perk9_spawn(self, count: int = 1) -> None:
+        """One perk-9 sphere button appeared on a roll (clicked or not)."""
+        if count <= 0:
+            return
+        self.rollover_perk9_if_needed()
+        self.perk9_spawns_today += int(count)
+
+    def record_perk9_click_emoji(self, emoji: str | None) -> None:
+        """Remember which colour was clicked, oldest first, for the Run panel."""
+        if not emoji:
+            return
+        self.rollover_perk9_if_needed()
+        self.perk9_click_emojis.append(str(emoji))
+        del self.perk9_click_emojis[:-PERK9_CLICK_HISTORY_MAX]
+
+    def sync_perk9_unknown_clicks(self) -> None:
+        """Clicks Mudae counted that this session never saw show as face-down.
+
+        Connecting mid-day, or a click whose confirmation was missed, leaves the
+        colour unknowable — the panel renders those as ``spU`` rather than
+        pretending the history is complete.
+        """
+        gap = int(self.perk9_clicks_today) - len(self.perk9_click_emojis)
+        self.perk9_unknown_clicks = max(0, gap)
 
     def set_rolls_reset(self, minutes: int | None, *, now: Any = None) -> None:
         from macro.live_clock import apply_countdown

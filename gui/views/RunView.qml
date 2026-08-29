@@ -270,6 +270,11 @@ Item {
             status: runRoot.runSummary.power_save || null
         }
 
+        Perk9AdaptiveStatus {
+            Layout.fillWidth: true
+            status: runRoot.runSummary.perk9_adaptive || null
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true

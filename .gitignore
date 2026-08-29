@@ -1,14 +1,10 @@
-data/settings.json
-data/channel_cache.json
-data/*_log.json
-data/events.jsonl
-data/*.bak
-data/settings_commands_capture.json
-data/session_logs/*
-data/settings.sync-conflict-*.json
-# Syncthing metadata / version history (local sync only)
-data/.stfolder/
-data/.stversions/
+# data/ is local-only and holds Discord tokens. Ignore the whole tree rather
+# than naming files: per-file rules missed timestamped backups
+# (settings.json.bak-<stamp>) and Syncthing conflict copies, which put real
+# tokens into a commit. Only the .gitkeep placeholders are tracked.
+data/**
+!data/.gitkeep
+!data/session_logs/
 !data/session_logs/.gitkeep
 
 

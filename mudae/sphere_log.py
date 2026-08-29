@@ -76,6 +76,11 @@ def clear_recording_account() -> None:
     set_recording_account("", "Main")
 
 
+def recording_account_id() -> str:
+    """Account new events are being logged under, for reading its own rows back."""
+    return _recording_account_id
+
+
 def username_matches_own(claimed_by: str | None, own_usernames: list[str]) -> bool:
     if not claimed_by or not own_usernames:
         return False

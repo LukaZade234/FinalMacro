@@ -15,6 +15,10 @@ import "../emptyStates.js" as Empty
 Item {
     id: page
 
+    // Run-status panels folded to their title line (session state).
+    property bool saverFolded: false
+    property bool perk9Folded: false
+
     RunModel { id: run }
     TargetModel { id: targets }
 
@@ -600,10 +604,10 @@ Item {
 
                 // smart saver
                 Rectangle {
+                    id: saverBox
                     Layout.fillWidth: true
-                    visible: run.powerSaveOn
-                    Layout.preferredHeight: run.powerSaveOn ? (saverCol.implicitHeight + 26) : 0
-                    Layout.maximumHeight: run.powerSaveOn ? 400 : 0
+                    readonly property bool folded: !run.powerSaveOn || page.saverFolded
+                    Layout.preferredHeight: saverCol.implicitHeight + 26
                     radius: Theme.radiusLg
                     color: Theme.surface
                     border.width: 1
@@ -619,18 +623,16 @@ Item {
                         anchors.topMargin: 13
                         spacing: 0
 
-                        Text {
-                            text: Theme.sectionLabel("Smart saver")
-                            color: Theme.mute
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.sizeMicro
-                            font.weight: Font.DemiBold
-                            font.letterSpacing: Theme.tracking(Theme.sizeMicro)
-                            bottomPadding: 7
+                        PanelFoldHeader {
+                            width: saverCol.width
+                            title: "Smart saver"
+                            on: run.powerSaveOn
+                            collapsed: page.saverFolded
+                            onToggled: page.saverFolded = !page.saverFolded
                         }
 
                         Repeater {
-                            model: run.powerSaveRows
+                            model: saverBox.folded ? [] : run.powerSaveRows
                             delegate: Item {
                                 required property var modelData
                                 width: saverCol.width
@@ -656,6 +658,97 @@ Item {
                                 }
                             }
                         }
+                    }
+                }
+
+                // adaptive perk 9
+                Rectangle {
+                    id: perk9Box
+                    Layout.fillWidth: true
+                    readonly property bool folded: !run.perk9AdaptiveOn || page.perk9Folded
+                    Layout.preferredHeight: perk9Col.implicitHeight + 26
+                    radius: Theme.radiusLg
+                    color: Theme.surface
+                    border.width: 1
+                    border.color: Theme.line
+
+                    Column {
+                        id: perk9Col
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 15
+                        anchors.rightMargin: 15
+                        anchors.topMargin: 13
+                        spacing: 0
+
+                        PanelFoldHeader {
+                            width: perk9Col.width
+                            title: "Adaptive perk 9"
+                            on: run.perk9AdaptiveOn
+                            collapsed: page.perk9Folded
+                            onToggled: page.perk9Folded = !page.perk9Folded
+                        }
+
+                        Repeater {
+                            model: perk9Box.folded ? [] : run.perk9AdaptiveRows
+                            delegate: Item {
+                                required property var modelData
+                                width: perk9Col.width
+                                height: 22
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: Theme.dim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.sizeBody
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.value
+                                    color: modelData.tone === "accent" ? Theme.accent
+                                        : (modelData.tone === "good" ? Theme.good : Theme.fg)
+                                    font.family: Theme.monoFamily
+                                    font.pixelSize: Theme.sizeBody
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                        }
+
+                        Item { width: 1; height: 6 }
+
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            visible: !perk9Box.folded && spheres.length > 0
+                            label: "clicking now"
+                            spheres: run.perk9Allowed
+                        }
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            visible: !perk9Box.folded && spheres.length > 0
+                            label: "drops"
+                            spheres: run.perk9StricterDrops
+                            note: run.perk9StricterText
+                            sphereOpacity: 0.6
+                        }
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            visible: !perk9Box.folded && spheres.length > 0
+                            label: "opens up"
+                            spheres: run.perk9LooserAdds
+                            note: run.perk9LooserText
+                        }
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            visible: !perk9Box.folded && spheres.length > 0
+                            label: "clicked"
+                            spheres: run.perk9History
+                        }
+
+                        Item { width: 1; height: 4 }
                     }
                 }
 

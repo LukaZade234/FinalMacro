@@ -87,6 +87,8 @@ changes.
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `perk9_daily.py` | Daily perk-9 click counter |
+| `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`) |
+| `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs |
 | `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
 | `sphere_game.py` / `oc_game.py` / `oq_game.py` | Individual minigames |
@@ -134,6 +136,8 @@ under test (`test_roll_cycle.py`, `test_parsers.py`, …).
 | `build_fonts.py` | Static Space Grotesk weights from the variable font |
 | `document_settings_commands.py` | Live `$settings` + read-only `$bonus` capture; skips 16 direct toggles unless `--include-toggles` (send+revert) |
 | `oq_bakeoff.py` | Replay MIXED vs entropy on every `$oq` world |
+| `perk9_bakeoff.py` | Score the perk-9 adaptive threshold vs static allow-lists |
+| `merge_event_logs.py` | Union diverged `events.jsonl` copies after a Syncthing outage |
 
 ---
 

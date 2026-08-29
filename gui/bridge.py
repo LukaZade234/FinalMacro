@@ -1229,6 +1229,89 @@ class AppBridge(QObject):
             }
         )
 
+    @Slot(str, int, result=str)
+    def perk9ThresholdPreview(self, preset_id: str, spawns: int) -> str:
+        """Threshold ladder for a preset, so Presets can show the DP's own numbers."""
+        from macro.perk9_threshold import (
+            build_perk9_threshold_context,
+            click_threshold,
+            estimate_opportunities_left,
+            estimate_sphere_colour_frequency,
+            normalize_frequency,
+            sphere_base_values,
+        )
+
+        preset = self._presets.find_preset(preset_id)
+        if not preset:
+            return "{}"
+        rules = preset.sphere_reaction
+        state = self._macro_state
+        clicks = int(getattr(state, "perk9_click_max", 20) or 20)
+        pool = getattr(state, "perk9_roll_pool", None)
+        rolled = getattr(state, "perk9_rolled_today", None)
+        live = estimate_opportunities_left(
+            state,
+            manual_override=rules.expected_daily_opportunities,
+            rolls_per_hour=getattr(state, "rolls_per_hour_net", None),
+        )
+        total = int(spawns) if int(spawns) > 0 else (live or 120)
+        ctx = build_perk9_threshold_context(
+            opportunities_left=total,
+            clicks_left=clicks,
+            base_values=rules.sphere_values or None,
+            frequency=rules.sphere_frequency or None,
+            double_chance_pct=float(
+                getattr(self._macro_state, "sphere_double_chance_pct", 0.0) or 0.0
+            ),
+            additional_spheres=float(
+                getattr(self._macro_state, "additional_spheres", 0.0) or 0.0
+            ),
+            shop9_bonus_pct=float(
+                getattr(self._macro_state, "perk9_sphere_value_pct", 0.0) or 0.0
+            ),
+        )
+        if ctx is None:
+            return "{}"
+        order = sorted(ctx.ev_by_emoji, key=lambda e: ctx.ev_by_emoji[e])
+        steps = sorted({total, total // 2, total // 4, clicks * 2, clicks})
+        ladder = []
+        for left in steps:
+            if not 1 <= left <= total:
+                continue
+            bar = click_threshold(ctx.value_table, left, clicks)
+            ladder.append(
+                {
+                    "left": left,
+                    "threshold": round(bar, 1),
+                    "clicks": [e for e in order if ctx.ev_by_emoji[e] >= bar],
+                }
+            )
+        measured = estimate_sphere_colour_frequency()
+        freq = normalize_frequency(rules.sphere_frequency or None)
+        base_values = sphere_base_values(rules.sphere_values or None)
+        return json.dumps(
+            {
+                "spawns": total,
+                "clicks_left": clicks,
+                "clicks_used": int(getattr(state, "perk9_clicks_today", 0) or 0),
+                "ev": {e: round(v, 1) for e, v in ctx.ev_by_emoji.items()},
+                "base": dict(base_values),
+                "freq": {e: round(v * 100.0, 2) for e, v in freq.items()},
+                "ladder": ladder,
+                "estimate": {
+                    "value": live,
+                    "pool": pool,
+                    "rolled": rolled,
+                    "manual": rules.expected_daily_opportunities or 0,
+                },
+                "measured": (
+                    {e: round(v * 100.0, 2) for e, v in measured.items()}
+                    if measured
+                    else None
+                ),
+            }
+        )
+
     @Slot(str, str)
     def updatePresetRules(self, preset_id: str, patch_json: str) -> None:
         """Deep-merge a JSON patch into a preset's rules tree and persist."""
@@ -1437,6 +1520,11 @@ class AppBridge(QObject):
                 self._session_started_at,
                 kakera_rules=(
                     getattr(self._macro_config, "kakera_reaction", None)
+                    if self._macro_config
+                    else None
+                ),
+                sphere_rules=(
+                    getattr(self._macro_config, "sphere_reaction", None)
                     if self._macro_config
                     else None
                 ),

@@ -103,8 +103,10 @@ def build_run_summary(
     session_started_at: dt.datetime | None,
     *,
     kakera_rules: Any = None,
+    sphere_rules: Any = None,
 ) -> dict[str, Any]:
     from macro.perk8_power import power_save_status
+    from macro.perk9_threshold import adaptive_status
     from mudae.kakera_log import get_kakera_events
     from mudae.key_log import get_key_events
     from mudae.sphere_log import get_sphere_events
@@ -149,4 +151,5 @@ def build_run_summary(
         },
         "last_claim": last_claim,
         "power_save": power_save_status(state, kakera_rules),
+        "perk9_adaptive": adaptive_status(state, sphere_rules),
     }

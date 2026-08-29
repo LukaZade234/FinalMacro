@@ -47,6 +47,7 @@ from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
 from macro.kakera_reactor import KakeraReactor
 from macro.chaos_followup import chaos_extra_rolls, merge_tu_hourly_rolls
 from macro.perk8_runtime import Perk8Runtime
+from macro.perk9_runtime import Perk9Runtime
 from macro.post_roll import PostRollHandler, RollRecord
 from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
 from macro.roll_stop import ROLLS_LEFT_STOP, RollStopTracker
@@ -158,6 +159,14 @@ class RollCycleEngine:
             notification_reconnect=notification_reconnect,
         )
         self._perk8 = Perk8Runtime(
+            self._ctx,
+            daily_get=daily_resets_get,
+            daily_save=daily_resets_save,
+            on_busy=lambda: self._set_phase(MacroPhase.CHECKING_TU),
+            on_idle=lambda: self._set_phase(MacroPhase.IDLE),
+            response_timeout_sec=_RESPONSE_TIMEOUT_SEC,
+        )
+        self._perk9 = Perk9Runtime(
             self._ctx,
             daily_get=daily_resets_get,
             daily_save=daily_resets_save,
@@ -364,6 +373,19 @@ class RollCycleEngine:
 
     async def _refresh_perk8_status(self, *, at_startup: bool = False) -> None:
         await self._perk8.refresh(at_startup=at_startup)
+        await self._perk9.refresh(at_startup=at_startup)
+
+    def _note_perk9_spawn(self, count: int = 1) -> None:
+        self._perk9.note_spawn(count)
+
+    def _persist_perk9_click_progress(self) -> None:
+        self._perk9.persist_click_progress()
+
+    async def _resync_perk9_after_sphere_timeout(self) -> None:
+        await self._perk9.resync_after_uncertain_click()
+
+    async def _confirm_perk9_exhausted(self) -> None:
+        await self._perk9.confirm_exhausted()
 
     async def _run_priority_pause(self) -> None:
         """Run account-global ``$p`` / ``$daily`` before rolls when they are due."""
@@ -385,7 +407,7 @@ class RollCycleEngine:
             return
         try:
             await self._run_priority_pause()
-            await self._perk8.maybe_refresh()
+            await self._maybe_refresh_perk8_status()
             await self._maybe_play_daily_minigames()
         finally:
             held = False
@@ -397,6 +419,7 @@ class RollCycleEngine:
 
     async def _maybe_refresh_perk8_status(self) -> None:
         await self._perk8.maybe_refresh()
+        await self._perk9.maybe_refresh()
 
     async def _maybe_play_daily_minigames(self) -> None:
         """Spend remaining ``$oh`` / ``$oc`` / ``$oq`` once per daily cycle."""
@@ -433,12 +456,19 @@ class RollCycleEngine:
         return done, claimed, roll_index
 
     def _make_sphere_reactor(self) -> SphereReactor:
+        budget = self._config.sphere_reaction.budget_aware
         return SphereReactor(
             actions=self._actions,
             config=self._config,
             state=self._state,
             log=self._log,
             debug_log=self._log_debug,
+            on_spawn=self._note_perk9_spawn if budget else None,
+            on_click_progress=self._persist_perk9_click_progress if budget else None,
+            on_click_timeout=(
+                self._resync_perk9_after_sphere_timeout if budget else None
+            ),
+            on_exhausted=self._confirm_perk9_exhausted if budget else None,
         )
 
     def _sync_claim_window_from_tu(self) -> None:
@@ -483,6 +513,10 @@ class RollCycleEngine:
         """Rebind per-channel persistence after a live server/channel switch."""
         self._ctx.account_id = account_id
         self._perk8.update_daily_store(
+            daily_get=daily_resets_get,
+            daily_save=daily_resets_save,
+        )
+        self._perk9.update_daily_store(
             daily_get=daily_resets_get,
             daily_save=daily_resets_save,
         )

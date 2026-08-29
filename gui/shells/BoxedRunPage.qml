@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import gui 1.0
+import "../components"
 import "../emptyStates.js" as Empty
 
 /*
@@ -12,6 +13,10 @@ import "../emptyStates.js" as Empty
 */
 Item {
     id: page
+
+    // Run-status panels folded to their caption line (session state).
+    property bool saverFolded: false
+    property bool perk9Folded: false
 
     RunModel { id: run }
     TargetModel { id: targets }
@@ -340,10 +345,14 @@ Item {
 
                 BoxedBox {
                     Layout.fillWidth: true
-                    visible: run.powerSaveOn
-                    Layout.preferredHeight: run.powerSaveOn ? (saverCol.implicitHeight + 28) : 0
-                    Layout.maximumHeight: run.powerSaveOn ? 400 : 0
+                    Layout.preferredHeight: folded ? 22 : (saverCol.implicitHeight + 28)
                     caption: "Smart saver"
+                    readonly property bool folded: !run.powerSaveOn || page.saverFolded
+                    collapsible: run.powerSaveOn
+                    collapsed: folded
+                    stateText: run.powerSaveOn ? "on" : "off"
+                    stateOn: run.powerSaveOn
+                    onToggled: page.saverFolded = !page.saverFolded
 
                     Column {
                         id: saverCol
@@ -359,6 +368,62 @@ Item {
                                 tone: modelData.tone || ""
                             }
                         }
+                    }
+                }
+
+                BoxedBox {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: folded ? 22 : (perk9Col.implicitHeight + 28)
+                    caption: "Adaptive perk 9"
+                    readonly property bool folded: !run.perk9AdaptiveOn || page.perk9Folded
+                    collapsible: run.perk9AdaptiveOn
+                    collapsed: folded
+                    stateText: run.perk9AdaptiveOn ? "on" : "off"
+                    stateOn: run.perk9AdaptiveOn
+                    onToggled: page.perk9Folded = !page.perk9Folded
+
+                    Column {
+                        id: perk9Col
+                        width: parent.width
+                        spacing: 0
+
+                        Repeater {
+                            model: run.perk9AdaptiveRows
+                            BoxedStatRow {
+                                width: perk9Col.width
+                                label: modelData.label
+                                value: modelData.value
+                                tone: modelData.tone || ""
+                            }
+                        }
+
+                        Item { width: 1; height: 6 }
+
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            label: "Clicking now"
+                            spheres: run.perk9Allowed
+                        }
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            label: "Drops"
+                            spheres: run.perk9StricterDrops
+                            note: run.perk9StricterText
+                            sphereOpacity: 0.6
+                        }
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            label: "Opens up"
+                            spheres: run.perk9LooserAdds
+                            note: run.perk9LooserText
+                        }
+                        Perk9SphereRow {
+                            width: perk9Col.width
+                            label: "Clicked"
+                            spheres: run.perk9History
+                        }
+
+                        Item { width: 1; height: 4 }
                     }
                 }
 

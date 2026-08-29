@@ -375,6 +375,90 @@ this as **clicks used / cap** on the Run page. The cap is
   still governs which colours to click. After the daily budget is used, Mudae
   stops spawning the buttons — the reactor does not add its own skip.
 
+### Adaptive threshold (`perk_9` budget mode)
+
+`SphereReactionRules.budget_aware` (Presets → Sphere reaction, default
+**off**) replaces the static colour list with an expected-value decision, so
+the same preset is right on a light day and a heavy one. Implemented in
+`macro/perk9_threshold.py`; `macro/rule_eval.py` only reads a prebuilt
+context, `macro/sphere_reactor.py` builds one per roll.
+
+```
+EV(colour) = (base_sp × (1 + double_chance) + additional_spheres) × (1 + shop9)
+V(0,c) = V(r,0) = 0
+V(r,c) = Σ freq(colour) × max( EV(colour) + V(r-1,c-1),  V(r-1,c) )
+click   iff  EV(colour) ≥ V(r-1,c) − V(r-1,c-1)
+```
+
+`r` is **perk-9 spawns still expected today**, `c` is clicks left in the
+daily cap. `double_chance` / `additional_spheres` come from `$bonus`
+(`sphere_double_chance_pct`, `additional_spheres`), `shop9` from `$shop`
+(`perk9_sphere_value_pct`) — all via `macro/sheet_caps.py`. The bar falls as
+spawns run out and reaches **0** once `r ≤ c`: unused clicks expire at the
+UTC reset, so the last ones are worth spending on anything. Megasphere skips
+the gate (free, spends no slot). Budget mode only ever **narrows**
+`types_allowed`, never widens it.
+
+Base SP and spawn rates default to Colblitz's published p9calc table
+(138,925 observed rolls) and are **editable per colour in the preset**
+because the sample is still being re-measured locally:
+
+| | `spB` | `spT` | `spG` | `spY` | `spL` | `spO` | `spD` | `spR` | `spW` |
+|---|---|---|---|---|---|---|---|---|---|
+| Base SP | 10 | 20 | 35 | 55 | 75.9 | 90 | 104.5 | 150 | 500 |
+| Spawn % | 59.58 | 24.10 | 7.88 | 2.67 | 2.98 | 0.99 | 1.45 | 0.31 | 0.04 |
+
+Dark and light have no entry in `SPHERE_BASE_SP` (dark resolves into another
+colour, light splits into fragments); the figures above are measured
+averages, which is why dark outranks orange here even though
+`SPHERE_VALUE_RANK` — which orders `$oh` clicks, not EV — does not.
+Frequencies are conditional on a button appearing, so they total 100% and one
+unit of `r` is one spawn, not one roll. A preset stores only the colours the
+user edited; the rest stay at these defaults. Set a colour to 0 to drop it.
+
+Remaining spawns come from `$ohu9`'s `(Perk 9) Rolled today: 44/154`
+(`parse_perk9_rolled_pool`; `pool − rolled` is a hard ceiling), clamped by
+rolls left before the UTC reset, and overridden by
+`expected_daily_opportunities` when set. Without any of those signals the
+context is `None` and the static filter applies.
+
+### `$ohu9` timing (`macro/perk9_runtime.py`)
+
+Same shape as perk-8's `$ohu8` runtime — it is **not** sent every roll
+session. `Perk9Runtime` sends it:
+
+- once at session start (and on a refresh deferred while the gateway was down),
+- when the refill deadline has passed or the record is from an earlier UTC day,
+- after a sphere click whose `SPHERE_CLICK` confirmation timed out — the click
+  may have landed, so the count could be short,
+- once when the local count first reaches the cap, to confirm before standing
+  down until the refill.
+
+Between those, counts are tracked locally: every paid sphere button on a roll
+is one spawn (`record_perk9_spawn`), every confirmed click bumps the used count
+and appends its colour (`record_perk9_click_emoji`). A reply re-syncs both —
+clicks via `merge_click_count` (catch up when Mudae is ahead, tolerate a 1–2
+click lag, rewind a stale local count) and spawns via `merge_spawn_count`
+(Mudae's `Rolled today` keeps rising after the budget is spent because it counts
+rolled characters, not spawned buttons, so the larger number wins).
+
+`$ohu` / `$ohu8` / `$ohu9` share the availability header, so the wait keys on
+the `(Perk 9)` line (`is_ohu9_response`) — otherwise an `$ohu8` reply would
+satisfy an `$ohu9` wait. The reply parses through `parse_ohu`.
+
+Every Run page shows the live state under Smart saver, fed by
+`adaptive_status`: Classic via `Perk9AdaptiveStatus.qml`, and Haul / Console /
+Boxed via `RunModel.perk9Adaptive*` in each shell's own idiom, with the sphere
+rows shared through `Perk9SphereRow.qml`. It shows clicks used/cap, spawns seen and `Rolled today`,
+spawns left, the current EV bar and which colours clear it, when the set opens
+up (fewer spawns left) or tightens (fewer clicks left), and the click history
+newest-first. Clicks Mudae counted that this session never saw — connecting
+mid-day, or a missed confirmation — render as face-down `spU` rather than
+implying the history is complete.
+
+Score it with `scripts/perk9_bakeoff.py` (`--tuned-for N` compares against a
+single static filter picked for one volume).
+
 ---
 
 ## Perk 10 (invested spheres)

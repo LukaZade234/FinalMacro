@@ -23,7 +23,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 11. **`$oc` leftover-click lookahead** — solver only; keep the geometric model.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
 13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — tables no longer parse the full log; shared filter state across tabs and a Qt list model can wait.
-14. **Perk 9 threshold** / **`$bw` advisory** — arithmetic on stored `$bonus` fields (`sphere_double_chance_pct`, `additional_spheres`, `rolls_per_hour["penalties"]["bw"]`); still not wired.
+14. ~~**Perk 9 threshold**~~ / **`$bw` advisory** — perk-9 EV + DP is wired (`macro/perk9_threshold.py`, opt-in `budget_aware`). `$bw` advisory still needs `rolls_per_hour["penalties"]["bw"]`.
 15. **`$ot` Phase 2** / **use parsed `$settings`/`$bonus` in decisions** / **full daily autonomy** / **Phase D** — real projects.
 16. Last: split `bridge.py`, achievements, GUI polish.
 
@@ -37,7 +37,7 @@ Highest first. What makes an overnight run correct and complete.
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
 3. ~~**Sphere tracking + EventLog / shared stats**~~ — EventLog + daily cube + paged stats tables. Totals/charts no longer walk every event in QML.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
-5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played), perk 9 static filter.
+5. **Unused or mis-spent daily budget** — `$ot` (parsed, not played). ~~Perk 9 static filter~~ — opt-in adaptive threshold spends the daily clicks by EV.
 6. **Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`. Overnight sessions mis-attribute `$tu` and can collide with a minigame.
 7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
 8. ~~**Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).~~ Parser + follow-up in `KakeraReactor` / `chaos_followup.py`; raw windows still go to `data/chaos_log.json`.
@@ -79,7 +79,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 **Wave 4 — spend the daily budget better**
 
-- Perk 9 adaptive threshold (needs wave 1 colour + wave 2 `$bonus`).
+- ~~Perk 9 adaptive threshold~~ — `macro/perk9_threshold.py`: EV formula + `V(spawns, clicks)` DP, opt-in `SphereReactionRules.budget_aware`. Colours/rates editable per preset (Colblitz's 138,925-roll table as defaults). Spawns left come from `$ohu9`'s `(Perk 9) Rolled today`. Score with `scripts/perk9_bakeoff.py`.
 - `$ot` play + Phase 2 enumerator (`$ohu` already counts it; wave 3 skip logic should already know the id).
 - `$oc` leftover-click lookahead; `$oh` DP only if the wave 1 histogram is stable. `$oq` MIXED matches Colblitz — leave it.
 
@@ -232,7 +232,7 @@ The guide is a fair transcription of their published “How it works” pages. S
 
 ### Calculators — new features, not solver ports
 
-- **Perk 9 click/skip DP — medium, highest daily value of the calculators.** [p9calc](https://colblitz.com/mudae/p9calc): `EV(colour) = (base × (1 + double) + flat) × (1 + SP9×0.10)`, daily cap `10 + SP9`, then `V(rolls left, clicks left)` so the threshold **falls** as the day runs out. We have a static `SphereReactionRules.types_allowed` and no remaining-budget awareness. **Action:** `$bonus` now stores `sphere_double_chance_pct` and `additional_spheres`; compute the threshold table and use it in `passes_sphere_reaction` (click if `EV ≥ V[r-1][c] − V[r-1][c-1]`). Seed frequencies from our `sphere_click` log; label them provisional until the sample is large. A standalone “how many OP9 chars to skip teal” page is optional — the live advisor is the part that belongs in this app.
+- ~~**Perk 9 click/skip DP**~~ — [p9calc](https://colblitz.com/mudae/p9calc)'s `EV = (base × (1 + double) + flat) × (1 + SP9×0.10)` and `V(spawns left, clicks left)` are implemented in `macro/perk9_threshold.py` and gate `passes_sphere_reaction` when the preset's **budget_aware** toggle is on (off = the old static `types_allowed`). Verified against Colblitz's published EV column to ±0.04 on all nine colours; their base SP for dark (104.5) and light (75.9) fill the gap in `SPHERE_BASE_SP`. Spawn rates and values are editable per colour in Presets since the sample is still being re-measured; `estimate_sphere_colour_frequency` shows our own logged mix beside them as advisory only. Against one static filter tuned for a 120-spawn day the DP is +121% at 30 spawns, +47% at 60, +6% at 120, +28% at 250 (`scripts/perk9_bakeoff.py --tuned-for 120`). A standalone “how many OP9 chars to skip teal” page is still optional.
 
 - **`$bw` / key EV — medium, advisory only.** [bwcalc](https://colblitz.com/mudae/bwcalc): sweep `$bw` for keys/hour (wishlist / starwish / per-character). Formulas are published; **absolute** keys/hr are community guesses — the *peak* is what to trust. **Action:** a Settings/Utilities paste of `$bonus` + `$wlsz+z!` (rolls/hour + `$bw` penalty are already parsed) after the app-only wishlist. Never auto-send `$bw`.
 

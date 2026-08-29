@@ -42,6 +42,12 @@ _NO_MEGASPHERE_RE = re.compile(
     r"no\s+(?:<:spm:[^>]+>|:spm:)\s+left\s+today",
     re.IGNORECASE,
 )
+# ``$ohu9``: ``(Perk 9) Rolled today: **44**/154``. Anchored on the perk tag so
+# it can never pick up the perk-8 line of the same shape.
+_PERK9_ROLLED_RE = re.compile(
+    r"\(perk\s*9\)\s*rolled today:\s*\*{0,2}(\d+)\*{0,2}\s*/\s*\*{0,2}(\d+)\*{0,2}",
+    re.IGNORECASE,
+)
 _STOCK_RE = re.compile(
     r"stock:\s*\*{0,2}([\d,]+)\*{0,2}\s*(?:<:sp:|:sp:)",
     re.IGNORECASE,
@@ -109,6 +115,19 @@ def parse_perk9_buttons(content: str) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+def parse_perk9_rolled_pool(content: str) -> tuple[int, int] | None:
+    """``(rolled_today, pool)`` from ``$ohu9``'s ``(Perk 9) Rolled today: 44/154``.
+
+    ``pool - rolled`` is the ceiling on perk-9 sphere spawns still to come today.
+    """
+    if not content:
+        return None
+    match = _PERK9_ROLLED_RE.search(content)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
 def parse_megasphere_left(content: str) -> bool | None:
     """``False`` when ``$ohu`` says no megaspheres left today; else ``None``."""
     if not content:
@@ -153,6 +172,15 @@ def is_ohu_response(content: str) -> bool:
     return "$oh left for today" in lower
 
 
+def is_ohu9_response(content: str) -> bool:
+    """True only for ``$ohu9`` — the ``(Perk 9)`` line is what distinguishes it.
+
+    ``$ohu`` / ``$ohu8`` / ``$ohu9`` share the availability header, so matching
+    on that alone would let an ``$ohu8`` reply satisfy an ``$ohu9`` wait.
+    """
+    return bool(content) and _PERK9_ROLLED_RE.search(content) is not None
+
+
 def parse_ohu(content: str) -> ParseResult:
     from mudae.parsers.ohu8 import parse_refill_minutes
 
@@ -169,6 +197,9 @@ def parse_ohu(content: str) -> ParseResult:
     buttons = parse_perk9_buttons(content)
     if buttons is not None:
         fields["perk9_clicked_today"], fields["perk9_click_max"] = buttons
+    rolled = parse_perk9_rolled_pool(content)
+    if rolled is not None:
+        fields["perk9_rolled_today"], fields["perk9_roll_pool"] = rolled
     megasphere_left = parse_megasphere_left(content)
     if megasphere_left is not None:
         fields["megasphere_left"] = megasphere_left

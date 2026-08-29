@@ -144,7 +144,7 @@ def is_rt_use_parse_result(snapshot: MudaeMessageSnapshot, parsed: ParseResult) 
     return is_rt_response(content)
 
 
-from mudae.parsers.ohu import is_ohu_response
+from mudae.parsers.ohu import is_ohu9_response, is_ohu_response
 from mudae.parsers.ohu8 import is_ohu8_response
 
 
@@ -159,6 +159,17 @@ def is_ohu_parse_result(parsed: ParseResult) -> bool:
             return True
     content = parsed.fields.get("content") or parsed.summary or ""
     return is_ohu_response(content) or is_ohu8_response(content)
+
+
+def is_ohu9_parse_result(parsed: ParseResult) -> bool:
+    """Only the ``(Perk 9)`` line proves this is an ``$ohu9`` reply, not ``$ohu8``."""
+    content = parsed.fields.get("content") or parsed.summary or ""
+    if is_ohu9_response(content):
+        return True
+    return (
+        parsed.fields.get("perk9_rolled_today") is not None
+        and parsed.fields.get("perk9_roll_pool") is not None
+    )
 
 
 def is_ohu8_parse_result(parsed: ParseResult) -> bool:
@@ -280,6 +291,24 @@ class DiscordActions:
         result = await self.wait_for(
             lambda snapshot, parsed: is_ohu8_parse_result(parsed)
             or is_ohu8_response(getattr(snapshot, "content", "") or ""),
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
+    async def wait_for_sphere_click(
+        self, *, timeout: float = 10.0
+    ) -> ParseResult | None:
+        """Mudae's confirmation of a sphere button click (``N/M buttons clicked``)."""
+        result = await self.wait_for(
+            lambda _s, parsed: parsed.kind == MessageKind.SPHERE_CLICK,
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
+    async def wait_for_ohu9(self, *, timeout: float = 12.0) -> ParseResult | None:
+        result = await self.wait_for(
+            lambda snapshot, parsed: is_ohu9_parse_result(parsed)
+            or is_ohu9_response(getattr(snapshot, "content", "") or ""),
             timeout=timeout,
         )
         return result[1] if result else None

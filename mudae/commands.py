@@ -112,6 +112,12 @@ def is_ohu8_response(content: str) -> bool:
     return _is_ohu8(content)
 
 
+def is_ohu9_response(content: str) -> bool:
+    from mudae.parsers.ohu import is_ohu9_response as _is_ohu9
+
+    return _is_ohu9(content)
+
+
 def is_ku_response(content: str) -> bool:
     from mudae.parsers.reaction_power import is_ku_response as _is_ku
 

@@ -64,6 +64,20 @@ def _coerce_hhmm(value: Any, default: str) -> str:
     return normalize_hhmm(value, default)
 
 
+def _coerce_float_map(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, float] = {}
+    for key, raw in value.items():
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if number >= 0:
+            out[str(key)] = number
+    return out
+
+
 def _coerce_power_window_hours(value: Any) -> float:
     from macro.perk8_power import clamp_power_window_hours
 
@@ -257,6 +271,13 @@ class SphereReactionRules:
 
     enabled: bool = False
     types_allowed: list[str] = field(default_factory=list)
+    # Budget-aware mode spends the daily perk-9 clicks by expected value instead
+    # of a fixed colour list. Empty maps mean "use the shipped defaults" so the
+    # user only stores colours they have actually re-measured.
+    budget_aware: bool = False
+    sphere_frequency: dict[str, float] = field(default_factory=dict)
+    sphere_values: dict[str, float] = field(default_factory=dict)
+    expected_daily_opportunities: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> SphereReactionRules:
@@ -265,6 +286,12 @@ class SphereReactionRules:
         return cls(
             enabled=bool(data.get("enabled", False)),
             types_allowed=_coerce_str_list(data.get("types_allowed")),
+            budget_aware=bool(data.get("budget_aware", False)),
+            sphere_frequency=_coerce_float_map(data.get("sphere_frequency")),
+            sphere_values=_coerce_float_map(data.get("sphere_values")),
+            expected_daily_opportunities=max(
+                0, _coerce_int_or_none(data.get("expected_daily_opportunities")) or 0
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:

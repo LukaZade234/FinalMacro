@@ -187,6 +187,51 @@ Item {
         ]
     }
 
+    // ---- adaptive perk 9 ---------------------------------------------------
+
+    readonly property var perk9Adaptive: summary.perk9_adaptive || null
+    readonly property bool perk9AdaptiveOn: !!(perk9Adaptive && perk9Adaptive.enabled)
+
+    readonly property var perk9AdaptiveRows: {
+        if (!perk9AdaptiveOn)
+            return []
+        var s = perk9Adaptive
+        var spawns = String(numberOr(s.spawns_seen, 0))
+        if (s.spawns_total)
+            spawns += " / " + s.spawns_total
+        var left = (s.spawns_left === null || s.spawns_left === undefined)
+            ? "unknown" : String(s.spawns_left)
+        var bar = (s.threshold === null || s.threshold === undefined)
+            ? "—" : ("≥ " + s.threshold + " SP")
+        return [
+            { label: "clicks", value: s.clicks_used + " / " + (s.clicks_max || "?"),
+              tone: numberOr(s.clicks_left, 1) === 0 ? "" : "accent" },
+            { label: "spawns seen", value: spawns, tone: "" },
+            { label: "left today", value: left, tone: "" },
+            { label: "EV bar", value: bar, tone: "good" }
+        ]
+    }
+
+    // Sphere-id lists; the shells draw these as artwork, not text.
+    readonly property var perk9Allowed: perk9AdaptiveOn ? (perk9Adaptive.allowed || []) : []
+    readonly property var perk9History: perk9AdaptiveOn ? (perk9Adaptive.history || []) : []
+    readonly property var perk9LooserAdds: perk9AdaptiveOn ? (perk9Adaptive.looser_adds || []) : []
+    readonly property var perk9StricterDrops: perk9AdaptiveOn ? (perk9Adaptive.stricter_drops || []) : []
+
+    readonly property string perk9LooserText: {
+        if (!perk9AdaptiveOn || !perk9Adaptive.looser_at)
+            return ""
+        return "at " + perk9Adaptive.looser_at + " spawns left"
+    }
+    readonly property string perk9StricterText: {
+        if (!perk9AdaptiveOn || !perk9Adaptive.stricter_at)
+            return ""
+        var n = perk9Adaptive.stricter_at
+        return "with " + n + " click" + (n === 1 ? "" : "s") + " left"
+    }
+    readonly property int perk9UnknownClicks: perk9AdaptiveOn
+        ? numberOr(perk9Adaptive.unknown_clicks, 0) : 0
+
     // ---- session haul ------------------------------------------------------
 
     readonly property var session: summary.session || ({})

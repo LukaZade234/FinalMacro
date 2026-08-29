@@ -30,6 +30,7 @@ from macro.perk8_power import (
     snapshot_from_state,
     window_sec_from_rules,
 )
+from macro.perk9_threshold import Perk9ThresholdContext
 from macro.reaction_power import (
     can_afford_reaction,
     display_reaction_power,
@@ -501,6 +502,7 @@ def passes_sphere_reaction(
     state: AccountState,
     *,
     message_id: int | None = None,
+    threshold_ctx: Perk9ThresholdContext | None = None,
 ) -> ReactionDecision:
     """Which sphere buttons (if any) should be clicked on a roll?"""
     del state  # currently unused, kept for symmetry
@@ -528,9 +530,33 @@ def passes_sphere_reaction(
             reason=f"no sphere button matched filter [{','.join(rules.types_allowed)}]"
         )
 
+    budget_ctx = threshold_ctx if rules.budget_aware else None
+    if budget_ctx is not None:
+        # Megasphere is free and never spends a perk-9 slot, so it skips the gate.
+        kept = [
+            b
+            for b in selected
+            if _sphere_emoji(b) in SPHERE_ROLL_FREE_EMOJIS
+            or budget_ctx.should_click(_sphere_emoji(b))
+        ]
+        if not kept:
+            bar = budget_ctx.threshold()
+            return ReactionDecision(
+                reason=(
+                    f"perk9 budget: below EV bar {bar:.0f} "
+                    f"({budget_ctx.clicks_left} clicks / "
+                    f"{budget_ctx.opportunities_left} spawns left)"
+                )
+            )
+        selected = kept
+
     choices = [_make_button_choice(message_id, b) for b in selected]
-    return ReactionDecision(
-        buttons=choices,
-        reason=f"{len(choices)} sphere"
-        + (f" filter [{','.join(rules.types_allowed)}]" if rules.types_allowed else ""),
-    )
+    reason = f"{len(choices)} sphere"
+    if budget_ctx is not None:
+        reason += (
+            f" perk9 EV bar {budget_ctx.threshold():.0f}"
+            f" ({budget_ctx.clicks_left} left)"
+        )
+    elif rules.types_allowed:
+        reason += f" filter [{','.join(rules.types_allowed)}]"
+    return ReactionDecision(buttons=choices, reason=reason)

@@ -600,6 +600,16 @@ Item {
                                     patch("sphere_reaction", "types_allowed", ids)
                                 }
                             }
+
+                            Perk9BudgetPanel {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 6
+                                rules: presetsRoot.rules.sphere_reaction || null
+                                presetId: presetsRoot.editingPresetId
+                                onFieldChanged: function(key, value) {
+                                    presetsRoot.patch("sphere_reaction", key, value)
+                                }
+                            }
                         }
                     }
                 }
