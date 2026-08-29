@@ -471,6 +471,13 @@ def test_power_save_status_hidden_when_toggle_off():
     assert power_save_status(state, rules, now=_FOURTEEN) is None
     rules = KakeraReactionRules(enabled=True, perk_8_budget_mode=False, perk_8_power_save=True)
     assert power_save_status(state, rules, now=_FOURTEEN) is None
+    rules = KakeraReactionRules(
+        enabled=True,
+        perk_8_budget_mode=True,
+        perk_8_priority=False,
+        perk_8_power_save=True,
+    )
+    assert power_save_status(state, rules, now=_FOURTEEN) is None
 
 
 def test_power_save_status_perk8_priority_limits_clicks():

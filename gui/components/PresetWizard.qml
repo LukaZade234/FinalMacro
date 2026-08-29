@@ -27,7 +27,7 @@ Item {
         kakera_reaction: { enabled: false, types_allowed: [], require_chaos_key: false,
                            require_chaos_key_bypass_types: ["kakeraP"],
                            require_perk_8: false, min_spheres: null, low_power: null,
-                           perk_8_budget_mode: false,
+                           perk_8_budget_mode: false, perk_8_priority: true,
                            perk_8_budget_bypass_types: ["kakeraP"],
                            perk_8_types_allowed: [], auto_use_dk: false,
                            perk_8_power_save: true, perk_8_power_window_hours: 4 },

@@ -675,6 +675,7 @@ def test_us_kakera_perk_8_character_uses_base_perk_8_colors():
     rules = cfg.kakera_rules_for_roll(us_roll=True)
     assert rules.types_allowed == ["kakeraP"]
     assert rules.perk_8_types_allowed == ["kakeraT", "kakeraR"]
+    assert rules.perk_8_priority is True
 
     fields = {
         "perk_8": True,
@@ -697,6 +698,20 @@ def test_us_kakera_perk_8_character_uses_base_perk_8_colors():
     decision = passes_kakera_reaction(fields, rules, state)
     assert len(decision.buttons) == 1
     assert decision.buttons[0].emoji == "kakeraT"
+
+
+def test_us_kakera_rules_copy_perk8_priority_off():
+    cfg = MacroConfig(
+        kakera_reaction=KakeraReactionRules(
+            enabled=True,
+            perk_8_budget_mode=True,
+            perk_8_priority=False,
+        ),
+        us_roll_kakera=UsRollKakeraRules(override=True, types_allowed=["kakeraP"]),
+    )
+    rules = cfg.kakera_rules_for_roll(us_roll=True)
+    assert rules.perk_8_priority is False
+    assert rules.perk8_priority_on() is False
 
 
 def test_us_mode_does_not_add_when_power_exhausted():

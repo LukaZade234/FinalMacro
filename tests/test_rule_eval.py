@@ -15,6 +15,7 @@ from macro.rule_eval import (
     passes_character_claim,
     passes_kakera_reaction,
     passes_sphere_reaction,
+    perk8_is_saving,
     slice_kakera_budget_candidates,
 )
 from macro.state import AccountState
@@ -66,6 +67,7 @@ def test_round_trip_preserves_all_blocks():
     assert restored.kakera_reaction.low_power.below_percent == 25
     assert restored.kakera_reaction.low_power.types_allowed == ["kakeraR"]
     assert restored.kakera_reaction.perk_8_budget_mode is True
+    assert restored.kakera_reaction.perk_8_priority is True
     assert restored.kakera_reaction.perk_8_power_save is True
     assert restored.kakera_reaction.perk_8_power_window_hours == 4.0
     assert restored.kakera_reaction.perk_8_budget_bypass_types == ["kakeraP"]
@@ -455,6 +457,49 @@ def test_kakera_perk_8_characters_keep_perk_8_colors_after_quota():
     inactive = AccountState(perk8_priority_mode="inactive", power_percent=100.0)
     decision = passes_kakera_reaction(fields, rules, inactive)
     assert {b.emoji for b in decision.buttons} == {"kakeraW", "kakeraC", "kakeraO"}
+
+
+def test_perk8_priority_off_still_uses_perk8_colors_and_clicks_normal_rolls():
+    rules = KakeraReactionRules(
+        enabled=True,
+        types_allowed=["kakeraW", "kakeraC"],
+        perk_8_types_allowed=["kakeraW", "kakeraC", "kakeraO"],
+        perk_8_budget_mode=True,
+        perk_8_priority=False,
+        perk_8_budget_bypass_types=["kakeraP"],
+    )
+    state = AccountState(
+        perk8_priority_mode="active",
+        perk8_click_max=40,
+        power_percent=100.0,
+    )
+    state.rollover_kakera_budget_if_needed()
+    state.kakera_clicks_today = 1
+    assert perk8_is_saving(state, rules) is False
+
+    perk8 = passes_kakera_reaction(
+        _kakera_fields(_kakera_buttons("kakeraW", "kakeraC", "kakeraO"), perk_8=True),
+        rules,
+        state,
+    )
+    assert {b.emoji for b in perk8.buttons} == {"kakeraW", "kakeraC", "kakeraO"}
+
+    normal = passes_kakera_reaction(
+        _kakera_fields(_kakera_buttons("kakeraW", "kakeraC"), perk_8=False),
+        rules,
+        state,
+    )
+    assert {b.emoji for b in normal.buttons} == {"kakeraW", "kakeraC"}
+    assert "saving perk-8" not in normal.reason
+
+
+def test_perk8_priority_defaults_on_when_omitted_from_preset():
+    rules = KakeraReactionRules.from_dict({"perk_8_budget_mode": True})
+    assert rules.perk_8_priority is True
+    off = KakeraReactionRules.from_dict(
+        {"perk_8_budget_mode": True, "perk_8_priority": False}
+    )
+    assert off.perk_8_priority is False
 
 
 def test_counts_toward_perk8_budget_includes_bypass_on_perk8():

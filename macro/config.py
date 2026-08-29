@@ -139,6 +139,10 @@ class KakeraReactionRules:
     min_spheres: int | None = None
     low_power: LowPowerOverride | None = None
     perk_8_budget_mode: bool = False
+    # When budget mode is on: True = hold normal kakera for perk-8 (current
+    # default). False = perk-8 still uses perk-8 colours, but other rolls
+    # click as they appear.
+    perk_8_priority: bool = True
     # Colours still clicked on *non*-perk-8 rolls while saving the daily 40.
     # They do not count toward the quota on those rolls (purple is free power
     # as well). The same colours on a perk-8 character always count.
@@ -150,6 +154,10 @@ class KakeraReactionRules:
     # Off = old click / $dk rules. On = today-first (unused perk-8 expires at midnight).
     perk_8_power_save: bool = True
     perk_8_power_window_hours: float = 4.0
+
+    def perk8_priority_on(self) -> bool:
+        """True when perk-8 colours are on *and* normal kakera should be held back."""
+        return bool(self.perk_8_budget_mode) and bool(self.perk_8_priority)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> KakeraReactionRules:
@@ -170,6 +178,7 @@ class KakeraReactionRules:
             min_spheres=_coerce_int_or_none(data.get("min_spheres")),
             low_power=low_power,
             perk_8_budget_mode=bool(data.get("perk_8_budget_mode", False)),
+            perk_8_priority=bool(data.get("perk_8_priority", True)),
             perk_8_budget_bypass_types=_coerce_str_list(
                 data.get("perk_8_budget_bypass_types", ["kakeraP"])
             ),
@@ -191,6 +200,7 @@ class KakeraReactionRules:
             "min_spheres": self.min_spheres,
             "low_power": self.low_power.to_dict() if self.low_power else None,
             "perk_8_budget_mode": self.perk_8_budget_mode,
+            "perk_8_priority": self.perk_8_priority,
             "perk_8_budget_bypass_types": list(self.perk_8_budget_bypass_types),
             "perk_8_types_allowed": list(self.perk_8_types_allowed),
             "auto_use_dk": self.auto_use_dk,
@@ -339,6 +349,7 @@ class MacroConfig:
                 min_spheres=base.min_spheres,
                 low_power=None,
                 perk_8_budget_mode=base.perk_8_budget_mode,
+                perk_8_priority=base.perk_8_priority,
                 perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
                 perk_8_types_allowed=list(base.perk_8_types_allowed),
                 auto_use_dk=base.auto_use_dk,
@@ -354,6 +365,7 @@ class MacroConfig:
             min_spheres=base.min_spheres,
             low_power=base.low_power,
             perk_8_budget_mode=base.perk_8_budget_mode,
+            perk_8_priority=base.perk_8_priority,
             perk_8_budget_bypass_types=list(base.perk_8_budget_bypass_types),
             perk_8_types_allowed=list(base.perk_8_types_allowed),
             auto_use_dk=base.auto_use_dk,

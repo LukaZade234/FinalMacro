@@ -328,9 +328,11 @@ def dk_allowed_for_click(
 
 
 def power_save_enabled(rules: Any) -> bool:
-    return bool(getattr(rules, "perk_8_budget_mode", False)) and bool(
-        getattr(rules, "perk_8_power_save", False)
-    )
+    if not bool(getattr(rules, "perk_8_budget_mode", False)):
+        return False
+    if not bool(getattr(rules, "perk_8_priority", True)):
+        return False
+    return bool(getattr(rules, "perk_8_power_save", False))
 
 
 def window_sec_from_rules(rules: Any) -> float:

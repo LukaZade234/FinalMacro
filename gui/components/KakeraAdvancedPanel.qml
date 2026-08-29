@@ -108,7 +108,7 @@ ColumnLayout {
 
             Label {
                 Layout.fillWidth: true
-                text: "Save daily clicks for perk-8 rolls. Other rolls use the main color filter once the budget is used up."
+                text: "Perk-8 characters can use their own kakera colors. Optionally hold other kakera until the daily 40 are used."
                 color: Theme.fgMuted
                 font.pixelSize: 10
                 wrapMode: Text.WordWrap
@@ -116,7 +116,7 @@ ColumnLayout {
 
             ThemedCheckBox {
                 Layout.fillWidth: true
-                text: "Save daily clicks for perk-8 rolls, then click equally"
+                text: "Separate kakera colors on perk-8 characters"
                 checked: rules.kakera_reaction ? !!rules.kakera_reaction.perk_8_budget_mode : false
                 onToggled: onPatch("kakera_reaction", "perk_8_budget_mode", checked)
             }
@@ -134,9 +134,31 @@ ColumnLayout {
                 }
             }
 
+            ThemedCheckBox {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                text: "Prioritize perk-8 (skip other kakera until the 40 are used)"
+                checked: rules.kakera_reaction
+                    ? rules.kakera_reaction.perk_8_priority !== false
+                    : true
+                onToggled: onPatch("kakera_reaction", "perk_8_priority", checked)
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                text: rules.kakera_reaction && rules.kakera_reaction.perk_8_priority === false
+                    ? "Off: perk-8 rolls still use the perk-8 colors (orange, dark, …). Other rolls use the main colors as they appear — first come, first clicked."
+                    : "On: hold paid kakera on normal rolls so the daily 40 can go to perk-8 characters first. After 40/40, everyone uses equal clicking."
+                color: Theme.fgMuted
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+
             ColorChipPicker {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_priority !== false
                 title: "Also click on non-perk-8 while saving (not counted toward 40)"
                 options: kakeraOptions
                 selected: rules.kakera_reaction
@@ -150,6 +172,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_priority !== false
                 text: "Purple is always free. Red/rainbow (or any other colour here) still cost power on a normal character, but do not use the daily 40. On a perk-8 character those colours follow the perk-8 list and always count."
                 color: Theme.fgMuted
                 font.pixelSize: 10
@@ -159,6 +182,7 @@ ColumnLayout {
             ThemedCheckBox {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_priority !== false
                 text: "Smart power and $dk saving"
                 checked: rules.kakera_reaction
                     ? rules.kakera_reaction.perk_8_power_save !== false
@@ -169,6 +193,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_priority !== false
                 text: "Off keeps the old click and $dk rules. On keeps a full perk-8 dump payable in the first N hours after UTC midnight (the daily reset). Today's leftover clicks still expire at midnight, so they always get power and $dk first. After 40/40, normal kakera still click; $dk on those only if a new use is back by midnight. Purple stays free."
                 color: Theme.fgMuted
                 font.pixelSize: 10
@@ -178,6 +203,7 @@ ColumnLayout {
             RowLayout {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_priority !== false
                     && rules.kakera_reaction.perk_8_power_save !== false
                 Label {
                     text: "Hours after daily reset"
@@ -198,6 +224,7 @@ ColumnLayout {
             Label {
                 Layout.fillWidth: true
                 visible: rules.kakera_reaction && !!rules.kakera_reaction.perk_8_budget_mode
+                    && rules.kakera_reaction.perk_8_priority !== false
                     && rules.kakera_reaction.perk_8_power_save !== false
                 text: "How long after midnight a 40-click perk-8 dump should still be payable. Not a stop time — slow perk-8 keeps rolling until 40/40 or reset."
                 color: Theme.fgMuted

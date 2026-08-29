@@ -370,11 +370,10 @@ def perk8_mode_from_state(state: AccountState) -> Perk8PriorityMode:
 def perk8_is_saving(state: AccountState, rules: KakeraReactionRules) -> bool:
     """True while budget mode should hoard clicks for perk-8 characters.
 
-    Red/rainbow bypass clicks on perk-8 still consume Mudae's daily quota, so
-    remaining 0 (or mode ``done``) must unblock non-perk-8 rolls. Perk-8
-    characters keep the perk-8 colour list either way.
+    Off when ``perk_8_priority`` is False: perk-8 characters still use the
+    perk-8 colour list, but other rolls click as they appear.
     """
-    if not rules.perk_8_budget_mode:
+    if not rules.perk8_priority_on():
         return False
     if not perk8_budget_applies(perk8_mode_from_state(state)):
         return False

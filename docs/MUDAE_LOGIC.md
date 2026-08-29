@@ -151,10 +151,12 @@ Preset fields live on `KakeraReactionRules`.
    (default purple) may click.
 7. Affordability (bar vs cost). Mudae's "can't react for N min" still wins
    if the tracker is wrong.
-8. **Saving window** (`perk8_is_saving`): mode is `active` and local count
+8. **Saving window** (`perk8_is_saving`): only when **Prioritize perk-8**
+   is on (`perk_8_priority`, default on), mode is `active`, and local count
    is under the `$ohu8` cap. Non-perk-8 rolls keep only **bypass** colours
    (`perk_8_budget_bypass_types`, default purple). Perk-8 rolls keep the
-   perk-8 list.
+   perk-8 list. With priority **off**, perk-8 characters still use the
+   perk-8 colours, but other rolls use the main filter as they appear.
 9. Optional smart power / `$dk` reserve on paid *non*-perk-8 clicks.
 10. Remaining-quota slice: at most N clicks that **count toward the 40**.
     Purple never counts. Bypass colours on a **non**-perk-8 roll do not
@@ -321,13 +323,15 @@ chat `+N`, which includes bonuses. `$oq` hunt uses MIXED (`P(purple)+0.1×Gini`)
 Perk 8 marks some characters and grants a **daily kakera-click budget**
 (40 clicks, `$ohu8`). The flag is consumed after the first roll of the day,
 so leftover clicks expire at **UTC midnight**. The macro can enter **budget
-mode**: spend those clicks on perk-8 characters first. Bypass colours
-(default purple; often also red/rainbow) still click on everyone else
-without using the 40; on a perk-8 character they **do** use a slot.
-Purple is free power on every roll. Once the 40 are used or the roll pool
-is under 10, treat non-perk-8 characters equally with the main colour
-list; perk-8 characters keep the perk-8 colour list. Full click-order
-rules: [Kakera reaction rules](#kakera-reaction-rules).
+mode**: spend those clicks on perk-8 characters first (**Prioritize perk-8**,
+`perk_8_priority`, default on). Bypass colours (default purple; often also
+red/rainbow) still click on everyone else without using the 40; on a perk-8
+character they **do** use a slot. Purple is free power on every roll. Once
+the 40 are used or the roll pool is under 10, treat non-perk-8 characters
+equally with the main colour list; perk-8 characters keep the perk-8 colour
+list. With priority **off**, perk-8 colours still apply but other rolls are
+not skipped. Full click-order rules:
+[Kakera reaction rules](#kakera-reaction-rules).
 
 **Power / `$dk` reserve** (`macro/perk8_power.py`) is optional on the perk-8
 budget panel. Off keeps the old click and `$dk` rules. On keeps enough bar
