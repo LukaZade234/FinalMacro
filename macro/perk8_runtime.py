@@ -34,6 +34,9 @@ from macro.roll_scheduler import seconds_until_perk8_refill
 # Pause after sending ``$ohu8`` before polling for the reply.
 OHU8_SETTLE_SEC = 2.0
 OHU8_RESPONSE_TIMEOUT_SEC = 12.0
+# Confirmed clicks ``$ohu8`` may not have included yet. Larger gaps are stale
+# persist (yesterday's 40/40) and must rewind to Mudae's number.
+OHU8_CLICK_LAG_MAX = 2
 
 
 class Perk8Action(str, Enum):
@@ -94,6 +97,22 @@ def opportunistic_decision(
     if commands_blocked:
         return Perk8Action.DEFER
     return Perk8Action.QUERY
+
+
+def merge_kakera_click_count(*, live: int, reported: int) -> int:
+    """Combine a live tracker with a ``$ohu8`` (or cached) count.
+
+    Catch up when Mudae is ahead. Keep the live count when it is only one or
+    two clicks ahead (a click that has not shown up on ``$ohu8`` yet). Rewind
+    when the live count is far ahead — that is a stale 40/40, not lag.
+    """
+    live_n = max(0, int(live))
+    reported_n = max(0, int(reported))
+    if reported_n >= live_n:
+        return reported_n
+    if live_n - reported_n <= OHU8_CLICK_LAG_MAX:
+        return live_n
+    return reported_n
 
 
 class Perk8Runtime:
@@ -170,10 +189,9 @@ class Perk8Runtime:
             state.perk8_click_max = record.last_click_max
         if record.last_clicked is not None:
             state.rollover_kakera_budget_if_needed()
-            # Never rewind a live count if ``$ohu8`` is behind; catch up when it
-            # is ahead (local 38, Mudae 40).
-            state.kakera_clicks_today = max(
-                int(state.kakera_clicks_today), int(record.last_clicked)
+            state.kakera_clicks_today = merge_kakera_click_count(
+                live=int(state.kakera_clicks_today),
+                reported=int(record.last_clicked),
             )
             state.clamp_kakera_clicks_to_perk8_cap()
         cap = state.perk8_click_max

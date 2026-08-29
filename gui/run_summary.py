@@ -123,8 +123,6 @@ def build_run_summary(
     perk8_used = int(getattr(state, "kakera_clicks_today", 0) or 0)
     if perk8_cap is not None and perk8_cap > 0:
         perk8_used = min(perk8_used, perk8_cap)
-        if str(getattr(state, "perk8_priority_mode", "") or "") == "done":
-            perk8_used = perk8_cap
     elapsed = int((now - session_started_at).total_seconds()) if session_started_at else 0
     sphere_sp = _sum_amounts(sphere_events, since=session_started_at)
 

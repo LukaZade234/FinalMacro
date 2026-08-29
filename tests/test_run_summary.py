@@ -54,6 +54,22 @@ def test_run_summary_caps_perk8_used_at_daily_max(monkeypatch):
     assert summary["power_save"] is None
 
 
+def test_run_summary_does_not_paint_40_when_mode_done_but_count_is_lower(monkeypatch):
+    monkeypatch.setattr("mudae.kakera_log.get_kakera_events", lambda: [])
+    monkeypatch.setattr("mudae.key_log.get_key_events", lambda: [])
+    monkeypatch.setattr("mudae.sphere_log.get_sphere_events", lambda: [])
+    state = SimpleNamespace(
+        activity_log=[],
+        kakera_clicks_today=8,
+        perk8_click_max=40,
+        perk8_priority_mode="done",
+        perk9_clicks_today=0,
+        perk9_click_max=20,
+    )
+    summary = build_run_summary(state, session_started_at=None)
+    assert summary["today"]["perk8_used"] == 8
+
+
 def test_run_summary_includes_power_save_when_enabled(monkeypatch):
     monkeypatch.setattr("mudae.kakera_log.get_kakera_events", lambda: [])
     monkeypatch.setattr("mudae.key_log.get_key_events", lambda: [])

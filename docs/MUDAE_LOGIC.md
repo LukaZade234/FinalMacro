@@ -171,9 +171,12 @@ colour list (equal clicking); perk-8 characters **keep** the perk-8 list
 **`$ohu8` timing:** sent at session start and when the daily refill is due.
 Saving is off (`inactive`) until that reply sets `active` / `done`. That
 is intentional — the first `$ohu8` of the day is what starts the holdback.
-After **any wait timeout on a perk-8 click** (first attempt or retry,
-success or fail), send `$ohu8` again so a landed-but-unseen click cannot
-desync the 40. Non-perk-8 timeouts do not.
+A live `$ohu8` count **overwrites** a stale Run-tab 40/40 (persist from a
+spent day or a false catch-up). The local counter is kept only when it is
+1–2 clicks ahead of Mudae (a click that has not landed in the `$ohu8`
+text yet). After **any wait timeout on a perk-8 click** (first attempt or
+retry, success or fail), send `$ohu8` again so a landed-but-unseen click
+cannot desync the 40. Non-perk-8 timeouts do not.
 
 **`$us`:** optional narrower `types_allowed` for non-perk-8 `$us` rolls.
 Perk-8 characters still use the Reactions perk-8 list. "Don't claim kakera

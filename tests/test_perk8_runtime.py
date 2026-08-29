@@ -18,6 +18,7 @@ from macro.perk8_runtime import (
     Perk8Action,
     Perk8Runtime,
     gate_before_load,
+    merge_kakera_click_count,
     opportunistic_decision,
     query_decision,
 )
@@ -333,6 +334,42 @@ def test_apply_mode_does_not_rewind_live_click_count():
 
     assert ctx.state.kakera_clicks_today == 38
     assert ctx.state.perk8_priority_mode == Perk8PriorityMode.ACTIVE.value
+
+
+def test_apply_mode_rewinds_stale_40_when_ohu8_is_far_behind():
+    runtime, ctx, _actions, _logs, _store = _make_runtime()
+    ctx.state.rollover_kakera_budget_if_needed()
+    ctx.state.kakera_clicks_today = 40
+    ctx.state.perk8_click_max = 40
+    record = Perk8DailyRecord(last_clicked=8, last_click_max=40)
+
+    runtime.apply_mode(Perk8PriorityMode.ACTIVE, record)
+
+    assert ctx.state.kakera_clicks_today == 8
+    assert ctx.state.perk8_priority_mode == Perk8PriorityMode.ACTIVE.value
+
+
+def test_merge_kakera_click_count_lag_vs_stale():
+    assert merge_kakera_click_count(live=38, reported=40) == 40
+    assert merge_kakera_click_count(live=38, reported=36) == 38
+    assert merge_kakera_click_count(live=40, reported=8) == 8
+    assert merge_kakera_click_count(live=0, reported=8) == 8
+
+
+def test_refresh_rewinds_stale_40_when_ohu8_says_8():
+    runtime, ctx, actions, _logs, store = _make_runtime(reply=_ohu8(8, 40))
+    ctx.state.perk8_priority_mode = Perk8PriorityMode.DONE.value
+    ctx.state.perk8_click_max = 40
+    ctx.state.rollover_kakera_budget_if_needed()
+    ctx.state.kakera_clicks_today = 40
+
+    action = asyncio.run(runtime.refresh(at_startup=True))
+
+    assert action is Perk8Action.QUERY
+    assert actions.sent == ["ohu8"]
+    assert ctx.state.kakera_clicks_today == 8
+    assert ctx.state.perk8_priority_mode == Perk8PriorityMode.ACTIVE.value
+    assert store["value"][PERK8_DAILY_KEY]["last_clicked"] == 8
 
 
 def test_apply_mode_catches_up_and_marks_done_when_ohu8_ahead():
