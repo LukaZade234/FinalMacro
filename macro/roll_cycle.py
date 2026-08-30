@@ -43,6 +43,7 @@ from macro.us_stop import (
     _minimum_kakera_cost,
 )
 from mudae.discord_errors import is_fatal_runtime_error
+from mudae.macro_activity import enter_macro_activity, exit_macro_activity
 from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
 from macro.kakera_reactor import KakeraReactor
 from macro.chaos_followup import chaos_extra_rolls, merge_tu_hourly_rolls
@@ -82,6 +83,13 @@ _PERK6_SPAWN_POLL_SEC = 0.25
 _PERK6_POST_SETTLE_SEC = 1.2  # pause after spawn reactions before next roll
 _US_ADD_SETTLE_SEC = 1.0  # pause after $us N before the first $wa
 
+# How long the hourly loop yields to a manually started minigame before giving
+# up on the pass. A full $oh/$oc/$oq board is well under a minute, so anything
+# past this is a stuck game, not a slow one — and the rolls reset only every
+# hour, so waiting a little costs nothing.
+MINIGAME_OVERLAP_MAX_SEC = 180.0
+MINIGAME_OVERLAP_POLL_SEC = 1.0
+
 
 @dataclass
 class _RollOutcome:
@@ -114,6 +122,7 @@ class RollCycleEngine:
         priority_wake_hint: Callable[[], float | None] | None = None,
         play_daily_minigames: Callable[[], Awaitable[None]] | None = None,
         notification_connection_held: Callable[[], bool] | None = None,
+        minigames_busy: Callable[[], bool] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -126,6 +135,7 @@ class RollCycleEngine:
         self._priority_wake_hint = priority_wake_hint
         self._play_daily_minigames = play_daily_minigames
         self._notification_connection_held = notification_connection_held
+        self._minigames_busy = minigames_busy
         self._daily_get = daily_resets_get
         self._daily_save = daily_resets_save
         self._channel_settings: dict[str, Any] = {}
@@ -396,12 +406,44 @@ class RollCycleEngine:
         if asyncio.iscoroutine(result):
             await result
 
+    async def _wait_for_minigame_to_finish(self, label: str) -> bool:
+        """Block while a manually started minigame is mid-board.
+
+        The GUI lets the user play ``$oh`` / ``$oc`` / ``$oq`` by hand while the
+        hourly loop sits in its refill wait, so the loop must not come out of
+        that wait straight into a ``$tu`` — the minigame is clicking buttons and
+        waiting on grid edits, and an interleaved command corrupts both sides.
+
+        Returns False when Stop was requested or the minigame outlasted
+        ``MINIGAME_OVERLAP_MAX_SEC``; the caller then abandons this pass rather
+        than sending into the collision.
+        """
+        cb = self._minigames_busy
+        if cb is None or not cb():
+            return True
+        self._log(f"{label}: minigame in progress — waiting for it to finish")
+        waited = 0.0
+        while cb():
+            if self._stop.is_set():
+                return False
+            if waited >= MINIGAME_OVERLAP_MAX_SEC:
+                self._log(
+                    f"{label}: minigame still running after "
+                    f"{int(MINIGAME_OVERLAP_MAX_SEC)}s — skipping this pass"
+                )
+                return False
+            await self._ctx.sleep(MINIGAME_OVERLAP_POLL_SEC)
+            waited += MINIGAME_OVERLAP_POLL_SEC
+        return not self._stop.is_set()
+
     async def _on_scheduled_wake(self) -> None:
         """Run $p/$daily, perk-8, and daily minigames when a wait is interrupted.
 
         Notification mode drops the gateway during the hourly wait, so reconnect
         first. After the work, disconnect again if we are still waiting for rolls.
         """
+        if not await self._wait_for_minigame_to_finish("Scheduled work"):
+            return
         if not await self._restore_connection_for_notifications():
             self._log("Notification mode: reconnect failed — deferring scheduled work")
             return
@@ -598,8 +640,24 @@ class RollCycleEngine:
         self._notify()
         return True
 
+    def _minigame_start_blocked(self, label: str) -> bool:
+        """Refuse to start a roll session on top of a running minigame.
+
+        The GUI checks this too, but it checks on the Qt thread and then hands
+        the start to the event loop — so a Start clicked in the same instant as
+        a Play button passes both checks. This is the one place that sees the
+        final answer, immediately before the task is created.
+        """
+        cb = self._minigames_busy
+        if cb is None or not cb():
+            return False
+        self._log(f"{label}: not starting — a minigame is still running")
+        return True
+
     def start(self, *, session_meta: dict[str, Any] | None = None) -> None:
         if self.is_running:
+            return
+        if self._minigame_start_blocked("hourly macro"):
             return
         if session_meta:
             self.begin_session("hourly", session_meta)
@@ -614,6 +672,8 @@ class RollCycleEngine:
     ) -> None:
         if self.is_running:
             return
+        if self._minigame_start_blocked("$us mode"):
+            return
         if session_meta:
             self.begin_session("us", session_meta)
         self._us_stop = us_stop or us_stop_from_config(self._config)
@@ -627,7 +687,7 @@ class RollCycleEngine:
     async def _run_cycle(self) -> None:
         session_reason = "finished"
         try:
-            self._monitor.macro_active = True
+            enter_macro_activity(self._monitor)
             self._actions.drain_queue()
             self._reset_roll_stop_tracker()
 
@@ -741,7 +801,7 @@ class RollCycleEngine:
                 session_reason = "stopped"
             self._save_runtime_state()
             self._finish_session(session_reason)
-            self._monitor.macro_active = False
+            exit_macro_activity(self._monitor)
             self._state.phase = MacroPhase.IDLE
             self._notify()
             self._task = None
@@ -1410,7 +1470,7 @@ class RollCycleEngine:
         """
         session_reason = "finished"
         try:
-            self._monitor.macro_active = True
+            enter_macro_activity(self._monitor)
             self._actions.drain_queue()
             self._reset_roll_stop_tracker()
             cmd = self._config.normalized_roll_command()
@@ -1801,7 +1861,7 @@ class RollCycleEngine:
                 session_reason = "stopped"
             self._save_runtime_state()
             self._finish_session(session_reason)
-            self._monitor.macro_active = False
+            exit_macro_activity(self._monitor)
             self._state.phase = MacroPhase.IDLE
             self._notify()
             self._task = None
@@ -2020,6 +2080,9 @@ class RollCycleEngine:
             finally:
                 self._waiting_for_hourly_refill = False
             if not woke:
+                return False
+
+            if not await self._wait_for_minigame_to_finish("Hourly refill"):
                 return False
 
             if not await self._restore_connection_for_notifications():

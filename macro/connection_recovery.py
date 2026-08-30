@@ -83,11 +83,11 @@ class ConnectionRecovery:
             if not await self.release_for_notifications():
                 return False
             return await self.restore_for_notifications()
-        was_active = bool(getattr(ctx.monitor, "macro_active", False))
-        ok = await _resolve(reconnect())
-        if ok and was_active:
-            ctx.monitor.macro_active = True
-        return ok
+        # ``macro_active`` is not touched here. It belongs to whoever is running
+        # (see ``mudae.macro_activity``) and survives a gateway restart; the
+        # monitor no longer clears it, so restoring it from here would only
+        # paper over a hole that is closed at the source.
+        return await _resolve(reconnect())
 
     async def recover_transient(
         self,

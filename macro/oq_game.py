@@ -13,6 +13,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from mudae.macro_activity import enter_macro_activity, exit_macro_activity
 from macro.minigame_util import (
     empty_minigame_result,
     log_minigame_exhausted,
@@ -123,8 +124,7 @@ class OqSphereGame:
         self._paid_clicks = 0
 
     async def play(self, *, prefix: str = "$", uses: int = 1) -> dict[str, Any]:
-        previously_active = getattr(self._monitor, "macro_active", False)
-        self._monitor.macro_active = True
+        enter_macro_activity(self._monitor)
         paid_clicks = 0
         try:
             self._actions.drain_queue()
@@ -285,7 +285,7 @@ class OqSphereGame:
                 "session": session,
             }
         finally:
-            self._monitor.macro_active = previously_active
+            exit_macro_activity(self._monitor)
 
     def _sync_observations(
         self,

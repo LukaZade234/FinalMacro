@@ -32,6 +32,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from mudae.macro_activity import enter_macro_activity, exit_macro_activity
 from mudae.constants import (
     SPHERE_EMOJI_NAME_PATTERN,
     SPHERE_FREE_EMOJIS,
@@ -705,8 +706,7 @@ class OhSphereGame:
         self._reward_content = ""
 
     async def play(self, *, prefix: str = "$", uses: int = 1) -> dict[str, Any]:
-        previously_active = getattr(self._monitor, "macro_active", False)
-        self._monitor.macro_active = True
+        enter_macro_activity(self._monitor)
         clicks_spent = 0
         free_clicks = 0
         try:
@@ -900,7 +900,7 @@ class OhSphereGame:
                 "session": session,
             }
         finally:
-            self._monitor.macro_active = previously_active
+            exit_macro_activity(self._monitor)
 
     async def _wait_for_grid(self) -> tuple[Any | None, dict[str, Any] | None]:
         return await wait_for_grid_or_exhausted(

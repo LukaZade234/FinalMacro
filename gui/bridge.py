@@ -2627,6 +2627,7 @@ class AppBridge(QObject):
             ),
             play_daily_minigames=self._play_daily_minigames_from_engine,
             notification_connection_held=self._minigames_busy,
+            minigames_busy=self._minigames_busy,
         )
         if channel_settings is not None:
             self._engine.update_run_target(

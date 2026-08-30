@@ -136,7 +136,6 @@ class ChannelMonitor:
 
     async def force_reconnect(self) -> bool:
         """Close the gateway (if any) and open a fresh Discord connection."""
-        was_active = self.macro_active
         self._emit_status("Reconnecting to Discord…")
         try:
             await self.stop_background()
@@ -144,8 +143,6 @@ class ChannelMonitor:
             pass
         self._clear_channel_state()
         ready = await self.start_background()
-        if was_active:
-            self.macro_active = True
         if ready:
             self._emit_status("Reconnected")
         else:
@@ -154,17 +151,14 @@ class ChannelMonitor:
 
     async def switch_channel(self, channel_id: int) -> bool:
         """Point the monitor at another channel without dropping the gateway."""
-        was_active = self.macro_active
         self.channel_id = int(channel_id)
         self._clear_channel_state()
-        self.macro_active = was_active
         if self.is_connected:
             await self._emit_channel_status("Switched")
         return True
 
     async def reconnect(self, *, channel_id: int | None = None) -> bool:
         """Restart the gateway — used when the account token changes."""
-        was_active = self.macro_active
         if channel_id is not None:
             self.channel_id = int(channel_id)
         self._clear_channel_state()
@@ -173,8 +167,6 @@ class ChannelMonitor:
         except Exception:
             pass
         ready = await self.start_background()
-        if was_active:
-            self.macro_active = True
         if ready:
             await self._emit_channel_status("Reconnected")
         else:
@@ -182,7 +174,15 @@ class ChannelMonitor:
         return ready
 
     def _clear_channel_state(self) -> None:
-        """Drop cached messages and in-flight waits for the previous channel."""
+        """Drop cached messages and in-flight waits for the previous channel.
+
+        ``macro_active`` is deliberately left alone: it belongs to whoever is
+        *running* (see :mod:`mudae.macro_activity`), not to the gateway. It
+        used to be cleared here and restored by each caller afterwards, which
+        left it false for the whole reconnect — up to 30s of an overnight run
+        during which Mudae's replies to our own commands were attributed to
+        whatever the user last typed by hand.
+        """
         self._messages.clear()
         for future in self._tick_waiters.values():
             if not future.done():
@@ -191,7 +191,6 @@ class ChannelMonitor:
         self._pending_macro_command = None
         self._commands = CommandContextTracker()
         self._claims = ClaimContextTracker()
-        self.macro_active = False
 
     async def _resolve_channel_label(self) -> str:
         if not self._client:

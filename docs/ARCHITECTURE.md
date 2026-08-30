@@ -123,6 +123,7 @@ changes.
 | `minigame_log.py` / `chaos_capture.py` | Separate files: `data/minigame_log.json`, `data/chaos_log.json` |
 | `settings_catalog.py` / `settings_commands.py` / `settings_preset.py` | GUI settings templates |
 | `command_ack.py` / `command_context.py` / `claim_context.py` | Match replies to the command we just sent |
+| `macro_activity.py` | Owner **depth count** behind `ChannelMonitor.macro_active`. The roll cycle and each minigame overlap (a manual `$oh` is allowed during the hourly refill wait), so the flag cannot be saved and restored per owner — it is true while any owner holds it. The gateway does not own it: reconnecting leaves it alone. |
 
 ### `tests/`
 
