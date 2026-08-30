@@ -60,17 +60,44 @@ from macro.minigame_board import (
 )
 
 
+# $oh picks between revealed spheres by what they actually pay, not by the
+# ordinal SPHERE_VALUE_RANK. That rank orders spD(5) < spL(6) < spO(7), but
+# dark pays ~104 SP against orange's 90 and light's 76, so ranking made the
+# greedy take a revealed orange over a revealed dark. Dark and light have no
+# SPHERE_BASE_SP entry (they transform on click); these are their measured
+# means over the logged games. SPHERE_VALUE_RANK is shared with $oc/$oq and
+# is deliberately left alone.
+_OH_CLICK_VALUE: dict[str, float] = {
+    "spB": 10.0,
+    "spT": 20.0,
+    "spG": 35.0,
+    "spY": 55.0,
+    "spL": 76.0,
+    "spO": 90.0,
+    "spD": 104.0,
+    "spR": 150.0,
+    "sp": 150.0,
+    "spW": 500.0,
+    "spP": 5.0,
+}
+
+
+def oh_click_value(emoji: str) -> float:
+    """SP a revealed sphere pays if clicked now (dark/light at their means)."""
+    return _OH_CLICK_VALUE.get(canonical_sphere_emoji(emoji), 0.0)
+
+
 def sphere_value_rank(emoji: str) -> int:
     """Paid-click value for a revealed sphere emoji (higher = click first)."""
     return SPHERE_VALUE_RANK.get(canonical_sphere_emoji(emoji), 0)
 
 
-def _button_sort_key(buttons: list[dict[str, Any]], button: dict[str, Any]) -> tuple[int, int]:
-    rank = sphere_value_rank(_emoji(button))
+def _button_sort_key(buttons: list[dict[str, Any]], button: dict[str, Any]) -> tuple[float, int]:
+    value = oh_click_value(_emoji(button))
     for index, candidate in enumerate(buttons):
         if candidate.get("custom_id") == button.get("custom_id"):
-            return rank, -index
-    return rank, 0
+            return value, -index
+    return value, 0
 
 # "You can click **5** times on the buttons below ..."
 _CLICKS_ALLOWED_RE = re.compile(r"click\s*\*{0,2}(\d+)\*{0,2}\s*times", re.IGNORECASE)

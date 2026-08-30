@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 from collections import deque
-from pathlib import Path
 from types import SimpleNamespace
 
 from macro.sphere_game import (
@@ -29,7 +27,6 @@ from macro.sphere_game import (
     wait_for_minigame_click_ack,
 )
 
-_FIXTURE = Path(__file__).resolve().parent.parent / "data" / "oh_log.json"
 _GRID_TEXT = (
     "You can click **5** times on the buttons below (for 2 minutes. Only you can click).\n"
     "Spheres buttons have different values depending on their color, like kakera."
@@ -428,16 +425,54 @@ def test_choose_returns_none_when_all_disabled():
     assert choose_oh_click(buttons) is None
 
 
-def test_choose_on_real_initial_grid_picks_yellow():
-    data = json.loads(_FIXTURE.read_text(encoding="utf-8"))
-    grid_entry = next(
-        e for e in data["entries"] if "buttons below" in (e.get("rawContent") or "").lower()
-    )
-    buttons = json.loads(grid_entry["rawButtons"])
+# Real opening grids, taken verbatim from logged $oh games (the
+# `initial_board` of rows in the minigame log). This replaced a fixture that
+# read data/oh_log.json — a Parse Lab capture that was never committed and is
+# not in git history, so the test had been failing rather than checking
+# anything. These boards exercise the same behaviour without a missing file.
+_REAL_OPENING_LIGHT_OVER_YELLOW = {
+    0: "spB", 6: "spB", 7: "spL", 13: "spT", 17: "spY", 21: "spB", 23: "spG",
+}
+_REAL_OPENING_PURPLE_AND_DARK = {4: "spP", 7: "spB", 9: "spD", 24: "spB"}
+
+
+def _grid_from(revealed: dict[int, str]) -> list[dict]:
+    return [_btn(i, revealed.get(i, "spU")) for i in range(25)]
+
+
+def test_choose_on_real_initial_grid_takes_the_highest_paying_sphere():
+    buttons = _grid_from(_REAL_OPENING_LIGHT_OVER_YELLOW)
     choice = choose_oh_click(buttons, rng=random.Random(1))
     assert choice is not None
-    # The only revealed value spheres in the opening grid are the two yellows.
-    assert choice["emoji"] == "spY"
+    # Light (76) outranks yellow (55) and green (35); blue/teal are skipped.
+    assert choice["emoji"] == "spL"
+
+
+def test_choose_on_real_initial_grid_prefers_free_purple():
+    buttons = _grid_from(_REAL_OPENING_PURPLE_AND_DARK)
+    choice = choose_oh_click(buttons, rng=random.Random(1))
+    assert choice is not None
+    # Purple costs no click, so it always goes first even beside a dark.
+    assert choice["emoji"] == "spP"
+
+
+def test_choose_prefers_dark_over_orange():
+    """Dark pays ~104 SP, orange 90 — the ordinal rank had this backwards.
+
+    `SPHERE_VALUE_RANK` orders spD(5) < spO(7), so the greedy used to take
+    the orange. $oh now ranks by what a sphere actually pays.
+    """
+    buttons = _grid_from({3: "spO", 11: "spD"})
+    choice = choose_oh_click(buttons, rng=random.Random(1))
+    assert choice is not None
+    assert choice["emoji"] == "spD"
+
+
+def test_choose_still_prefers_orange_over_light():
+    buttons = _grid_from({3: "spO", 11: "spL"})
+    choice = choose_oh_click(buttons, rng=random.Random(1))
+    assert choice is not None
+    assert choice["emoji"] == "spO"
 
 
 class _FakeActions:

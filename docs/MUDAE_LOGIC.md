@@ -1,7 +1,7 @@
 # Mudae logic
 
 How Mudae works, and how FinalMacro uses each mechanic. Code locations are
-pointers only — the file map lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+pointers only — the file map lives in `[ARCHITECTURE.md](ARCHITECTURE.md)`.
 
 Source of truth for button names and ranks is `mudae/constants.py` (and
 `gui/SphereAssets.qml` for artwork). If this doc and those files disagree,
@@ -26,6 +26,8 @@ the usual `$` prefix; servers can change it with `$prefix`.
 
 ---
 
+
+
 ## Rolls
 
 A roll command (`$wa`, `$ha`, `$wg`, `$hg`, `$ma`, …) asks Mudae to spawn a
@@ -42,22 +44,26 @@ until the pool is empty or a stop rule fires. Delay between rolls is at least
 
 ---
 
+
+
 ## `$tu` — the status snapshot
 
 `$tu` is the account's current state on that server. The parser in
 `mudae/parsers/tu.py` pulls:
 
-| Field | Meaning |
-|-------|---------|
-| Claim available / cooldown | Whether you can marry right now |
-| Next claim reset | Minutes until the claim slot refills |
-| Rolls left | Hourly pool, plus optional `+$us` / `+$mk` bonus |
-| Next rolls reset | Minutes until the hourly pool refills |
-| Reaction power % | Kakera click budget |
-| `$rt` ready / next | Extra claim token |
-| `$dk` stock / next | Daily kakera power top-up |
-| `$daily` reset | Minutes until the account-global `$daily` (not the hourly rolls reset) |
-| Perk 8 refill | When daily perk-8 clicks come back |
+
+| Field                      | Meaning                                                                |
+| -------------------------- | ---------------------------------------------------------------------- |
+| Claim available / cooldown | Whether you can marry right now                                        |
+| Next claim reset           | Minutes until the claim slot refills                                   |
+| Rolls left                 | Hourly pool, plus optional `+$us` / `+$mk` bonus                       |
+| Next rolls reset           | Minutes until the hourly pool refills                                  |
+| Reaction power %           | Kakera click budget                                                    |
+| `$rt` ready / next         | Extra claim token                                                      |
+| `$dk` stock / next         | Daily kakera power top-up                                              |
+| `$daily` reset             | Minutes until the account-global `$daily` (not the hourly rolls reset) |
+| Perk 8 refill              | When daily perk-8 clicks come back                                     |
+
 
 **Macro:** almost every session starts with `$tu`. Claim timing, `$us`
 stacking, `$dk`, and reaction-power estimates all come from this message.
@@ -65,6 +71,8 @@ Between rolls the engine tracks power locally instead of polling `$tu` every
 time (`macro/reaction_power.py`).
 
 ---
+
+
 
 ## Claims
 
@@ -85,38 +93,42 @@ Implemented in `macro/claim_window.py`.
 **Macro claim rules** (`CharacterClaimRules` / `passes_character_claim`):
 
 1. Wish ping + claim button → claim **immediately** (interrupt the roll loop).
-   If the slot is on cooldown and `$rt` is available and `auto_use_rt` is on,
+  If the slot is on cooldown and `$rt` is available and `auto_use_rt` is on,
    spend `$rt` and claim.
 2. Kakera value ≥ `min_kakera`, or claim rank ≤ `max_claim_rank` → claim
-   immediately.
+  immediately.
 3. Otherwise, if `only_final_hour` is on and this is not the final hour →
-   skip (save the slot).
+  skip (save the slot).
 4. Eligible leftovers are compared at the **end of the batch**; the best one
-   is claimed then.
+  is claimed then.
 
 Already-claimed characters and embeds with no enabled claim button are
 skipped.
 
 ---
 
+
+
 ## Kakera
 
 Kakera are gem buttons on a roll. Clicking one pays currency and costs
 **reaction power**, except purple.
 
-| Emoji name | Color | Notes |
-|------------|-------|--------|
-| `kakeraP` | Purple | **Free** — no power cost. Always worth clicking. |
-| `kakera` | Blue | Default cheap kakera |
-| `kakeraT` | Teal | |
-| `kakeraG` | Green | |
-| `kakeraY` | Yellow | |
-| `kakeraO` | Orange | |
-| `kakeraR` | Red | |
-| `kakeraW` | Rainbow | Highest single-color value |
-| `kakeraL` | Light | Splits into several smaller kakera |
-| `kakeraD` | Dark | |
-| `kakeraC` | Chaos | Highest tier the macro tracks |
+
+| Emoji name | Color   | Notes                                            |
+| ---------- | ------- | ------------------------------------------------ |
+| `kakeraP`  | Purple  | **Free** — no power cost. Always worth clicking. |
+| `kakera`   | Blue    | Default cheap kakera                             |
+| `kakeraT`  | Teal    |                                                  |
+| `kakeraG`  | Green   |                                                  |
+| `kakeraY`  | Yellow  |                                                  |
+| `kakeraO`  | Orange  |                                                  |
+| `kakeraR`  | Red     |                                                  |
+| `kakeraW`  | Rainbow | Highest single-color value                       |
+| `kakeraL`  | Light   | Splits into several smaller kakera               |
+| `kakeraD`  | Dark    |                                                  |
+| `kakeraC`  | Chaos   | Highest tier the macro tracks                    |
+
 
 Typical published value bands (purple/blue/…/rainbow) match older Mudae
 guides. Dark and chaos were added later; treat `mudae/constants.py` as
@@ -143,34 +155,34 @@ Preset fields live on `KakeraReactionRules`.
 2. Optional `require_perk_8` (lifted after 40/40 or insufficient roll pool).
 3. Optional min-spheres.
 4. **Colour list:** perk-8 characters use `perk_8_types_allowed` whenever
-   budget mode is on (empty = any colour). Everyone else uses
+  budget mode is on (empty = any colour). Everyone else uses
    `types_allowed` (or the `$us` override list on `$us` rolls).
 5. Low-power override, if enabled and bar is below the threshold — this
-   **replaces** the colour list, including on perk-8 characters.
+  **replaces** the colour list, including on perk-8 characters.
 6. Chaos-key gate: without a chaos key, only `require_chaos_key_bypass_types`
-   (default purple) may click.
+  (default purple) may click.
 7. Affordability (bar vs cost). Mudae's "can't react for N min" still wins
-   if the tracker is wrong.
+  if the tracker is wrong.
 8. **Saving window** (`perk8_is_saving`): only when **Prioritize perk-8**
-   is on (`perk_8_priority`, default on), mode is `active`, and local count
+  is on (`perk_8_priority`, default on), mode is `active`, and local count
    is under the `$ohu8` cap. Non-perk-8 rolls keep only **bypass** colours
    (`perk_8_budget_bypass_types`, default purple). Perk-8 rolls keep the
    perk-8 list. With priority **off**, perk-8 characters still use the
    perk-8 colours, but other rolls use the main filter as they appear.
 9. Optional smart power / `$dk` reserve on paid *non*-perk-8 clicks.
 10. Remaining-quota slice: at most N clicks that **count toward the 40**.
-    Purple never counts. Bypass colours on a **non**-perk-8 roll do not
+  Purple never counts. Bypass colours on a **non**-perk-8 roll do not
     count (they still cost power, except purple). Bypass colours on a
     **perk-8** roll **do** count — they are normal perk-8 kakera.
 
-**Daily 40 (`$ohu8`):** only perk-8-character paid clicks use the quota.
+**Daily 40 (**`$ohu8`**):** only perk-8-character paid clicks use the quota.
 Red/rainbow on a perk-8 character count because they are on the perk-8
 list. The same colours on a normal character are bypass: still clicked
 while saving, not counted. After 40/40, non-perk-8 rolls use the main
 colour list (equal clicking); perk-8 characters **keep** the perk-8 list
 (orange/dark stay allowed).
 
-**`$ohu8` timing:** sent at session start and when the daily refill is due.
+`$ohu8` **timing:** sent at session start and when the daily refill is due.
 Saving is off (`inactive`) until that reply sets `active` / `done`. That
 is intentional — the first `$ohu8` of the day is what starts the holdback.
 A live `$ohu8` count **overwrites** a stale Run-tab 40/40 (persist from a
@@ -180,15 +192,14 @@ text yet). After **any wait timeout on a perk-8 click** (first attempt or
 retry, success or fail), send `$ohu8` again so a landed-but-unseen click
 cannot desync the 40. Non-perk-8 timeouts do not.
 
-**`$us`:** optional narrower `types_allowed` for non-perk-8 `$us` rolls.
+`$us`**:** optional narrower `types_allowed` for non-perk-8 `$us` rolls.
 Perk-8 characters still use the Reactions perk-8 list. "Don't claim kakera
 on `$us` rolls" disables **all** kakera on those rolls, including perk-8.
 
 Implemented in `macro/rule_eval.py` and `macro/kakera_reactor.py`. Caps from
 `$bonus` / `$shop` are applied per run channel in `macro/sheet_caps.py`.
 
-**Chaos kakera (`kakeraC`) extras:** the `+$k` body can add `+N rolls this
-hour` (spend them now; they die at the hourly reset), store `$oh`/`$oc`/`$oq`/`$ot`
+**Chaos kakera (**`kakeraC`**) extras:** the `+$k` body can add `+N rolls this hour` (spend them now; they die at the hourly reset), store `$oh`/`$oc`/`$oq`/`$ot`
 (logged, not played), spawn `$kl` (logged), grant `N% kakera power discount`
 (applied when subtracting tracked power after the click), `+N` omega keys
 (`$ok`, key log source `chaos`), spawn an owned character with free kakera
@@ -199,30 +210,34 @@ kakera react and is not a chaos minigame. Raw windows still go to
 
 ---
 
+
+
 ## Spheres and `$oh`
 
 Spheres are a second currency / minigame track. They show up in two places:
 
 1. **Roll react buttons** — a sphere on the character embed (perk 9).
-2. **`$oh` minigame** — a 5×5 grid of sphere buttons.
+2. `$oh` **minigame** — a 5×5 grid of sphere buttons.
 
 Button emoji names are `sp` + a color letter:
 
-| Emoji | Meaning |
-|-------|---------|
-| `spM` | Megasphere — free bonus on a **roll** (always click; splits like light kakera) |
-| `spP` | Purple — **free `$oh` click** (does not use the daily click allowance) |
-| `spB` | Blue — lowest paid; skipped in `$oh` (click a face-down instead) |
-| `spT` | Teal — same as blue in `$oh` |
-| `spG` | Green | |
-| `spY` | Yellow | |
-| `spD` | Dark — paid click; may resolve to purple in the reward tracker |
-| `spL` | Light | |
-| `spO` | Orange | |
-| `spR` | Red | |
-| `sp` | **Red.** Mudae's default sphere emoji when "recognizable sphere buttons" is off. A roll button labelled `:sp:` is red. |
-| `spW` | Rainbow — highest paid |
-| `spU` | Hidden / face-down in `$oh` |
+
+| Emoji | Meaning                                                                                                                |
+| ----- | ---------------------------------------------------------------------------------------------------------------------- |
+| `spM` | Megasphere — free bonus on a **roll** (always click; splits like light kakera)                                         |
+| `spP` | Purple — **free** `$oh` **click** (does not use the daily click allowance)                                             |
+| `spB` | Blue — lowest paid; skipped in `$oh` (click a face-down instead)                                                       |
+| `spT` | Teal — same as blue in `$oh`                                                                                           |
+| `spG` | Green                                                                                                                  |
+| `spY` | Yellow                                                                                                                 |
+| `spD` | Dark — paid click; may resolve to purple in the reward tracker                                                         |
+| `spL` | Light                                                                                                                  |
+| `spO` | Orange                                                                                                                 |
+| `spR` | Red                                                                                                                    |
+| `sp`  | **Red.** Mudae's default sphere emoji when "recognizable sphere buttons" is off. A roll button labelled `:sp:` is red. |
+| `spW` | Rainbow — highest paid                                                                                                 |
+| `spU` | Hidden / face-down in `$oh`                                                                                            |
+
 
 **Colour-blind variants:** some servers (or `$settings`) use a second emoji
 set with a small letter in the corner. Discord names them with a trailing
@@ -236,14 +251,14 @@ There is no chaos sphere. Rank order for paid `$oh` clicks (low → high):
 blue, teal, green, yellow, dark, light, orange, red, rainbow
 (`SPHERE_VALUE_RANK`).
 
-**`$oh` strategy** (`macro/sphere_game.py`):
+`$oh` **strategy** (`macro/sphere_game.py`):
 
 - Always take free purple.
 - Never click an already-revealed blue or teal.
 - Otherwise click the highest-value revealed paid sphere.
 - If nothing good is showing, click a random face-down (`spU`).
 - The grid is **one message that Mudae edits** after every click — wait for
-  the edit before the next move.
+the edit before the next move.
 
 **Macro on rolls:** `SphereReactionRules` + `SphereReactor` click matching
 sphere buttons on the character embed. A filter that includes `spR` also
@@ -253,6 +268,8 @@ Artwork: `gui/assets/kakera/Sp*.webp`, labels in `gui/SphereAssets.qml`.
 Bare `sp` uses the red (`SpR`) image.
 
 ---
+
+
 
 ## Keys and soulmates
 
@@ -264,6 +281,8 @@ Chaos keys do **not** change sphere clicks. They only cheapen kakera
 reactions (half power cost).
 
 ---
+
+
 
 ## `$us` — stacked extra rolls
 
@@ -280,18 +299,20 @@ adds batches, then rolls them down. Kakera on `$us` rolls can follow the
 normal rules or a narrower override (`UsRollKakeraRules`). Drain policy lives
 on the preset (Presets → `$us`), not the Run page:
 
-* **Keep draining** pauses on the hourly reset (and on power *if* that stop
-  is on) instead of quitting.
-* **Stop on power** is optional; `$dk` and perk-8 “held for tomorrow” count.
-* **Session roll cap** (e.g. 1000) is a hard stop.
-* **Local schedule** (`us_schedule_*`) is this computer’s clock, not UTC.
-  While connected it drains `$us` on its own, like `$p` / `$daily`. Roll `$us`
-  on the Run page always starts immediately and ignores the window. Auto
-  drain uses the session cap and other preset stops; leftover `$us` stays on
-  the stack when the end time hits. If hourly is waiting for a refill, the
-  schedule pauses it, drains `$us`, then resumes hourly.
+- **Keep draining** pauses on the hourly reset (and on power *if* that stop
+is on) instead of quitting.
+- **Stop on power** is optional; `$dk` and perk-8 “held for tomorrow” count.
+- **Session roll cap** (e.g. 1000) is a hard stop.
+- **Local schedule** (`us_schedule_`*) is this computer’s clock, not UTC.
+While connected it drains `$us` on its own, like `$p` / `$daily`. Roll `$us`
+on the Run page always starts immediately and ignores the window. Auto
+drain uses the session cap and other preset stops; leftover `$us` stays on
+the stack when the end time hits. If hourly is waiting for a refill, the
+schedule pauses it, drains `$us`, then resumes hourly.
 
 ---
+
+
 
 ## Minigames
 
@@ -300,8 +321,8 @@ on the preset (Presets → `$us`), not the Run page:
 `$ot` is parsed but not played yet. Extra `$oq` / `$ot` from perk 10 on
 the first `$oh` of the day are counted (play-all spends the extra `$oq`).
 Playing a game with no uses left gets
-``You don't have enough $oh for today. Time to wait before the refill: 3h 08 min.``
-(``$oc`` / ``$oq`` / ``$ot`` in place of ``$oh``); the activity log reports
+`You don't have enough $oh for today. Time to wait before the refill: 3h 08 min.`
+(`$oc` / `$oq` / `$ot` in place of `$oh`); the activity log reports
 out of minigames instead of a grid timeout.
 
 Each finished `$oh` / `$oc` / `$oq` writes one row to `data/minigame_log.json`
@@ -315,31 +336,61 @@ Per-cell spawn chance on an `$oh` grid, from Colblitz and **confirmed against
 96 logged boards** (2,317 revealed cells). "Logged" is each colour's share of
 all 25 cells:
 
-| Colour | Base SP | Published | Logged | On click |
-|---|---|---|---|---|
-| White (`spW`) | 500 | 0.04% | 0.04% | extremely rare |
-| Red (`spR`) | 150 | 0.22% | 0.21% | |
-| Dark (`spD`) | ~104 | 1.46% | 1.17% | transforms into a random sphere |
-| Orange (`spO`) | 90 | 0.97% | 0.88% | |
-| Light (`spL`) | ~76 | 2.96% | 3.12% | breaks into component spheres |
-| Yellow (`spY`) | 55 | 2.57% | 2.79% | |
-| Green (`spG`) | 35 | 7.88% | 7.21% | |
-| Teal (`spT`) | 20 | 23.48% | 21.83% | reveals 1 covered cell |
-| Blue (`spB`) | 10 | 54.49% | 55.38% | reveals 3 covered cells |
-| Purple (`spP`) | 5 | 3.93% | 3.92% | **free** — always click first |
 
-The table sums to **98%**. The missing **2% is an `$oc` spawn**: it is
+| Colour          | Base SP | Published | Logged | On click                        |
+| --------------- | ------- | --------- | ------ | ------------------------------- |
+| Rainbow (`spW`) | 500     | 0.04%     | 0.04%  | extremely rare                  |
+| Red (`spR`)     | 150     | 0.22%     | 0.21%  |                                 |
+| Dark (`spD`)    | ~104    | 1.46%     | 1.17%  | transforms into a random sphere |
+| Orange (`spO`)  | 90      | 0.97%     | 0.88%  |                                 |
+| Light (`spL`)   | ~76     | 2.96%     | 3.12%  | breaks into component spheres   |
+| Yellow (`spY`)  | 55      | 2.57%     | 2.79%  |                                 |
+| Green (`spG`)   | 35      | 7.88%     | 7.21%  |                                 |
+| Teal (`spT`)    | 20      | 23.48%    | 21.83% | reveals 1 covered cell          |
+| Blue (`spB`)    | 10      | 54.49%    | 55.38% | reveals 3 covered cells         |
+| Purple (`spP`)  | 5       | 3.93%     | 3.92%  | **free** — always click first   |
+
+
+The table sums to **98%**. The missing **2% is an** `$oc` **spawn**: it is
 indistinguishable from an unclicked cell, so it can only be hit by luck and
 stays `spU` on the logged board. That is confirmed — across 94 completed
 games the leftover unrevealed cells run at **2.13% per cell**, matching the
 2.00% residual. Both the rates and this residual are pinned by
 `tests/test_minigame_log_models.py`.
 
-`$oh` play is still greedy (`macro/sphere_game.py`): never click a revealed
-blue/teal, otherwise take the highest revealed paid sphere, else a random
-face-down. There is no `$oh` solver or simulator yet — the counts DP that
-would replace the greedy rule was blocked on exactly this table, and is now
-unblocked.
+**Reveal mechanic.** Clicking a blue exposes **3** more covered cells and a
+teal exposes **1**, and the targets are **uniformly random, not adjacent**
+(586 logged unveil events: 26.8% land next to the clicked cell against
+24.0% expected by chance). Position therefore does not matter, which is
+what licenses a counts-based DP rather than a positional one. The greedy
+never clicks an already-revealed blue or teal, so it only ever triggers this
+via a face-down that turns out to be one.
+
+**`$oh` play is still greedy** (`macro/sphere_game.py:choose_oh_click`):
+take any revealed purple free, else the highest-**paying** revealed sphere,
+never blue/teal, else a random face-down. Ordering is by real SP
+(`_OH_CLICK_VALUE`), not the ordinal `SPHERE_VALUE_RANK` — that rank puts
+dark below orange, but dark pays ~104 against orange's 90.
+`SPHERE_VALUE_RANK` is shared with `$oc`/`$oq` and is left alone.
+
+There is no `$oh` *solver* yet, but there is now a simulator and replay
+harness (`macro/oh_replay.py`, `scripts/oh_bakeoff.py --from-log`) so any
+future policy can be scored. Replaying the 94 recoverable logged boards
+gives 156.5 SP against 153.4 in live play. Two cautions baked into it:
+
+* **The replay is stochastic** — unveil targets are random, so every board
+  is averaged over several seeds.
+* **An `$oc` spawn is invisible.** It renders as `spU` even after being
+  unveiled, so it never leaves the face-down pool and cannot be targeted.
+  Clicking one grants a whole extra `$oc` game (~314 SP), but the harness
+  values it at **0 by default**: priced at 314, a policy search will happily
+  stop claiming known spheres to farm a random drop it cannot actually aim
+  at. The bakeoff prints both valuations so no conclusion rests on it.
+
+**Headroom.** A prototype policy search over clicks-left thresholds beats
+the greedy by only **~1.5–2.5%**, and that margin is flat from 1 to 10
+initial reveals — buying the initial-reveal perk raises the score a lot
+(145 → 186 SP) but does not widen the gap a solver could exploit.
 
 ### `$oq` — the world model, validated
 
@@ -370,12 +421,14 @@ did not reproduce — the constraint layer can be trusted.
 What is *not* determined by the rules is which eligible cell gets which
 colour. Measured over those 100 boards:
 
-| Region (relative to red) | Colour mix | True EV |
-|---|---|---|
-| orthogonally adjacent | orange 63%, **green 22%**, teal 15% | 67.6 SP |
-| on the diagonal | yellow 64%, teal 36% | 42.4 SP |
-| same row/column only | green 68%, teal 32% | 30.2 SP |
-| everything else | blue 97%, (centre yellow) 2%, teal 1% | 11.0 SP |
+
+| Region (relative to red) | Colour mix                            | True EV |
+| ------------------------ | ------------------------------------- | ------- |
+| orthogonally adjacent    | orange 63%, **green 22%**, teal 15%   | 67.6 SP |
+| on the diagonal          | yellow 64%, teal 36%                  | 42.4 SP |
+| same row/column only     | green 68%, teal 32%                   | 30.2 SP |
+| everything else          | blue 97%, (centre yellow) 2%, teal 1% | 11.0 SP |
+
 
 Two things fall out of this. **Greens do sit on orthogonally adjacent
 cells** (22%), so the orange and green regions genuinely overlap — a cell
@@ -400,14 +453,18 @@ replays real boards and reports paired deltas with a t-statistic; the
 default synthetic mode is calibrated against the table above but is still
 a model, so confirm anything important against the log.
 
-| Command | What it is | Engine |
-|---------|------------|--------|
-| `$oh` | 5×5 sphere grid | `macro/sphere_game.py` |
-| `$oc` | Color-matching sphere game | `macro/oc_game.py` |
-| `$oq` | World / path sphere game | `macro/oq_game.py` |
-| `$ot` | Tracked in `$ohu` only | — |
+
+| Command | What it is                 | Engine                 |
+| ------- | -------------------------- | ---------------------- |
+| `$oh`   | 5×5 sphere grid            | `macro/sphere_game.py` |
+| `$oc`   | Color-matching sphere game | `macro/oc_game.py`     |
+| `$oq`   | World / path sphere game   | `macro/oq_game.py`     |
+| `$ot`   | Tracked in `$ohu` only     | —                      |
+
 
 ---
+
+
 
 ## Perk 8 (daily kakera budget)
 
@@ -424,9 +481,10 @@ list. With priority **off**, perk-8 colours still apply but other rolls are
 not skipped. Full click-order rules:
 [Kakera reaction rules](#kakera-reaction-rules).
 
-**Power / `$dk` reserve** (`macro/perk8_power.py`) is optional on the perk-8
+**Power /** `$dk` **reserve** (`macro/perk8_power.py`) is optional on the perk-8
 budget panel. Off keeps the old click and `$dk` rules. On keeps enough bar
-+ `$dk` that a full perk-8 dump is still payable in the first N hours
+
+- `$dk` that a full perk-8 dump is still payable in the first N hours
 **after UTC midnight** (the daily reset; default 4h). Unused perk-8 clicks
 expire at midnight, so they always get power and `$dk` first — that is not
 a separate setting. After 40/40, chaos kakera still click unless *this*
@@ -445,26 +503,30 @@ stops spawning those buttons.
 
 ---
 
+
+
 ## Perk 9 (daily sphere-button budget)
 
 Perk 9 adds **sphere react buttons** on characters you have rolled today.
 Each click consumes one slot from a daily budget (shown on `$ohu9` as
-``6/20 buttons clicked`` in the shared minigame header). The macro tracks
+`6/20 buttons clicked` in the shared minigame header). The macro tracks
 this as **clicks used / cap** on the Run page. The cap is
 `10 + perk9_extra_clicks` from the run channel's `$shop` (fallback **20**).
 
-- Query with **`$ohu9`** — same layout as `$ohu8` / `$ohu`: minigame
-  counts, refill timer, ``buttons clicked``, megasphere stock line, then
-  ``(Perk 9) Rolled today: 44/154`` and the list of characters rolled.
+- Query with `$ohu9` — same layout as `$ohu8` / `$ohu`: minigame
+counts, refill timer, `buttons clicked`, megasphere stock line, then
+`(Perk 9) Rolled today: 44/154` and the list of characters rolled.
 - Sphere buttons on those characters are **perk 9 spawns**; after the budget
-  is used, no more spawn until the daily refill (same window as `$oh` /
-  sphere stock).
+is used, no more spawn until the daily refill (same window as `$oh` /
+sphere stock).
 - **Megasphere** (`spM`) on a roll is a free bonus, not a perk 9 click —
-  the Run counter ignores it.
+the Run counter ignores it.
 - The macro increments by one on each confirmed **sphere button click**
-  (`MessageKind.SPHERE_CLICK`, excluding `spM`). `SphereReactionRules.types_allowed`
-  still governs which colours to click. After the daily budget is used, Mudae
-  stops spawning the buttons — the reactor does not add its own skip.
+(`MessageKind.SPHERE_CLICK`, excluding `spM`). `SphereReactionRules.types_allowed`
+still governs which colours to click. After the daily budget is used, Mudae
+stops spawning the buttons — the reactor does not add its own skip.
+
+
 
 ### Adaptive threshold (`perk_9` budget mode)
 
@@ -494,10 +556,12 @@ Base SP and spawn rates default to Colblitz's published p9calc table
 (138,925 observed rolls) and are **editable per colour in the preset**
 because the sample is still being re-measured locally:
 
-| | `spB` | `spT` | `spG` | `spY` | `spL` | `spO` | `spD` | `spR` | `spW` |
-|---|---|---|---|---|---|---|---|---|---|
-| Base SP | 10 | 20 | 35 | 55 | 75.9 | 90 | 104.5 | 150 | 500 |
-| Spawn % | 59.58 | 24.10 | 7.88 | 2.67 | 2.98 | 0.99 | 1.45 | 0.31 | 0.04 |
+
+|         | `spB` | `spT` | `spG` | `spY` | `spL` | `spO` | `spD` | `spR` | `spW` |
+| ------- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
+| Base SP | 10    | 20    | 35    | 55    | 75.9  | 90    | 104.5 | 150   | 500   |
+| Spawn % | 59.58 | 24.10 | 7.88  | 2.67  | 2.98  | 0.99  | 1.45  | 0.31  | 0.04  |
+
 
 Dark and light have no entry in `SPHERE_BASE_SP` (dark resolves into another
 colour, light splits into fragments); the figures above are measured
@@ -521,9 +585,9 @@ session. `Perk9Runtime` sends it:
 - once at session start (and on a refresh deferred while the gateway was down),
 - when the refill deadline has passed or the record is from an earlier UTC day,
 - after a sphere click whose `SPHERE_CLICK` confirmation timed out — the click
-  may have landed, so the count could be short,
+may have landed, so the count could be short,
 - once when the local count first reaches the cap, to confirm before standing
-  down until the refill.
+down until the refill.
 
 Between those, counts are tracked locally: every paid sphere button on a roll
 is one spawn (`record_perk9_spawn`), every confirmed click bumps the used count
@@ -552,9 +616,11 @@ single static filter picked for one volume).
 
 ---
 
+
+
 ## Perk 10 (invested spheres)
 
-Perk 10 pays on the **first `$oh` of the UTC day**. The grid message can
+Perk 10 pays on the **first** `$oh` **of the UTC day**. The grid message can
 include a line like:
 
 ```
@@ -564,13 +630,15 @@ include a line like:
 Older lines omit `$ot`: `+2 $oq and +5,344 :sp: from your invested spheres!`
 
 - **Flat SP** is logged as sphere source `perk10` (Statistics → Spheres),
-  not as `$oh` minigame earnings.
-- Extra **`$oq` / `$ot` uses** are stored on that `$oh` session
-  (`oq_bonus` / `ot_bonus`). Statistics → Minigames → `$oh` shows the
-  totals. Play-all spends the extra `$oq` (like bonus `$oc` from hidden
-  clicks). Extra `$ot` is counted in `$ohu` availability but not played yet.
+not as `$oh` minigame earnings.
+- Extra `$oq` **/** `$ot` **uses** are stored on that `$oh` session
+(`oq_bonus` / `ot_bonus`). Statistics → Minigames → `$oh` shows the
+totals. Play-all spends the extra `$oq` (like bonus `$oc` from hidden
+clicks). Extra `$ot` is counted in `$ohu` availability but not played yet.
 
 ---
+
+
 
 ## `$settings` and `$bonus`
 
@@ -601,13 +669,15 @@ Reaction-power max (`kakera_max_power`) and the perk 9 click cap
 
 ### `$bonus` meaning keys needed later
 
-| Key | Type | Typical source tag | Later use |
-| --- | --- | --- | --- |
-| `kakera_max_power` | int | `$kt` | Reaction-power cap (wired) |
-| `power_cost_per_kakera_button` | % | — | Kakera react budget |
-| `additional_spheres` | int | clicked + premium | Perk 9 EV flat SP |
-| `sphere_double_chance_pct` | % | `$kt` | Perk 9 EV double chance |
-| `rolls_per_hour` | dict | `$k`/`$kl`/`$kt`/premium | `net`, `sources`, `penalties.bw` / `penalties.bk` |
+
+| Key                            | Type | Typical source tag       | Later use                                         |
+| ------------------------------ | ---- | ------------------------ | ------------------------------------------------- |
+| `kakera_max_power`             | int  | `$kt`                    | Reaction-power cap (wired)                        |
+| `power_cost_per_kakera_button` | %    | —                        | Kakera react budget                               |
+| `additional_spheres`           | int  | clicked + premium        | Perk 9 EV flat SP                                 |
+| `sphere_double_chance_pct`     | %    | `$kt`                    | Perk 9 EV double chance                           |
+| `rolls_per_hour`               | dict | `$k`/`$kl`/`$kt`/premium | `net`, `sources`, `penalties.bw` / `penalties.bk` |
+
 
 One `$bonus` bullet is one field. Multi-number lines (`rolls_per_hour`, `oh_daily`, `megaspheres`, `random_kakera`) stay as a single dict instead of flattened keys. Identity is the meaning key, not the suffix — `$bk` on kakera-buttons is not the `$bk` rolls/hour penalty.
 
@@ -624,19 +694,21 @@ tag belong to the previous perk (OP6 omega-key chance, OP9 sphere-value %).
 Stored on the channel profile like `$bonus` (`App.fetchShop`). Read-only —
 do not send `$shoprefund`.
 
-| Key | Type | Later use |
-| --- | --- | --- |
-| `perk9_extra_clicks` | int | Daily cap `10 + extra` (max 20) |
-| `perk9_click_max` | int | Daily cap `10 + extra` (wired) |
-| `perk9_sphere_value_pct` | % | p9calc `shop9_bonus` (10% per OP9 level) |
-| `perk2_megasphere_rewards` | int | Megasphere planner |
-| `perks` | dict | Full OP1–OP10 current/next values |
+
+| Key                        | Type | Later use                                |
+| -------------------------- | ---- | ---------------------------------------- |
+| `perk9_extra_clicks`       | int  | Daily cap `10 + extra` (max 20)          |
+| `perk9_click_max`          | int  | Daily cap `10 + extra` (wired)           |
+| `perk9_sphere_value_pct`   | %    | p9calc `shop9_bonus` (10% per OP9 level) |
+| `perk2_megasphere_rewards` | int  | Megasphere planner                       |
+| `perks`                    | dict | Full OP1–OP10 current/next values        |
+
 
 `$oh` / megasphere *values* on `$bonus` stay on `oh_daily` / `megaspheres`.
 
 Unknown `$settings` / `$bonus` / `$shop` bullets become warnings (not silent drops).
 
-**Dangerous `$settings` commands:** 16 are **direct toggles**. A bare send
+**Dangerous** `$settings` **commands:** 16 are **direct toggles**. A bare send
 flips the live server (no help text, no confirm). Capture tooling
 (`scripts/document_settings_commands.py`) skips them unless
 `--include-toggles`, which sends then immediately sends again to revert.
@@ -653,16 +725,20 @@ independent rank-on-roll flags above.
 
 ---
 
+
+
 ## `$p` and `$daily` (account-global)
 
 Neither command is per server. Sending `$p` or `$daily` on any channel
 consumes the cooldown for that Discord account everywhere, so each account
 picks **one** designated channel on the Accounts tab.
 
-| Command | Cooldown | Success | Retry copy |
-| --- | --- | --- | --- |
-| `$daily` | 20 hours from the successful send | Mudae **tick** on the user message | `Next $daily reset in 20h 00 min.` |
-| `$p` | Fixed 2-hour slots from UTC midnight (00:00, 02:00, …) | Pokemon grid / `You won` — results are not stored | `Remaining time before your next $p: 1h 41 min.` |
+
+| Command  | Cooldown                                               | Success                                           | Retry copy                                       |
+| -------- | ------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------ |
+| `$daily` | 20 hours from the successful send                      | Mudae **tick** on the user message                | `Next $daily reset in 20h 00 min.`               |
+| `$p`     | Fixed 2-hour slots from UTC midnight (00:00, 02:00, …) | Pokemon grid / `You won` — results are not stored | `Remaining time before your next $p: 1h 41 min.` |
+
 
 **Macro:** `macro/account_dailies.py` (timing) and
 `macro/account_daily_runtime.py` (switch / send / restore). While connected,
@@ -685,14 +761,17 @@ only `$settings` + `$bonus` text.
 
 ---
 
+
+
 ## What the macro does not do (yet)
 
 - Claim by emoji reaction (servers with `$togglebutton` off).
 - External sniping of other people's rolls.
 - Slash-command rolls.
 - Multi-account concurrent connections (config supports it; runtime is
-  one Discord session — see Phase D in `ARCHITECTURE.md`).
+one Discord session — see Phase D in `ARCHITECTURE.md`).
 - Playing `$ot`.
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`
-  (parsers are trusted for storage; power max and perk 9 cap are the
-  exceptions already wired).
+(parsers are trusted for storage; power max and perk 9 cap are the
+exceptions already wired).
+

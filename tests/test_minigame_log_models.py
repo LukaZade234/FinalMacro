@@ -157,3 +157,63 @@ def test_oh_board_colours_are_all_known_sphere_types():
     rows = _rows("oh")
     seen = {c for r in rows for c in r["board"]}
     assert seen <= set(_OH_SPAWN_PCT) | {"spU"}
+
+
+# --- $oh: the unveil mechanic ----------------------------------------------
+#
+# Logged $oh clicks carry an `unveiled` field (the cell indices a click
+# exposed), written by an external enrichment step. It is the ground truth
+# behind macro/oh_replay's reveal model, so pin it here.
+
+
+def _unveil_events() -> list[tuple[str, int, list[int]]]:
+    out = []
+    for row in _rows("oh"):
+        for click in row.get("clicks", []):
+            unveiled = click.get("unveiled")
+            cell = click.get("cell")
+            if unveiled is not None and cell is not None:
+                out.append((click.get("emoji"), cell, unveiled))
+    if not out:
+        pytest.skip("no `unveiled` data in this log")
+    return out
+
+
+def test_blue_unveils_three_and_teal_unveils_one():
+    counts = Counter((emoji, len(u)) for emoji, _cell, u in _unveil_events())
+    assert counts[("spB", 3)] > 50
+    assert counts[("spT", 1)] > 20
+    # No blue ever unveils a number other than 3, nor teal other than 1.
+    assert not [k for k in counts if k[0] == "spB" and k[1] != 3]
+    assert not [k for k in counts if k[0] == "spT" and k[1] != 1]
+
+
+def test_unveiled_cells_are_uniform_random_not_adjacent():
+    """Position does not matter — which is what licenses a counts-based DP.
+
+    If unveils favoured neighbours, the solver would need to reason about
+    board geometry; they do not.
+    """
+    events = _unveil_events()
+
+    def neighbours(index: int) -> set[int]:
+        row, col = divmod(index, 5)
+        return {
+            (row + dr) * 5 + (col + dc)
+            for dr in (-1, 0, 1)
+            for dc in (-1, 0, 1)
+            if (dr or dc) and 0 <= row + dr < 5 and 0 <= col + dc < 5
+        }
+
+    total = adjacent = 0
+    for _emoji, cell, unveiled in events:
+        near = neighbours(cell)
+        for target in unveiled:
+            total += 1
+            adjacent += target in near
+    observed = adjacent / total
+    # Expected share if targets were drawn uniformly from the other cells.
+    expected = sum(len(neighbours(i)) for i in range(GRID_CELLS)) / GRID_CELLS / 24
+    assert abs(observed - expected) < 0.06, (
+        f"unveils land adjacent {observed:.1%} of the time vs {expected:.1%} by chance"
+    )
