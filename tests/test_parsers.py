@@ -133,6 +133,86 @@ def test_roll_limit_wins_over_roll_command_context():
     assert result.fields["rolls_reset_minutes"] == 34
 
 
+def test_roll_embed_reports_the_hourly_key_limit():
+    """The whole Lucy card as logged, through the roll parser and the feed line.
+
+    Rolling past 2,200 keys/h still spends the roll and can still claim; only
+    the key gain is refused. Nothing recorded it before, so a $us drain kept
+    burning the stack for no keys.
+    """
+    from mudae.live_feed import format_roll_line
+    from mudae.parsers.roll import parse_roll
+
+    snapshot = MudaeMessageSnapshot(
+        message_id=77,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[
+            {
+                "author": "Lucy",
+                "description": (
+                    "Cyberpunk: Edgerunners <:sw:1>\n"
+                    "❌ (You reached the limit of 2,200 keys per hour!)\n"
+                    "Claims: #82\n"
+                    "Likes: #151\n"
+                    "**201,569**<:kakera:1>\n"
+                ),
+                "footer": "Belongs to lukazade234",
+            }
+        ],
+        buttons=[],
+        created_at="21:51:18",
+    )
+
+    result = parse_roll(snapshot)
+    assert result.fields["key_limit"] == 2200
+    assert result.fields["keys"] is None
+    assert result.fields["character_name"] == "Lucy"
+    assert "key limit 2,200/h reached" in result.summary
+    assert "❌ key limit 2,200/h" in format_roll_line(result.fields)
+
+
+def test_roll_embed_without_the_limit_leaves_key_limit_unset():
+    from mudae.live_feed import format_roll_line
+    from mudae.parsers.roll import parse_roll
+
+    snapshot = MudaeMessageSnapshot(
+        message_id=78,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[
+            {
+                "author": "Kirby",
+                "description": (
+                    "Kirby\n"
+                    "<:chaoskey:1> (18) +5% kakera value\n"
+                    "**1,204**<:kakera:1>\n"
+                ),
+                "footer": "Belongs to lukazade234",
+            }
+        ],
+        buttons=[],
+        created_at="21:51:20",
+    )
+
+    result = parse_roll(snapshot)
+    assert result.fields["key_limit"] is None
+    assert "key limit" not in result.summary
+    assert "key limit" not in format_roll_line(result.fields)
+
+
 def test_parse_minigame_exhausted_message():
     from mudae.parsers.minigame_exhausted import (
         format_exhausted_activity,

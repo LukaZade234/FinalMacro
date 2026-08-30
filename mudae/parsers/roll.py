@@ -12,7 +12,7 @@ from mudae.parsers.embed import (
     is_character_embed,
     is_ownership_footer,
 )
-from mudae.parsers.kakera import parse_keys, parse_omega_keys
+from mudae.parsers.kakera import parse_key_limit, parse_keys, parse_omega_keys
 from mudae.soulmate_log import record_new_soulmate
 from mudae.parsers.utils import strip_discord_emojis, strip_markdown
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
@@ -62,6 +62,7 @@ ROLL_FIELD_KEYS: tuple[str, ...] = (
     "has_sphere_button",
     "keys",
     "omega_keys",
+    "key_limit",
     "claimed",
     "owner",
     "can_claim",
@@ -329,6 +330,9 @@ def parse_roll(
     omega_keys = parse_omega_keys(description)
     fields["omega_keys"] = omega_keys if omega_keys else None
 
+    # Set only when Mudae refused the key gain, so the field doubles as the flag.
+    fields["key_limit"] = parse_key_limit(description)
+
     fields["claimed"] = claimed
     fields["owner"] = owner
     fields["claim_rank"] = _parse_rank(description, "Claims")
@@ -376,6 +380,8 @@ def parse_roll(
     if fields.get("omega_keys"):
         total_omega = sum(entry["gain"] for entry in fields["omega_keys"])
         summary += f" · omega +{total_omega}"
+    if fields.get("key_limit") is not None:
+        summary += f" · key limit {fields['key_limit']:,}/h reached"
     if parts > 1:
         summary = f"$roll ({part}/{parts}) · {name}"
 

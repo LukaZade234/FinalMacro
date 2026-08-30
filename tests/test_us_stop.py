@@ -10,6 +10,7 @@ from macro.us_stop import (
     us_kakera_power_exhausted,
     us_stop_can_pause,
     us_stop_from_config,
+    us_stop_is_key_limit,
     us_stop_reason,
 )
 
@@ -33,6 +34,57 @@ def test_us_stop_roll_limit():
         us_rolls_done=100,
     )
     assert reason == "roll limit (100) reached"
+
+
+def test_us_stop_key_limit_is_off_until_toggled():
+    """A logged key limit must not stop a session that never asked for it."""
+    rules = KakeraReactionRules(enabled=False)
+    state = AccountState()
+    state.note_key_limit(2200)
+    assert (
+        us_stop_reason(
+            options=UsModeStopOptions(),
+            state=state,
+            rules=rules,
+            us_rolls_done=0,
+        )
+        is None
+    )
+
+
+def test_us_stop_key_limit_fires_once_a_roll_reports_it():
+    opts = UsModeStopOptions(stop_on_key_limit=True)
+    rules = KakeraReactionRules(enabled=False)
+    state = AccountState()
+    assert us_stop_reason(
+        options=opts, state=state, rules=rules, us_rolls_done=0
+    ) is None
+
+    assert state.note_key_limit(2200) is True
+    reason = us_stop_reason(options=opts, state=state, rules=rules, us_rolls_done=0)
+    assert reason == "hourly key limit reached (2,200 keys/h)"
+
+    # Seen again on the next roll: still capped, but no longer the first sighting.
+    assert state.note_key_limit(2200) is False
+
+    state.clear_key_limit()
+    assert us_stop_reason(
+        options=opts, state=state, rules=rules, us_rolls_done=0
+    ) is None
+
+
+def test_key_limit_always_waits_even_without_keep_draining():
+    """The cap lifts at the hourly reset, so the loop waits it out and resumes.
+
+    Reaction power is different — it may never come back inside one session, so
+    waiting on *that* stays opt-in behind keep-draining.
+    """
+    reason = "hourly key limit reached (2,200 keys/h)"
+    assert us_stop_is_key_limit(reason)
+    assert not us_stop_is_key_limit("roll limit (100) reached")
+    assert not us_stop_is_key_limit(None)
+    # It is not routed through keep-draining's pausable set.
+    assert not us_stop_can_pause(reason)
 
 
 def test_us_stop_power_with_dk_available():
@@ -114,14 +166,29 @@ def test_us_stop_power_perk8_budget_active_uses_7_5_percent():
     assert us_kakera_power_exhausted(state, rules)
 
 
-def test_us_stop_power_uses_bonus_base_cost():
+def test_us_stop_power_assumes_the_default_30_percent_click_halved_by_chaos():
+    """No ``$bonus`` on the state: falls back to a 30% click, 15% under chaos."""
+    rules = KakeraReactionRules(
+        enabled=True,
+        auto_use_dk=False,
+        types_allowed=["kakeraW"],
+    )
+    state = AccountState(power_percent=16.0, dk_stock=0)
+    assert not us_kakera_power_exhausted(state, rules)
+    state.power_percent = 14.0
+    assert us_kakera_power_exhausted(state, rules)
+
+
+def test_us_stop_power_uses_the_account_s_real_bonus_base_cost_not_the_default():
+    """``kakera_base_cost`` here simulates a costlier account from ``$bonus`` —
+    20% a click (e.g. upgrades bought), 10% under chaos — not the 30/15 default.
+    """
     rules = KakeraReactionRules(
         enabled=True,
         auto_use_dk=False,
         types_allowed=["kakeraW"],
     )
     state = AccountState(power_percent=12.0, dk_stock=0, kakera_base_cost=20.0)
-    # Chaos-assumed cost is 10%; 12% is enough.
     assert not us_kakera_power_exhausted(state, rules)
     state.power_percent = 8.0
     assert us_kakera_power_exhausted(state, rules)

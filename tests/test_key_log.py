@@ -148,6 +148,28 @@ def test_log_marceline_one_bronze():
     assert entries[0]["amount"] == 1
 
 
+def test_parse_key_limit_from_the_real_lucy_roll():
+    """Mudae's hourly cap replaces the key line on the card.
+
+    Logged 2026-08-30 during a ``$us`` drain. The roll still counted and could
+    still be claimed -- only the key gain was refused -- so this is a signal to
+    stop rolling, not a failed roll.
+    """
+    from mudae.parsers.kakera import parse_key_limit
+
+    desc = (
+        "Cyberpunk: Edgerunners <:sw:1>\n"
+        "❌ (You reached the limit of 2,200 keys per hour!)\n"
+        "Claims: #82\n"
+        "Likes: #151\n"
+        "201,569<:kakera:1>\n"
+    )
+    assert parse_key_limit(desc) == 2200
+    assert parse_keys(desc) == []
+    # An ordinary roll must not look like a capped one.
+    assert parse_key_limit(":chaoskey: (18) +5% kakera value\n") is None
+
+
 def test_log_reze_comma_separated_chaos_keys():
     desc = (
         ":chaoskey: (1,004) +5% kakera value\n"

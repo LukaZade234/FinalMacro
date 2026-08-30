@@ -34,6 +34,7 @@ Item {
         us_roll_kakera: { override: false, skip_kakera: false, types_allowed: [] },
         us_mode: { us_batch_size: 20, us_reset_margin_minutes: 2,
                    us_keep_draining: false, us_stop_on_power_exhausted: false,
+                   us_stop_on_key_limit: false,
                    us_stop_after_rolls_enabled: false, us_stop_after_rolls: 100,
                    us_schedule_enabled: false, us_schedule_start: "04:00",
                    us_schedule_end: "06:00" },

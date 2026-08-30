@@ -25,6 +25,7 @@ from macro.us_schedule import normalize_hhmm
 
 
 _POWER_EXHAUSTED_PREFIX = "reaction power exhausted"
+KEY_LIMIT_PREFIX = "hourly key limit reached"
 
 
 def _clamp_stop_after_rolls(value: Any, default: int = 100) -> int:
@@ -40,6 +41,7 @@ class UsModeStopOptions:
 
     keep_draining: bool = False
     stop_on_power_exhausted: bool = False
+    stop_on_key_limit: bool = False
     stop_after_rolls_enabled: bool = False
     stop_after_rolls: int = 100
     schedule_enabled: bool = False
@@ -53,6 +55,7 @@ class UsModeStopOptions:
         return cls(
             keep_draining=bool(data.get("keep_draining", False)),
             stop_on_power_exhausted=bool(data.get("stop_on_power_exhausted", False)),
+            stop_on_key_limit=bool(data.get("stop_on_key_limit", False)),
             stop_after_rolls_enabled=bool(data.get("stop_after_rolls_enabled", False)),
             stop_after_rolls=_clamp_stop_after_rolls(data.get("stop_after_rolls", 100)),
             schedule_enabled=bool(data.get("schedule_enabled", False)),
@@ -64,6 +67,7 @@ class UsModeStopOptions:
         return {
             "keep_draining": self.keep_draining,
             "stop_on_power_exhausted": self.stop_on_power_exhausted,
+            "stop_on_key_limit": self.stop_on_key_limit,
             "stop_after_rolls_enabled": self.stop_after_rolls_enabled,
             "stop_after_rolls": max(1, int(self.stop_after_rolls)),
             "schedule_enabled": self.schedule_enabled,
@@ -85,6 +89,7 @@ def us_stop_from_config(
     return UsModeStopOptions(
         keep_draining=bool(config.us_keep_draining),
         stop_on_power_exhausted=bool(config.us_stop_on_power_exhausted),
+        stop_on_key_limit=bool(config.us_stop_on_key_limit),
         stop_after_rolls_enabled=bool(config.us_stop_after_rolls_enabled),
         stop_after_rolls=max(1, int(config.us_stop_after_rolls)),
         schedule_enabled=bool(config.us_schedule_enabled) if apply_schedule else False,
@@ -109,8 +114,25 @@ def overlay_legacy_us_options(
 
 
 def us_stop_can_pause(reason: str | None) -> bool:
-    """True when keep-draining should wait instead of quitting."""
+    """True when keep-draining should wait instead of quitting.
+
+    Reaction power may never come back inside one session — it needs ``$dk`` or
+    hours of regen — so waiting on it is opt-in behind keep-draining. The key
+    cap is not in this class; see :func:`us_stop_is_key_limit`.
+    """
     return bool(reason) and reason.startswith(_POWER_EXHAUSTED_PREFIX)
+
+
+def us_stop_is_key_limit(reason: str | None) -> bool:
+    """True for the hourly key cap, which always waits rather than quitting.
+
+    Unlike reaction power this always comes back, and soon: it lifts at the
+    hourly rolls reset, which the ``$us`` loop already waits out for everyone
+    (``_wait_for_rolls_reset``). So enabling the toggle *is* the opt-in, and it
+    does not additionally require keep-draining — leaving the stack alone for
+    the rest of the hour and resuming is the whole point of it.
+    """
+    return bool(reason) and reason.startswith(KEY_LIMIT_PREFIX)
 
 
 def _perk8_half_cost_applies(state: Any, rules: KakeraReactionRules) -> bool:
@@ -163,6 +185,12 @@ def us_kakera_power_exhausted(state: Any, rules: KakeraReactionRules) -> bool:
 
     refresh_reaction_power(state)
     if state.power_percent is None:
+        # Same call as `can_afford_reaction`: unknown power means "not
+        # exhausted yet" rather than "stop now". The first click after this
+        # (if any) resolves the unknown one way or the other — either it
+        # spends power that turns out to be there, or Mudae's denial message
+        # re-anchors `power_percent` to the real value — so this check is
+        # accurate again on the very next roll either way.
         return False
 
     if rules.auto_use_dk and has_dk_available(state):
@@ -180,6 +208,17 @@ def us_kakera_power_exhausted(state: Any, rules: KakeraReactionRules) -> bool:
     return not can_afford_reaction(state, min_cost)
 
 
+def us_key_limit_reached(state: Any) -> int | None:
+    """Mudae's hourly key cap, once a roll has reported it."""
+    limit = getattr(state, "key_limit_hit", None)
+    if limit is None:
+        return None
+    try:
+        return int(limit)
+    except (TypeError, ValueError):
+        return None
+
+
 def us_stop_reason(
     *,
     options: UsModeStopOptions,
@@ -189,6 +228,10 @@ def us_stop_reason(
 ) -> str | None:
     if options.stop_after_rolls_enabled and us_rolls_done >= options.stop_after_rolls:
         return f"roll limit ({options.stop_after_rolls}) reached"
+    if options.stop_on_key_limit:
+        limit = us_key_limit_reached(state)
+        if limit is not None:
+            return f"{KEY_LIMIT_PREFIX} ({limit:,} keys/h)"
     if options.stop_on_power_exhausted and us_kakera_power_exhausted(state, rules):
         return "reaction power exhausted (no usable $dk left)"
     return None

@@ -83,7 +83,7 @@ changes.
 | `sheet_caps.py` | Run-channel `$bonus` power max + kakera click cost, `$shop` perk 9 cap |
 | `account_dailies.py` / `account_daily_runtime.py` | Account-global `$p` / `$daily` timing and send |
 | `roll_scheduler.py` / `roll_stop.py` / `roll_interrupts.py` | Sleep, stop, wish-claim interrupt |
-| `us_stop.py` | `$us` drain policy and stop / pause options |
+| `us_stop.py` | `$us` drain policy and stop / pause options (roll cap, reaction power, Mudae's hourly key limit, local schedule) |
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `perk9_daily.py` | Daily perk-9 click counter |

@@ -120,6 +120,16 @@ def refresh_reaction_power(state: Any, *, now: float | None = None) -> float | N
 
 
 def can_afford_reaction(state: Any, cost: float, *, now: float | None = None) -> bool:
+    """True unless power is known and too low.
+
+    Unknown power (before the first ``$tu``, or after a partial restore) is
+    treated as affordable rather than refused: a wrong guess costs at most one
+    click, since a real denial is a fast, parsed message
+    (``KAKERA_REACT_DENIED`` -> :func:`sync_reaction_power_from_denial`) that
+    re-anchors ``power_percent`` immediately, not a silent failure. Guessing
+    "no power" instead would wrongly skip real, affordable clicks every time a
+    session starts before its first ``$tu``.
+    """
     refresh_reaction_power(state, now=now)
     if cost <= 0:
         return True

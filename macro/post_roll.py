@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mudae.buttons import is_claim_button
+from mudae.types import MessageKind
 
 from macro.actions import DiscordActions
 from macro.config import MacroConfig
@@ -315,6 +316,23 @@ class PostRollHandler:
         parsed = await self._actions.wait_for_claim(timeout=8.0)
         if parsed is None:
             self._log(f"Claim timeout for {record.character_name or '?'}")
+            return
+        if parsed.kind == MessageKind.CLAIM_INTERVAL:
+            # This *is* the same claim slot tracked by `claim_available` /
+            # `claim_cooldown_minutes` (normally refreshed from `$tu`) — the
+            # click just revealed its real state more precisely than our last
+            # `$tu` did. Sync it the same way `$tu` parsing does, so the
+            # existing `claim_available is False` guards everywhere else
+            # (claim_best, $rt) take effect immediately instead of clicking
+            # into the same wall on the next roll in this batch.
+            minutes = parsed.fields.get("next_interval_minutes")
+            self._state.claim_available = False
+            self._state.set_claim_cooldown(minutes)
+            wait_note = f" — next in {minutes}m" if minutes is not None else ""
+            self._log(
+                f"Claim blocked by this server's claim interval for "
+                f"{record.character_name or '?'}{wait_note}"
+            )
             return
         winner = parsed.fields.get("winner") or "?"
         character = parsed.fields.get("character") or record.character_name or "?"

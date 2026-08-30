@@ -187,6 +187,32 @@ def parse_keys(description: str) -> list[dict[str, Any]]:
     return keys
 
 
+# "❌ (You reached the limit of 2,200 keys per hour!)" replaces the key line on a
+# roll once the hourly key cap is hit. The number is Mudae's, not ours, so it is
+# read rather than assumed -- only ``$us`` rolls come near it in practice.
+_KEY_LIMIT_RE = re.compile(
+    r"limit\s+of\s+\*{0,2}([\d,]+)\*{0,2}\s+keys?\s+per\s+hour",
+    re.IGNORECASE,
+)
+
+
+def parse_key_limit(description: str) -> int | None:
+    """Hourly key cap named on this roll, or ``None`` when it was not reached.
+
+    The roll itself still counts and can still be claimed; only the key gain is
+    refused, so this is a signal to stop rolling, not a failed roll.
+    """
+    if not description:
+        return None
+    match = _KEY_LIMIT_RE.search(description)
+    if not match:
+        return None
+    try:
+        return int(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 def parse_omega_keys(description: str) -> list[dict[str, Any]]:
     """Omega keys gained on this roll, e.g. ``<:omegakey:...> **+1**``.
 

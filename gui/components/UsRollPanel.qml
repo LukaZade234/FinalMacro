@@ -165,6 +165,22 @@ ColumnLayout {
             onToggled: onPatchUsMode("us_stop_on_power_exhausted", checked)
         }
 
+        ThemedCheckBox {
+            Layout.fillWidth: true
+            text: "Pause at Mudae's hourly key limit (2,200 keys/h)"
+            checked: boolField("us_mode", "us_stop_on_key_limit")
+            onToggled: onPatchUsMode("us_stop_on_key_limit", checked)
+        }
+
+        Label {
+            Layout.fillWidth: true
+            Layout.leftMargin: 24
+            text: "Past the cap a roll still costs a $us roll but grants no keys — Mudae prints \"You reached the limit of 2,200 keys per hour!\" on the card. Waits out the rest of the hour and resumes at the reset, leftover $us untouched; it does not need keep draining. Only $us gets near the cap."
+            color: Theme.fgMuted
+            font.pixelSize: 10
+            wrapMode: Text.WordWrap
+        }
+
         RowLayout {
             spacing: 6
             Layout.fillWidth: true

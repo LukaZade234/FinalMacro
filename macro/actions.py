@@ -358,8 +358,12 @@ class DiscordActions:
         *,
         timeout: float = 15.0,
     ) -> ParseResult | None:
+        # A server "once per interval" restriction is a real, fast reply too —
+        # without it here, that rejection was invisible to the waiter and the
+        # call just burned the full timeout before reporting a plain "timeout".
         result = await self.wait_for(
-            lambda _s, p: p.kind in {MessageKind.CLAIM, MessageKind.MARRIAGE},
+            lambda _s, p: p.kind
+            in {MessageKind.CLAIM, MessageKind.MARRIAGE, MessageKind.CLAIM_INTERVAL},
             timeout=timeout,
         )
         return result[1] if result else None

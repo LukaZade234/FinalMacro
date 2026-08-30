@@ -29,6 +29,7 @@ from macro.runtime_store import (
     save_runtime_record,
     snapshot_from_state,
 )
+from macro.live_clock import remaining_minutes
 from macro.us_schedule import (
     in_local_window,
     seconds_until_window_end,
@@ -38,6 +39,7 @@ from macro.us_stop import (
     UsModeStopOptions,
     us_kakera_power_exhausted,
     us_stop_can_pause,
+    us_stop_is_key_limit,
     us_stop_from_config,
     us_stop_reason,
     _minimum_kakera_cost,
@@ -931,6 +933,12 @@ class RollCycleEngine:
         self._log_debug(f"{log_prefix}→ {name}{ka_text}{spawn_note}")
         self._log(format_roll_line(fields))
 
+        if self._state.note_key_limit(fields.get("key_limit")):
+            self._log(
+                f"Hourly key limit reached ({int(self._state.key_limit_hit):,} "
+                "keys/h) — rolls still count but grant no keys"
+            )
+
         rl = fields.get("rolls_left")
         if not fields.get("perk_6"):
             # Perk-6 spawns are free, so they never come off a pool.
@@ -1364,6 +1372,10 @@ class RollCycleEngine:
         self._us_halt_reason = reason
         if not reason:
             return None
+        # The key cap always waits: it lifts at the hourly reset, so quitting
+        # would only strand the stack for the rest of the session.
+        if us_stop_is_key_limit(reason):
+            return "pause"
         if self._us_stop.keep_draining and us_stop_can_pause(reason):
             return "pause"
         return "stop"
@@ -1378,6 +1390,10 @@ class RollCycleEngine:
     async def _apply_us_halt(self, halt: str | None) -> str:
         """Turn a halt into ``""``, ``"break"``, or ``"continue"`` for the ``$us`` loop."""
         if halt == "pause":
+            if us_stop_is_key_limit(self._us_halt_reason):
+                if not await self._wait_for_key_limit_reset():
+                    return "break"
+                return "continue"
             if not await self._wait_for_us_power():
                 return "break"
             return "continue"
@@ -1459,8 +1475,11 @@ class RollCycleEngine:
         many into the usable count until the next rolls reset, where they (and
         any unused ``$us`` rolls) are wiped. So this loop:
 
-        * always rolls out the *usable* rolls first (normal + already-added
-          ``$us`` rolls) so nothing is skipped;
+        * always rolls out the *usable* rolls first (already-added ``$us`` rolls,
+          then leftover normal ones) so nothing is skipped. That order is
+          Mudae's, not a preference: a roll comes off the ``$us`` bonus while any
+          is left, so the hourly pool cannot be touched before the bonus is
+          spent;
         * tops up with ``$us <n>`` only when the usable pool hits zero;
         * reads the authoritative stacked total via a bare ``$us`` to decide how
           many to request and to know when the stack is exhausted (< 1 left);
@@ -1509,6 +1528,8 @@ class RollCycleEngine:
                         stop_bits.append(f"{verb} when power < {min_cost:g}%")
                     else:
                         stop_bits.append(f"{verb} on power (paid kakera only)")
+            if self._us_stop.stop_on_key_limit:
+                stop_bits.append("pause at the hourly key limit")
             if self._us_stop.stop_after_rolls_enabled:
                 stop_bits.append(f"stop after {self._us_stop.stop_after_rolls} rolls")
             if self._us_stop.schedule_enabled:
@@ -1547,6 +1568,31 @@ class RollCycleEngine:
                                 f"{hourly_left + us_bonus} usable roll(s) "
                                 "before they reset"
                             )
+                            # Same order as the steady-state path below, and for
+                            # the same reason: Mudae spends the ``$us`` bonus
+                            # before the hourly pool, so the bonus rolls are the
+                            # ones that go out first and they must carry the
+                            # ``$us`` kakera rules.
+                            if us_bonus > 0:
+                                done, claimed, halt = await self._roll_us_batch(
+                                    cmd,
+                                    us_bonus,
+                                    session_records,
+                                    roll_index,
+                                    us_roll=True,
+                                    respect_us_stop=False,
+                                )
+                                roll_index += done
+                                claimed_any = claimed_any or claimed
+                                if halt == "stop":
+                                    break
+                                keep, roll_timeouts = await self._handle_us_roll_timeout(
+                                    done, us_bonus, roll_timeouts
+                                )
+                                if not keep:
+                                    break
+                                if done < us_bonus:
+                                    continue
                             if hourly_left > 0:
                                 self._reset_roll_stop_tracker()
                                 segment_start = len(session_records)
@@ -1586,26 +1632,6 @@ class RollCycleEngine:
                                     if not keep:
                                         break
                                     continue
-                            if us_bonus > 0:
-                                done, claimed, halt = await self._roll_us_batch(
-                                    cmd,
-                                    us_bonus,
-                                    session_records,
-                                    roll_index,
-                                    us_roll=True,
-                                    respect_us_stop=False,
-                                )
-                                roll_index += done
-                                claimed_any = claimed_any or claimed
-                                if halt == "stop":
-                                    break
-                                keep, roll_timeouts = await self._handle_us_roll_timeout(
-                                    done, us_bonus, roll_timeouts
-                                )
-                                if not keep:
-                                    break
-                                if done < us_bonus:
-                                    continue
                         if not await self._wait_for_rolls_reset(margin):
                             break
                         us_stack = None
@@ -1614,7 +1640,17 @@ class RollCycleEngine:
                         self._reset_roll_stop_tracker()
                         continue
 
-                    if self._should_roll_normal_in_us_mode():
+                    # Bonus first, always. Mudae spends already-added ``$us``
+                    # rolls before the hourly pool, so while ``us_bonus > 0``
+                    # every roll -- however this loop labels it -- comes off the
+                    # bonus and ``rolls_left`` does not move. Running the
+                    # leftover-normal branch here rolled once, saw the same
+                    # ``rolls_left`` on the next ``$tu``, and rolled once again:
+                    # one ``$tu`` per roll until the bonus drained. It also gave
+                    # those rolls the hourly kakera rules instead of the ``$us``
+                    # ones. Leftover normal rolls are only reachable once the
+                    # bonus is spent, which is where this branch now runs.
+                    if us_bonus <= 0 and self._should_roll_normal_in_us_mode():
                         leftover = self._leftover_normal_rolls()
                         hourly_left = int(self._state.rolls_left or 0)
                         max_rolls = leftover
@@ -1964,7 +2000,76 @@ class RollCycleEngine:
             if reset_m is None or reset_m > margin:
                 note = f"next reset in {reset_m}m" if reset_m is not None else "reset passed"
                 self._log(f"$us mode: rolls reset complete ({note}) — resuming")
+                # The key cap is hourly like the roll pool, so the same
+                # rollover puts keys back on the table.
+                self._state.clear_key_limit()
                 return True
+        return False
+
+    async def _wait_for_key_limit_reset(self) -> bool:
+        """Pause until the hourly key window turns over, then resume rolling.
+
+        Past the cap a roll still spends a ``$us`` roll and grants no keys, so
+        the stack is better left alone for the rest of the hour. The key window
+        shares the roll pool's hourly boundary, so the tell is ``$tu``'s reset
+        countdown jumping back *up* — that only happens once the hour has
+        turned, whereas the raw number says nothing on its own.
+
+        Returns False if the user stops the macro, ``$tu`` fails, or a local
+        schedule window ends while waiting.
+        """
+        limit = self._state.key_limit_hit
+        label = f"{int(limit):,} keys/h" if limit is not None else "hourly cap"
+        self._log(
+            f"$us mode: pausing until the key window resets ({label}) — "
+            "leftover $us stays on the stack"
+        )
+        last_reset_m = self._state.rolls_reset_minutes
+        while not self._stop.is_set():
+            if (
+                self._us_stop.schedule_enabled
+                and self._us_schedule_entered
+                and not self._us_in_schedule_window()
+            ):
+                self._log(
+                    "$us mode: schedule window ended while waiting for the key window"
+                )
+                return False
+
+            # The reset deadline is already known, so sleep through the bulk of
+            # the countdown in one go rather than polling $tu at it; stop a
+            # minute short so the turn is not missed. An unknown deadline falls
+            # back to the ordinary poll.
+            slice_sec = _RESET_POLL_SEC
+            left_m = remaining_minutes(self._state.rolls_reset_at)
+            if left_m is not None and left_m > 1:
+                slice_sec = max(slice_sec, (left_m - 1) * 60.0)
+            if self._us_stop.schedule_enabled:
+                until_end = seconds_until_window_end(
+                    self._us_stop.schedule_start,
+                    self._us_stop.schedule_end,
+                )
+                if until_end is not None:
+                    slice_sec = min(slice_sec, max(1.0, until_end))
+
+            if not await self._wait_for_scheduled_wake(slice_sec):
+                return False
+            await self._maybe_refresh_perk8_status()
+            if not await self.run_tu():
+                self._log("$us mode: $tu failed while waiting for the key window")
+                return False
+
+            reset_m = self._state.rolls_reset_minutes
+            if (
+                reset_m is not None
+                and last_reset_m is not None
+                and reset_m > last_reset_m
+            ):
+                self._state.clear_key_limit()
+                self._log("$us mode: hourly key window reset — resuming")
+                return True
+            if reset_m is not None:
+                last_reset_m = reset_m
         return False
 
     async def _wait_for_us_power(self) -> bool:

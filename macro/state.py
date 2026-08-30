@@ -66,6 +66,10 @@ class AccountState:
     # subtracted from Mudae's ``pool - rolled`` between queries.
     perk9_spawns_at_sync: int = 0
     perk9_click_emojis: list[str] = field(default_factory=list)
+    # Mudae's hourly key cap ("You reached the limit of 2,200 keys per hour!"),
+    # as the number it named; ``None`` while keys are still being granted. Only
+    # reachable with $us, so the $us drain policy is what acts on it.
+    key_limit_hit: int | None = None
     perk9_unknown_clicks: int = 0
     kakera_base_cost: float = 30.0
     dk_cooldown_minutes: int = 20 * 60
@@ -173,6 +177,18 @@ class AccountState:
             return
         self.rollover_perk9_if_needed()
         self.perk9_spawns_today += int(count)
+
+    def note_key_limit(self, limit: int | None) -> bool:
+        """Record Mudae's hourly key cap. True the first time it is seen."""
+        if limit is None:
+            return False
+        first = self.key_limit_hit is None
+        self.key_limit_hit = int(limit)
+        return first
+
+    def clear_key_limit(self) -> None:
+        """The hourly window has rolled over; keys are being granted again."""
+        self.key_limit_hit = None
 
     def record_perk9_click_emoji(self, emoji: str | None) -> None:
         """Remember which colour was clicked, oldest first, for the Run panel."""

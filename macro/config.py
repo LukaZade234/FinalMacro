@@ -325,6 +325,12 @@ class MacroConfig:
     # A session roll cap and a local schedule window end are hard stops.
     us_keep_draining: bool = False
     us_stop_on_power_exhausted: bool = False
+    # Mudae grants no more keys past 2,200/hour, so $us rolls after that spend
+    # the stack for nothing. Only $us gets near it, which is why the toggle
+    # lives here and not in the hourly roll rules. Named for the ``us_stop_on_*``
+    # family, but the halt is a *pause*: the cap lifts at the hourly reset, so
+    # the loop waits it out and resumes rather than stranding the stack.
+    us_stop_on_key_limit: bool = False
     us_stop_after_rolls_enabled: bool = False
     us_stop_after_rolls: int = 100
     us_schedule_enabled: bool = False
@@ -468,6 +474,7 @@ class MacroConfig:
             us_roll_timeout_retry_sec=float(data.get("us_roll_timeout_retry_sec", 5.0)),
             us_keep_draining=bool(data.get("us_keep_draining", False)),
             us_stop_on_power_exhausted=bool(data.get("us_stop_on_power_exhausted", False)),
+            us_stop_on_key_limit=bool(data.get("us_stop_on_key_limit", False)),
             us_stop_after_rolls_enabled=bool(
                 data.get("us_stop_after_rolls_enabled", False)
             ),
@@ -497,6 +504,7 @@ class MacroConfig:
             "us_roll_timeout_retry_sec": self.us_roll_timeout_retry_sec,
             "us_keep_draining": self.us_keep_draining,
             "us_stop_on_power_exhausted": self.us_stop_on_power_exhausted,
+            "us_stop_on_key_limit": self.us_stop_on_key_limit,
             "us_stop_after_rolls_enabled": self.us_stop_after_rolls_enabled,
             "us_stop_after_rolls": max(1, int(self.us_stop_after_rolls)),
             "us_schedule_enabled": self.us_schedule_enabled,

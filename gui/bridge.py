@@ -380,6 +380,10 @@ class AppBridge(QObject):
         return bool(self._macro_config.us_stop_on_power_exhausted)
 
     @Property(bool, constant=False, notify=usModeOptionsChanged)
+    def usStopOnKeyLimit(self) -> bool:
+        return bool(self._macro_config.us_stop_on_key_limit)
+
+    @Property(bool, constant=False, notify=usModeOptionsChanged)
     def usStopAfterRollsEnabled(self) -> bool:
         return bool(self._macro_config.us_stop_after_rolls_enabled)
 
@@ -1216,6 +1220,7 @@ class AppBridge(QObject):
                     "us_stop_on_power_exhausted": data.get(
                         "us_stop_on_power_exhausted", False
                     ),
+                    "us_stop_on_key_limit": data.get("us_stop_on_key_limit", False),
                     "us_stop_after_rolls_enabled": data.get(
                         "us_stop_after_rolls_enabled", False
                     ),
@@ -1350,6 +1355,7 @@ class AppBridge(QObject):
                 "us_reset_margin_minutes",
                 "us_keep_draining",
                 "us_stop_on_power_exhausted",
+                "us_stop_on_key_limit",
                 "us_stop_after_rolls_enabled",
                 "us_stop_after_rolls",
                 "us_schedule_enabled",

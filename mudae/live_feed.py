@@ -134,6 +134,12 @@ def format_roll_line(fields: dict[str, Any]) -> str:
                     continue
         if total:
             parts.append(f":omegakey: +{total}")
+    limit = fields.get("key_limit")
+    if limit is not None:
+        try:
+            parts.append(f"❌ key limit {int(limit):,}/h")
+        except (TypeError, ValueError):
+            parts.append("❌ key limit reached")
     if fields.get("starwish"):
         parts.append(":starwish:")
     if fields.get("bku_reset"):

@@ -105,6 +105,21 @@ Implemented in `macro/claim_window.py`.
 Already-claimed characters and embeds with no enabled claim button are
 skipped.
 
+**"Once per interval" rejection.** If the claim slot's real state has drifted
+from what the last `$tu` reported (e.g. connecting mid-window), a claim button
+click can come back rejected: *"For this server, you can claim once per
+interval of Xh. The next interval begins in **N** min."* — parsed as
+`MessageKind.CLAIM_INTERVAL` (`mudae/parsers/claim_interval.py`). This is the
+**same slot** `claim_available` / `claim_cooldown_minutes` already track, just
+reported through a different message, so `_try_claim`
+(`macro/post_roll.py`) syncs it the same way `$tu` parsing does — `wait_for_claim`
+recognizes the kind (it used to time out on it, since it only matched
+`CLAIM`/`MARRIAGE`) and the handler sets `claim_available = False` /
+`set_claim_cooldown(next_interval_minutes)` from the reply. The existing
+`claim_available is False` guards (in `claim_best`, and the `$rt`-bypass path
+in `claim_record`) then apply immediately, instead of a later roll in the same
+batch clicking into the same wall again.
+
 ---
 
 
@@ -302,6 +317,14 @@ on the preset (Presets → `$us`), not the Run page:
 - **Keep draining** pauses on the hourly reset (and on power *if* that stop
 is on) instead of quitting.
 - **Stop on power** is optional; `$dk` and perk-8 “held for tomorrow” count.
+  The threshold always assumes the *next* click lands on a chaos key — the
+  cheapest a paid click can ever be — using the account's real `$bonus` base
+  cost when known (fallback 30%, so 15% under chaos). Deliberate: pricing the
+  stop at a plain click's cost (30%, no chaos) would trip the toggle well
+  before power is actually exhausted, since a chaos-key click might still be
+  affordable. `macro/us_stop.py::_minimum_kakera_cost`.
+- **Pause at the hourly key limit** (`us_stop_on_key_limit`, default off) — see
+below.
 - **Session roll cap** (e.g. 1000) is a hard stop.
 - **Local schedule** (`us_schedule_`*) is this computer’s clock, not UTC.
 While connected it drains `$us` on its own, like `$p` / `$daily`. Roll `$us`
@@ -309,6 +332,56 @@ on the Run page always starts immediately and ignores the window. Auto
 drain uses the session cap and other preset stops; leftover `$us` stays on
 the stack when the end time hits. If hourly is waiting for a refill, the
 schedule pauses it, drains `$us`, then resumes hourly.
+
+### Roll order: the `$us` bonus goes first
+
+The usable pool is `rolls_left + rolls_us_bonus`, and **Mudae spends the
+already-added `$us` rolls before the hourly ones**. That is Mudae's rule, not a
+macro preference, and every roll obeys it whatever the macro calls the roll.
+Two things follow:
+
+- Leftover normal rolls are only reachable once the bonus is spent. `$tu`
+reading `1 (+6 $us)` means six `$us` rolls and *then* the hourly one — the `1`
+does not move until the bonus is empty.
+- The bonus rolls must carry the `$us` kakera rules
+(`kakera_rules_for_roll(us_roll=True)`), because they are `$us` rolls.
+
+`_run_us_cycle` therefore rolls the bonus batch first and the leftover normal
+rolls after, in both the steady-state path and the reset-margin one. Getting
+this backwards is what caused the **`$tu` ↔ one-roll alternation**: the loop
+rolled a single "leftover normal" roll, the roll came off the bonus, `$tu`
+reported the same `rolls_left`, and it rolled one more — one `$tu` per roll
+until the bonus drained.
+
+### Hourly key limit
+
+Mudae grants at most **2,200 keys per hour**. Past that the roll card prints
+
+```
+❌ (You reached the limit of 2,200 keys per hour!)
+```
+
+in place of the key line. The roll still counts and can still be claimed —
+only the key gain is refused — so it is a reason to stop rolling, not a failed
+roll. `parse_key_limit` (`mudae/parsers/kakera.py`) reads the number Mudae
+names rather than assuming 2,200; `parse_roll` exposes it as `key_limit`, the
+Run feed marks the card, and `AccountState.key_limit_hit` holds it until the
+hourly rolls reset clears it (the key window shares that boundary).
+
+`us_stop_on_key_limit` turns it into a **pause**: the loop stops rolling on the
+capped card, waits out the rest of the hour, then resumes with the stack
+untouched (`_wait_for_key_limit_reset`). Unlike the reaction-power pause it is
+**not** gated behind keep draining — power may never come back inside a
+session, whereas the key cap always lifts at the next reset, which the loop
+already waits out for everyone. Enabling the toggle is the opt-in.
+
+The tell that the hour turned is `$tu`'s reset countdown jumping back **up**
+(e.g. 30m → 58m); the raw number says nothing on its own. The wait sleeps
+through the bulk of the countdown using the known deadline rather than polling
+`$tu` at it, and a local schedule window ending still cuts it short.
+
+The toggle lives in the `$us` rules alone — the cap is effectively unreachable
+on hourly rolls.
 
 ---
 

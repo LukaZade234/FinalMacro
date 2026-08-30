@@ -343,6 +343,137 @@ def test_us_mode_spends_leftovers_before_stacking_more():
     assert len(actions.roll_commands()) == 7
 
 
+def test_us_mode_rolls_the_us_bonus_before_a_leftover_normal_roll():
+    """The reported bug: one ``$tu`` per roll while a ``$us`` bonus was pending.
+
+    ``$tu`` read ``1 (+6 $us)``. The loop saw ``rolls_left == 1``, called it a
+    leftover normal roll and rolled exactly one -- but Mudae spends the ``$us``
+    bonus first, so the roll came off the bonus and ``rolls_left`` was still 1 on
+    the next ``$tu``. That repeated: seven rolls behind eight ``$tu`` polls, each
+    one using the hourly kakera rules rather than the ``$us`` ones. The bonus is
+    now rolled out as a batch first, and the leftover normal roll follows once it
+    is actually reachable.
+    """
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30, us_bonus=6), _tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(i) for i in range(1, 9)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, _ = _make_engine(actions)
+
+    _run_us(engine)
+
+    sent = [cmd for cmd, _ in actions.sent]
+    assert len(actions.roll_commands()) == 7
+    # The six bonus rolls go out back to back, with no $tu between them.
+    assert sent[:7] == ["tu"] + ["wa"] * 6, sent
+    # One $tu per roll is the signature of the bug.
+    assert sent.count("tu") < len(actions.roll_commands()), sent
+
+
+def test_us_bonus_rolls_use_the_us_kakera_rules_not_the_hourly_ones():
+    """Ordering is not cosmetic: it decides which kakera preset each roll gets.
+
+    Rolling the bonus as "leftover normal rolls" put ``$us`` rolls through
+    ``kakera_rules_for_roll(us_roll=False)``.
+    """
+    actions = _FakeActions(
+        tu_script=[_tu(1, 30, us_bonus=3), _tu(1, 30), _tu(0, 30)],
+        roll_script=[_roll(i) for i in range(1, 7)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, _ = _make_engine(
+        actions,
+        kakera_reaction=KakeraReactionRules(enabled=True, types_allowed=["kakeraY"]),
+        us_roll_kakera=UsRollKakeraRules(override=True, types_allowed=["kakeraR"]),
+    )
+
+    # Recorded at the reactor, not at ``kakera_rules_for_roll`` -- the stop
+    # checks call that too, and only the per-roll call is the question here.
+    seen: list[tuple[str, ...]] = []
+
+    class _Recorder:
+        async def react(self, *, rules, **_kw) -> None:
+            seen.append(tuple(rules.types_allowed))
+
+    with patch.object(engine, "_make_kakera_reactor", _Recorder):
+        _run_us(engine)
+
+    # Three bonus rolls on the $us preset, then the leftover normal roll on the
+    # hourly one.
+    assert seen[:3] == [("kakeraR",)] * 3, seen
+    assert seen[3] == ("kakeraY",), seen
+
+
+def test_us_mode_pauses_at_the_key_limit_and_resumes_next_hour():
+    """Past 2,200 keys/h a $us roll still costs a roll and grants no keys.
+
+    The third roll here is the first card that says so, so the batch stops
+    there. The cap lifts at the hourly reset, so the loop waits it out rather
+    than quitting and stranding the stack: the countdown jumping back *up*
+    (30m -> 58m) is the tell that the hour turned.
+    """
+    limited = _roll(3)
+    limited[1].fields["key_limit"] = 2200
+    actions = _FakeActions(
+        tu_script=[
+            _tu(0, 30, us_bonus=5),   # start: 5 usable $us rolls
+            _tu(0, 29),               # still the same hour while waiting
+            _tu(0, 58),               # countdown jumped -> new hour
+            _tu(0, 58, us_bonus=2),   # resumed: what is left of the pool
+            _tu(0, 57),
+        ],
+        roll_script=[_roll(1), _roll(2), limited, _roll(4), _roll(5)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+    engine._us_stop = UsModeStopOptions(stop_on_key_limit=True)
+
+    _run_us(engine)
+
+    # Paused after the capped card, then rolled the rest of the pool.
+    assert len(actions.roll_commands()) == 5
+    assert state.key_limit_hit is None  # cleared when the window turned
+
+
+def test_us_mode_key_limit_pause_does_not_need_keep_draining():
+    """Unlike the power pause, this one is not gated behind keep draining."""
+    limited = _roll(2)
+    limited[1].fields["key_limit"] = 2200
+    actions = _FakeActions(
+        tu_script=[_tu(0, 20, us_bonus=4), _tu(0, 55), _tu(0, 55, us_bonus=2), _tu(0, 54)],
+        roll_script=[_roll(1), limited, _roll(3), _roll(4)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+    engine._us_stop = UsModeStopOptions(
+        stop_on_key_limit=True,
+        keep_draining=False,
+    )
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 4
+    assert state.key_limit_hit is None
+
+
+def test_us_mode_rolls_on_through_the_key_limit_when_the_toggle_is_off():
+    """Default is unchanged: the cap is recorded but nothing acts on it."""
+    limited = _roll(2)
+    limited[1].fields["key_limit"] = 2200
+    actions = _FakeActions(
+        tu_script=[_tu(0, 30, us_bonus=4), _tu(0, 30)],
+        roll_script=[_roll(1), limited, _roll(3), _roll(4)],
+        stack_script=[_us_stack(0.2)],
+    )
+    engine, state = _make_engine(actions)
+
+    _run_us(engine)
+
+    assert len(actions.roll_commands()) == 4
+    assert state.key_limit_hit == 2200
+
+
 def test_us_mode_spends_chaos_extras_as_ordinary_hourly():
     """$tu already includes +N chaos rolls; they are ordinary stop-at-2 rolls."""
     actions = _FakeActions(
