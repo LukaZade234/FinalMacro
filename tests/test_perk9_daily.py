@@ -96,6 +96,41 @@ def test_sync_perk9_clicks_from_log(monkeypatch):
     assert state.perk9_clicks_today == 2
 
 
+def test_perk9_history_shows_the_dark_sphere_not_its_payout(monkeypatch):
+    """End to end: a real dark click reaches the Run panel as dark.
+
+    The panel is how the adaptive threshold is checked by eye, so a dark click
+    listed as the rainbow it paid out as would misreport both what was clicked
+    and how often the rare colours actually turn up.
+    """
+    from mudae.parsers.sphere import parse_sphere_click
+    from macro.perk9_daily import recent_perk9_click_colours
+
+    fields = parse_sphere_click(
+        "<:spD:1> turns into <a:spW:2>\n<a:spW:2> **lukazade234 +2,072** (7/20)"
+    ).fields
+
+    state = AccountState()
+    monkeypatch.setattr("macro.state.utc_date_key", lambda: "2026-08-30")
+    assert apply_perk9_click_from_parse(state, fields) is True
+    assert state.perk9_click_emojis == ["spD"]
+
+    monkeypatch.setattr(
+        "macro.perk9_daily.get_sphere_events",
+        lambda: [
+            {
+                "date_key": "2026-08-30",
+                "source": "sphere_click",
+                "sphere_type": fields["sphere_type"],
+                "sphere_resolved": fields["sphere_resolved"],
+            }
+        ],
+    )
+    assert recent_perk9_click_colours(
+        4, date_key="2026-08-30", account_id=""
+    ) == ["spD"]
+
+
 def test_run_summary_reports_perk9_from_state():
     from gui.run_summary import build_run_summary
 

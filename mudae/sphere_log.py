@@ -153,6 +153,14 @@ def record_sphere_earning(
     sphere_type = fields.get("sphere_type") or fields.get("kakera_type")
     if sphere_type:
         sphere_type = canonical_sphere_emoji(str(sphere_type))
+    # Dark/light paid out as another colour. ``sphere_type`` is the sphere that
+    # was clicked; this is what it became, so the row can show both and the
+    # amount still lines up with something.
+    resolved = [
+        canonical_sphere_emoji(str(item))
+        for item in (fields.get("sphere_resolved") or [])
+        if item
+    ]
     entry = {
         "guild_id": snapshot.guild_id,
         "guild_name": snapshot.guild_name,
@@ -163,6 +171,7 @@ def record_sphere_earning(
         "amount": value,
         "source": src,
         "sphere_type": sphere_type,
+        "sphere_resolved": resolved,
         "character_name": fields.get("character_name"),
         "claimed_by": fields.get("claimed_by"),
         "recorded_at": stamp.isoformat(),

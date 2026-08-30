@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""A/B the $ot probe policies against each other.
+"""A/B the $ot policies against each other.
 
-Ship cells are free and only blue costs a click, so the *only* decision worth
-scoring is which cell to probe when nothing is a certain ship. This script
-measures that choice three ways:
+Four named configurations, which is what `--policies` takes by default:
 
-``--known``       replays the 7 real boards baked into `macro/ot_replay.py`.
-                  Ground truth, but far too few to settle anything.
+``cap``        the whole pre-Extra-Chance solver — the 4th blue always ends the
+               board, and every certain ship is harvested on sight.
+``rule-only``  the same policy under the real end condition. This is the *bug
+               fix* on its own: it never walks away from a live board.
+``defer``      Extra Chance play without the hunt — hold the certain ships back
+               while nothing can end the board, but probe by plain EV.
+``hunt``       what ships: `defer` plus the blue bonus, and that bonus applies
+               only at 6-7 colours (`OT_BLUE_BONUS_COLORS`).
+
+Because the bonus wins at 6-7 colours and measured *negative* at 8-9, an
+aggregate mean averages a real effect against a real regression. Pass
+``--by-colors``, or fix ``--colors``, for anything you intend to act on.
+
+``--known``       replays the real boards baked into `macro/ot_replay.py`.
+                  Ground truth, but still a small sample.
 
 ``--from-log P``  replays every fully-revealed $ot board in a minigame log
                   (docs/minigames_to_use.jsonl, data/minigame_log.json) and
@@ -20,9 +31,10 @@ measures that choice three ways:
                   not of the policy; say so rather than picking a winner.
 
 Usage:
-  .venv/bin/python scripts/ot_bakeoff.py --known
+  .venv/bin/python scripts/ot_bakeoff.py --known --by-colors
   .venv/bin/python scripts/ot_bakeoff.py --from-log docs/minigames_to_use.jsonl
-  .venv/bin/python scripts/ot_bakeoff.py --trials 200 --policies greedy,mixed,safe
+  .venv/bin/python scripts/ot_bakeoff.py --trials 120 --by-colors
+  .venv/bin/python scripts/ot_bakeoff.py --sweep-blue-bonus 120 --colors 8
 """
 
 from __future__ import annotations
@@ -42,23 +54,70 @@ from macro.ot_replay import (  # noqa: E402
     replay_known_boards,
     replay_logged_boards,
     score_ot_trials,
+    split_by_colors,
 )
-from macro.ot_solver import DEFAULT_PROBE_POLICY, PROBE_POLICIES  # noqa: E402
+from macro.ot_solver import OT_BLUE_BONUS_SP, PROBE_POLICIES  # noqa: E402
+
+# The configurations worth comparing, as (label, kwargs). `cap` is the whole
+# pre-Extra-Chance solver — rules and policy — so it is the honest "before".
+NAMED_RUNS: dict[str, dict] = {
+    "cap": dict(policy="risk", extra_chance=False),
+    "rule-only": dict(policy="risk"),
+    "defer": dict(policy="hunt", blue_bonus=0.0),
+    "hunt": dict(policy="hunt"),
+}
 
 
-def _print_row(result: dict) -> None:
+def _print_row(result: dict, label: str | None = None) -> None:
     """One policy's line.
 
     ``ceiling`` is the SP of every ship cell — what a perfect game takes for
-    free. It is a yardstick, not a cap: blue pays 10 SP as well, so a game that
-    had to spend its four blues can land just over 100%.
+    free. It is a yardstick, not a cap: blue pays 10 SP as well, and under Extra
+    Chance a board can be cleared outright, so a good game lands over 100%.
+
+    ``paid`` adds `ot_replay.OT_CLICK_BONUS_SP` per click. Base SP is not what Mudae
+    actually pays — there is a large per-click term — and since Extra Chance
+    buys extra *clicks*, base SP understates it. See `macro.ot_replay`.
     """
     print(
-        f"  {result['policy']:11} avg_sp={result['avg_sp']:8.1f}"
+        f"  {label or result['policy']:11} avg_sp={result['avg_sp']:8.1f}"
         f"  ceiling={result['avg_ceiling']:8.1f}"
-        f"  share={result['share_of_ceiling'] * 100:5.1f}%"
+        f"  share={result['share_of_ceiling'] * 100:6.1f}%"
+        f"  clicks={result['avg_clicks']:5.2f}"
         f"  blues={result['avg_blues']:.2f}"
+        f"  perfect={result['perfect']:3d}"
+        f"  paid={result['avg_paid_sp']:8.1f}"
     )
+
+
+def _print_by_colors(results: dict[str, dict], baseline: str) -> None:
+    """Break every run down per colour count.
+
+    The blue bonus wins at 6-7 colours and measured *negative* at 8-9, which is
+    why it is only switched on for the first two. An aggregate mean averages
+    those together and reports neither, so anything comparing policies has to
+    come through here.
+    """
+    base = results.get(baseline)
+    if base is None:
+        return
+    base_split = split_by_colors(base)
+    print(f"\n  per colour count (delta vs {baseline}):")
+    for colours in sorted(base_split):
+        n = base_split[colours]["boards"]
+        print(f"    N={colours} ({n} boards)  {baseline}={base_split[colours]['avg_sp']:8.1f}")
+        for label, result in results.items():
+            if label == baseline:
+                continue
+            rows = split_by_colors(result).get(colours)
+            if not rows:
+                continue
+            delta = paired_delta(rows["per_board"], base_split[colours]["per_board"])
+            mark = "*" if delta["significant"] else " "
+            print(
+                f"      {label:11} {rows['avg_sp']:8.1f}"
+                f"  {delta['mean']:+8.1f} SP  t={delta['t']:+5.2f}{mark}"
+            )
 
 
 def _print_deltas(results: dict[str, dict], baseline: str) -> None:
@@ -82,37 +141,61 @@ def _print_deltas(results: dict[str, dict], baseline: str) -> None:
         )
 
 
-def run_known(policies: list[str], baseline: str) -> None:
+def _runs(policies: list[str]) -> dict[str, dict]:
+    """Named configurations first, then any bare policy names asked for."""
+    return {
+        name: (NAMED_RUNS[name] if name in NAMED_RUNS else dict(policy=name))
+        for name in policies
+    }
+
+
+def run_known(policies: list[str], baseline: str, by_colors: bool) -> None:
     print(f"REAL boards baked into macro/ot_replay.py: {len(KNOWN_BOARDS)}")
-    print("Ground truth — Mudae generated these layouts — but 7 is a tiny sample.\n")
-    results = {policy: replay_known_boards(policy=policy) for policy in policies}
-    for result in results.values():
-        _print_row(result)
-    names = results[policies[0]]["names"]
+    print("Ground truth — Mudae generated these layouts — but still a tiny sample.")
+    results = {
+        label: replay_known_boards(**kwargs) for label, kwargs in _runs(policies).items()
+    }
+    scored = next(iter(results.values()))
+    print(f"They really paid {scored['logged_avg_sp']:.1f} SP a board (hand / old solver).\n")
+    for label, result in results.items():
+        _print_row(result, label)
+    names = scored["names"]
     print("\n  per board:")
     print(f"    {'':11}" + "".join(f"{name:>10}" for name in names))
-    for policy, result in results.items():
+    for label, result in results.items():
         print(
-            f"    {policy:11}" + "".join(f"{value:10.0f}" for value in result["per_board"])
+            f"    {label:11}" + "".join(f"{value:10.0f}" for value in result["per_board"])
         )
     _print_deltas(results, baseline)
+    if by_colors:
+        _print_by_colors(results, baseline)
 
 
-def run_from_log(path: str, policies: list[str], baseline: str) -> None:
-    results = {policy: replay_logged_boards(path, policy=policy) for policy in policies}
-    first = results[policies[0]]
+def run_from_log(path: str, policies: list[str], baseline: str, by_colors: bool) -> None:
+    results = {
+        label: replay_logged_boards(path, **kwargs)
+        for label, kwargs in _runs(policies).items()
+    }
+    first = next(iter(results.values()))
     if not first["boards"]:
         print(f"no fully-revealed $ot boards found in {path}")
         return
     print(f"REAL logged boards: {first['boards']}  (source: {path})")
-    print(f"Played by hand at {first['logged_avg_sp']:.1f} SP average.\n")
-    for result in results.values():
-        _print_row(result)
+    print(f"They really scored {first['logged_avg_sp']:.1f} SP a board.\n")
+    for label, result in results.items():
+        _print_row(result, label)
     _print_deltas(results, baseline)
+    if by_colors:
+        _print_by_colors(results, baseline)
 
 
 def run_trials(
-    trials: int, policies: list[str], baseline: str, generators: list[str], colors: int | None
+    trials: int,
+    policies: list[str],
+    baseline: str,
+    generators: list[str],
+    colors: int | None,
+    by_colors: bool,
 ) -> None:
     label = "all colour counts" if colors is None else f"{colors}-colour boards"
     print(f"SYNTHETIC: {trials} {label} per generator.")
@@ -121,18 +204,61 @@ def run_trials(
     for generator in generators:
         print(f"generator = {generator}")
         results = {
-            policy: score_ot_trials(
+            name: score_ot_trials(
                 trials=trials,
                 n_colors=colors,
                 generator=generator,
-                policy=policy,
+                seed=7,
+                **kwargs,
+            )
+            for name, kwargs in _runs(policies).items()
+        }
+        for name, result in results.items():
+            _print_row(result, name)
+        _print_deltas(results, baseline)
+        if by_colors and colors is None:
+            _print_by_colors(results, baseline)
+        print()
+
+
+def run_blue_bonus_sweep(trials: int, generators: list[str], colors: int | None) -> None:
+    """Sweep the hunt's blue bonus, the knob that decides how hard to chase blues.
+
+    Bonus 0 is `defer` — the Extra Chance phase without the hunt — and a large
+    enough bonus is pure "click the likeliest blue". This is the sweep that says
+    the bonus belongs at 6-7 colours and nowhere else, so run it with `--colors`
+    fixed; averaged across colour counts it hides the sign change.
+    """
+    bonuses = [0.0, 60.0, 150.0, 300.0, 600.0, 1000.0, 3000.0]
+    print(f"BLUE BONUS SWEEP: {trials} boards per bonus per generator.")
+    print(f"bonus=0 is `defer`; the shipped value is {OT_BLUE_BONUS_SP:.0f}.\n")
+    for generator in generators:
+        print(f"generator = {generator}")
+        base = score_ot_trials(
+            trials=trials,
+            n_colors=colors,
+            generator=generator,
+            policy="risk",
+            extra_chance=False,
+            seed=7,
+        )
+        print(f"  cap (old rules)      avg_sp={base['avg_sp']:8.1f}")
+        for bonus in bonuses:
+            result = score_ot_trials(
+                trials=trials,
+                n_colors=colors,
+                generator=generator,
+                policy="hunt",
+                blue_bonus=bonus,
                 seed=7,
             )
-            for policy in policies
-        }
-        for result in results.values():
-            _print_row(result)
-        _print_deltas(results, baseline)
+            delta = paired_delta(result["per_board"], base["per_board"])
+            print(
+                f"  bonus={bonus:7.1f}      avg_sp={result['avg_sp']:8.1f}"
+                f"  clicks={result['avg_clicks']:5.2f}"
+                f"  {delta['mean']:+8.1f} SP  t={delta['t']:+5.2f}"
+                f"  {'SIGNIFICANT' if delta['significant'] else 'ns'}"
+            )
         print()
 
 
@@ -182,12 +308,20 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=0, help="synthetic boards per generator")
     parser.add_argument(
         "--policies",
-        default=",".join(PROBE_POLICIES[:4]),
-        help=f"comma-separated, from {','.join(PROBE_POLICIES)}",
+        default="cap,rule-only,defer,hunt",
+        help=(
+            f"comma-separated, from {','.join(NAMED_RUNS)}"
+            f" or a bare policy in {','.join(PROBE_POLICIES)}"
+        ),
     )
-    parser.add_argument("--baseline", default=DEFAULT_PROBE_POLICY)
+    parser.add_argument("--baseline", default="cap")
     parser.add_argument("--generator", default="both", help="uniform, sequential or both")
     parser.add_argument("--colors", type=int, default=None, help="fix the colour count")
+    parser.add_argument(
+        "--by-colors",
+        action="store_true",
+        help="break results down per colour count (the bonus flips sign at 8)",
+    )
     parser.add_argument(
         "--sweep-risk",
         type=int,
@@ -195,25 +329,45 @@ def main() -> None:
         metavar="TRIALS",
         help="sweep the risk penalty, which spans greedy through safe",
     )
+    parser.add_argument(
+        "--sweep-blue-bonus",
+        type=int,
+        default=0,
+        metavar="TRIALS",
+        help="sweep the hunt's blue bonus; pair it with --colors",
+    )
     args = parser.parse_args()
 
     policies = [p.strip() for p in args.policies.split(",") if p.strip()]
-    unknown = [p for p in policies if p not in PROBE_POLICIES]
+    known = set(NAMED_RUNS) | set(PROBE_POLICIES)
+    unknown = [p for p in policies if p not in known]
     if unknown:
         parser.error(f"unknown policies: {', '.join(unknown)}")
+    if args.baseline not in policies:
+        parser.error(f"baseline {args.baseline!r} is not among --policies")
     generators = list(GENERATORS) if args.generator == "both" else [args.generator]
 
     if args.sweep_risk:
         run_risk_sweep(args.sweep_risk, generators, args.colors)
         return
+    if args.sweep_blue_bonus:
+        run_blue_bonus_sweep(args.sweep_blue_bonus, generators, args.colors)
+        return
     if args.from_log:
-        run_from_log(args.from_log, policies, args.baseline)
+        run_from_log(args.from_log, policies, args.baseline, args.by_colors)
         print()
     if args.known or not (args.from_log or args.trials):
-        run_known(policies, args.baseline)
+        run_known(policies, args.baseline, args.by_colors)
         print()
     if args.trials:
-        run_trials(args.trials, policies, args.baseline, generators, args.colors)
+        run_trials(
+            args.trials,
+            policies,
+            args.baseline,
+            generators,
+            args.colors,
+            args.by_colors,
+        )
 
 
 if __name__ == "__main__":

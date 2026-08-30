@@ -329,6 +329,14 @@ def test_parse_sphere_click_megasphere():
 
 
 def test_parse_sphere_click_dark_turns_into_rainbow():
+    """The clicked sphere is the dark one, whatever the payout line says.
+
+    Mudae pays a dark click out under the colour it became, so the payout line
+    names a sphere that was never on the button. Reporting that colour made the
+    perk-9 history and the sphere log claim a rainbow was clicked -- and, since
+    the outcome only reaches its own line when Discord keeps the newline, the
+    answer changed with the whitespace. ``sphere_resolved`` keeps the payout.
+    """
     from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
 
     short = (
@@ -339,13 +347,17 @@ def test_parse_sphere_click_dark_turns_into_rainbow():
         "<:spD:1>  turns into <a:spW:2>\n"
         "<a:spW:2> **lukazade234 +2,072**  (20/20)"
     )
+    # Session logs flatten the newline away; both readings must agree.
+    flattened = short.replace("\n", " ")
     assert is_sphere_click_message(short) is True
     assert is_sphere_click_message(custom) is True
     # Two sphere emojis on adjacent lines match the $p grid heuristic.
     assert detect_command_from_response(short) == "p"
-    for content in (short, custom):
+    for content in (short, custom, flattened):
         parsed = parse_sphere_click(content)
-        assert parsed.fields["sphere_type"] == "spW"
+        assert parsed.fields["sphere_type"] == "spD"
+        assert parsed.fields["sphere_resolved"] == ["spW"]
+        assert "spD \u2192 spW" in parsed.summary
         assert parsed.fields["claimed_by"] == "lukazade234"
         assert parsed.fields["amount"] == 2072
         assert parsed.fields["daily_used"] == 20
@@ -367,6 +379,36 @@ def test_parse_sphere_click_dark_turns_into_rainbow():
         result = parse_message(snapshot)
         assert result.kind == MessageKind.SPHERE_CLICK
         assert result.fields["daily_used"] == 20
+
+
+def test_parse_sphere_click_light_keeps_its_fragments():
+    """Light spends the click too; the fragments are the payout, not the click."""
+    from mudae.parsers.sphere import parse_sphere_click
+
+    content = (
+        ":spL: breaks down into :spG: + :spT: + :spB: + :spT: + :spG: "
+        "=> lukazade234 +552 (2/20)"
+    )
+    parsed = parse_sphere_click(content)
+    assert parsed.fields["sphere_type"] == "spL"
+    assert parsed.fields["sphere_resolved"] == ["spG", "spT", "spB", "spT", "spG"]
+    assert parsed.fields["amount"] == 552
+
+
+def test_parse_sphere_click_plain_colour_has_no_transform():
+    """A colour that pays as itself must not grow a resolved list.
+
+    The ``$op 8`` footer says "turns into" as well, so the transform rule only
+    fires on a sphere emoji sitting directly before the verb.
+    """
+    from mudae.parsers.sphere import parse_sphere_click
+
+    parsed = parse_sphere_click(
+        ":spY: lukazade234 +292 (14/20) 💎/2 turns into 2x 🔴 for today."
+    )
+    assert parsed.fields["sphere_type"] == "spY"
+    assert "sphere_resolved" not in parsed.fields
+    assert "\u2192" not in parsed.summary
 
 
 def test_parse_kakera_claim():

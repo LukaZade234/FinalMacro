@@ -95,7 +95,7 @@ changes.
 | `oh_replay.py` | `$oh` simulator + replay of real logged boards (no solver yet; greedy lives in `sphere_game.py`) |
 | `oc_solver.py` / `oc_replay.py` | `$oc` geometric hunt + remaining-need-aware collect lookahead; replay of **real logged boards** (preferred) or calibrated synthetic ones |
 | `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
-| `ot_solver.py` / `ot_replay.py` | `$ot` battleship: fleet inference by a **memoised counting DP** over 5,520 ship triples (never enumerating the millions of placements), harvest-then-probe policy, replay of the 7 real boards or generated ones. |
+| `ot_solver.py` / `ot_replay.py` | `$ot` battleship: fleet inference by a **memoised counting DP** over 5,520 ship triples (never enumerating the millions of placements). Two-phase policy — hunt blues while **Extra Chance** holds the board open, then harvest-and-probe. Replay of the 27 real boards or generated ones. |
 | `minigame_board.py` | 5×5 board / click helpers for the minigame log. ``normalize_sphere_emoji`` folds colour-blind ``spB2`` / ``spT2`` into ``spB`` / ``spT``. |
 | `settings_apply.py` | Push a settings preset to the server |
 | `state.py` | `AccountState`, `MacroPhase` |
@@ -109,7 +109,7 @@ changes.
 | Path | Role |
 |------|------|
 | `clock.py` | UTC `date_key` (Mudae dailies); local HH:MM:SS for the live feed |
-| `discord_reader.py` | `ChannelMonitor` — user-token client, one channel |
+| `discord_reader.py` | `ChannelMonitor` — user-token client, one channel. `is_connected` tracks `on_disconnect` / `on_resumed` and `client.is_closed()` (it used to be set once by `on_ready` and never cleared, so every reconnect guard was dead code); `ensure_connected()` waits for discord.py's own resume before forcing one, and `seconds_since_last_event()` exposes a silent gateway to callers that know they should have heard something. `send_command` and `click_button` both retry transient failures, reconnect when the gateway has dropped, and report the reason; a click also refetches the message between attempts, since a stale cached copy is the usual reason a button "vanishes". |
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP**. Colour-blind ``spB2`` / ``spT2`` collapse via ``canonical_sphere_emoji``. |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere) |

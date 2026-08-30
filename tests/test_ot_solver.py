@@ -14,9 +14,12 @@ from macro.ot_replay import KNOWN_BOARDS, is_legal_board
 from macro.ot_solver import (
     BLUE,
     DEFAULT_CLICKS_BUDGET,
+    EXTRA_CHANCE_SHIP_HITS,
+    OT_BLUE_BONUS_COLORS,
     OT_CELL_SP,
     SEGMENTS,
     UNKNOWN_TWO,
+    blue_bonus_for,
     choose_ot_cell,
     choose_ot_click,
     emoji_to_ot_color,
@@ -26,6 +29,7 @@ from macro.ot_solver import (
     format_solver_stats,
     merge_observations,
     observations_from_buttons,
+    ot_game_over,
     parse_ot_fleet,
     solver_stats,
 )
@@ -221,7 +225,11 @@ def test_parse_rejects_anything_that_is_not_an_ot_fleet(text):
 def test_more_colours_mean_a_more_valuable_unknown_ship():
     values = [expected_two_cell_sp(fleet_for_colors(n), set()) for n in (6, 7, 8, 9)]
     assert values == sorted(values)
-    assert values[0] == pytest.approx(90.9, abs=0.5)
+    # Was 90.9 while `OT_RARE_WEIGHTS` borrowed the $oh spawn rates. Those
+    # predicted 0.2 rainbow ships across the 26 rare slots of KNOWN_BOARDS,
+    # where 3 turned up, so an unidentified length-2 cell was worth far more
+    # than the solver thought.
+    assert values[0] == pytest.approx(116.4, abs=0.5)
 
 
 def test_seeing_a_colour_removes_it_from_the_unknown_pool():
@@ -267,14 +275,72 @@ def test_the_safe_policy_really_does_minimise_blue_risk():
     assert marginals.p_blue(choice) == min(marginals.p_blue(c) for c in hidden)
 
 
-def test_no_click_once_the_blue_budget_is_gone():
+def test_no_click_once_the_blue_budget_is_gone_without_extra_chance():
+    """The old reading is a *state*, so the solver can short-circuit it.
+
+    Under Extra Chance it is an event instead — the same (4 blues, 5 hits) is a
+    finished board if the blue came last and a live one if the ship hit did — so
+    there the caller must ask `ot_game_over` after each blue and this returns a
+    cell either way. See `test_extra_chance_keeps_playing_past_the_budget`.
+    """
     fleet = fleet_for_colors(6)
     buttons = _buttons()
     assert choose_ot_click(buttons, {}, fleet=fleet, blues_spent=0) is not None
     assert (
-        choose_ot_click(buttons, {}, fleet=fleet, blues_spent=DEFAULT_CLICKS_BUDGET)
+        choose_ot_click(
+            buttons,
+            {},
+            fleet=fleet,
+            blues_spent=DEFAULT_CLICKS_BUDGET,
+            extra_chance=False,
+        )
         is None
     )
+
+
+def test_extra_chance_keeps_playing_past_the_budget():
+    fleet = fleet_for_colors(6)
+    buttons = _buttons()
+    for hits in (0, EXTRA_CHANCE_SHIP_HITS, EXTRA_CHANCE_SHIP_HITS + 3):
+        assert (
+            choose_ot_click(
+                buttons,
+                {},
+                fleet=fleet,
+                blues_spent=DEFAULT_CLICKS_BUDGET + 2,
+                ship_hits=hits,
+            )
+            is not None
+        ), hits
+
+
+@pytest.mark.parametrize(
+    "blues, hits, extra, expected",
+    [
+        # Nothing under the budget can ever end a board.
+        (0, 0, True, False),
+        (3, 9, True, False),
+        # The 4th blue: fatal at 5 hits, granted below.
+        (4, 5, True, True),
+        (4, 4, True, False),
+        (4, 0, True, False),
+        # ...and it stays grantable however many blues pile up, which is what
+        # makes a perfect game 8 Extra Chances on an 11-blue board.
+        (11, 0, True, False),
+        (11, 5, True, True),
+        # Without Extra Chance the 4th blue always ends it.
+        (4, 0, False, True),
+        (3, 0, False, False),
+    ],
+)
+def test_the_end_condition_is_the_one_the_logs_showed(blues, hits, extra, expected):
+    """Ten logged games split on exactly this predicate.
+
+    Nine reached their 4th blue with 6-16 ship hits and the grid locked; the
+    tenth reached it with 3 and the grid stayed live, so the macro stopped on a
+    playable board.
+    """
+    assert ot_game_over(blues, hits, extra_chance=extra) is expected
 
 
 def test_no_click_when_every_cell_is_already_revealed():
@@ -297,12 +363,19 @@ def test_solver_stats_describe_the_phase_and_the_pick():
     fleet = fleet_for_colors(6)
     stats = solver_stats(fleet, {})
     assert stats["configurations"] == CONFIGURATIONS[6]
-    assert stats["phase"] == "probe"
+    # An empty board with Extra Chance live is the hunt, not a plain probe —
+    # the phase name has to say so, or holding certain ships back would read as
+    # the solver ignoring free SP.
+    assert stats["phase"] == "hunt"
     assert 0 <= stats["best_index"] < GRID_CELLS
     assert stats["best_ev"] > OT_CELL_SP[BLUE]
     text = format_solver_stats(fleet, {})
-    assert "placements" in text and "probe" in text
+    assert "placements" in text and "hunt" in text
     assert "no fleet placement" in format_solver_stats(fleet, {0: "O", 24: "O"})
+
+    after = solver_stats(fleet, {}, ship_hits=EXTRA_CHANCE_SHIP_HITS)
+    assert after["phase"] == "probe"
+    assert solver_stats(fleet, {}, policy="risk")["phase"] == "probe"
 
 
 def test_the_uniform_sampler_reproduces_the_exact_marginals():
@@ -338,15 +411,69 @@ def test_the_uniform_sampler_reproduces_the_exact_marginals():
 def test_the_shipped_probe_rule_is_the_one_that_was_measured():
     """Pin the policy and its tuning so a change has to be deliberate.
 
-    `greedy` is the intuitive rule and it loses; the penalty is tuned to the
-    low end of the winning plateau because higher values have a demonstrated
-    collapse on a real board. Changing either of these should mean re-running
-    `scripts/ot_bakeoff.py --sweep-risk`, not editing a constant.
+    `greedy` is the intuitive rule and it loses; the risk penalty is tuned to
+    the low end of the winning plateau because higher values have a demonstrated
+    collapse on a real board. The blue bonus is the same expression with the
+    opposite sign, applied only while Extra Chance is live. Changing any of
+    these should mean re-running `scripts/ot_bakeoff.py`, not editing a
+    constant.
     """
-    from macro.ot_solver import DEFAULT_PROBE_POLICY, RISK_PENALTY_SP
+    from macro.ot_solver import (
+        DEFAULT_PROBE_POLICY,
+        EXTRA_CHANCE,
+        OT_BLUE_BONUS_SP,
+        RISK_PENALTY_SP,
+    )
 
-    assert DEFAULT_PROBE_POLICY == "risk"
+    assert EXTRA_CHANCE is True
+    assert DEFAULT_PROBE_POLICY == "hunt"
     assert RISK_PENALTY_SP == 60.0
+    assert OT_BLUE_BONUS_SP == 600.0
+
+
+def test_the_blue_bonus_is_off_where_it_measured_negative():
+    """6-7 colours hunt; 8-9 keep the plain probe.
+
+    At 8-9 colours there are only 5-7 blues, the four ship hits run out before
+    the hunt lands one, and the bonus measured -122 SP (t = -3.52) / -161 SP
+    (t = -3.57) on 120 generated boards apiece. Deferring the certain ships is
+    kept at every colour count; only the bonus is switched off.
+    """
+    assert OT_BLUE_BONUS_COLORS == {6, 7}
+    assert [blue_bonus_for(fleet_for_colors(n)) > 0 for n in (6, 7, 8, 9)] == [
+        True,
+        True,
+        False,
+        False,
+    ]
+
+
+def test_the_hunt_holds_certain_ships_back_until_the_phase_is_over():
+    """A certain ship is free *later* but costs a ship hit *now*.
+
+    Spending one while Extra Chance is live buys nothing — the cell stays
+    collectable — and moves the board one step closer to the ending. So the
+    hunt takes an uncertain cell instead, and only harvests once the phase is
+    done.
+    """
+    # A real board, revealed just far enough that some cells have resolved and
+    # most have not.
+    cells = KNOWN_BOARDS[0]["cells"]
+    fleet = fleet_for_colors(len(set(cells)))
+    observations = {index: cells[index] for index in range(2)}
+    marginals = enumerate_ot(fleet, observations)
+    hidden = [index for index in range(GRID_CELLS) if index not in observations]
+    certain = {cell for cell in hidden if marginals.is_certain_ship(cell)}
+    uncertain = [cell for cell in hidden if cell not in certain]
+    assert certain and uncertain, "this board no longer exercises the choice"
+
+    during = choose_ot_cell(fleet, observations, hidden, policy="hunt", ship_hits=0)
+    assert during in uncertain
+
+    after = choose_ot_cell(
+        fleet, observations, hidden, policy="hunt", ship_hits=EXTRA_CHANCE_SHIP_HITS
+    )
+    assert after in certain
 
 
 def test_a_zero_penalty_is_exactly_the_greedy_rule():

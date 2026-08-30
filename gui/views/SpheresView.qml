@@ -85,6 +85,19 @@ Item {
         return n.toLocaleString(Qt.locale(), "f", 0)
     }
 
+    // Dark and light are logged as the sphere that was *clicked*, because that
+    // is the one the perk-9 budget was spent on. The payout came from another
+    // colour, so name it on hover instead of losing it.
+    function resolvedTooltip(row) {
+        var resolved = row.sphere_resolved || []
+        if (!resolved.length)
+            return ""
+        var names = []
+        for (var i = 0; i < resolved.length; i++)
+            names.push(SphereAssets.label(resolved[i]))
+        return SphereAssets.label(row.sphere_type || "") + " \u2192 " + names.join(" + ")
+    }
+
     function sourceBreakdown() {
         return payload.by_source || []
     }
@@ -451,6 +464,7 @@ Item {
                                     SphereTypeBadge {
                                         anchors.verticalCenter: parent.verticalCenter
                                         sphereId: modelData.sphere_type || ""
+                                        tooltip: spheresRoot.resolvedTooltip(modelData)
                                     }
                                 }
                                 Label {

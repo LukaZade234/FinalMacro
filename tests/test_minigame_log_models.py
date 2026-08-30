@@ -306,13 +306,85 @@ def test_ot_blue_cells_pay_the_same_ten_sp_as_everywhere_else():
     assert ships and not any(click["paid"] for click in ships)
 
 
-def test_ot_games_end_on_the_fourth_blue():
-    """The conservative end condition the solver assumes, as logged."""
+def _ot_game_shape(row: dict) -> tuple[int, int, bool] | None:
+    """``(blues, ship hits before the last blue, board fully revealed)``."""
+    clicks = row.get("clicks") or []
+    if not clicks or row.get("reason") != "done":
+        return None
+    blues = hits = hits_at_last_blue = 0
+    for click in clicks:
+        if click.get("emoji") == "spB":
+            blues += 1
+            hits_at_last_blue = hits
+        else:
+            hits += 1
+    revealed = "spU" not in (row.get("board") or [])
+    return blues, hits_at_last_blue, revealed
+
+
+def test_ot_extra_chance_decides_whether_the_fourth_blue_ends_the_game():
+    """The rule `macro.ot_solver.ot_game_over` encodes, as logged.
+
+    A blue ends the board only when it is the 4th-or-later *and* at least
+    ``EXTRA_CHANCE_SHIP_HITS`` ship cells have already been clicked. The ten
+    games of 2026-08-30 split on exactly that: nine reached their 4th blue with
+    6-16 ship hits and Mudae revealed the board, while the tenth reached it with
+    3 hits, kept the grid live, and was abandoned mid-game by a loop that
+    stopped itself at the budget — so its board row is still full of ``spU``.
+
+    A fully-revealed board is therefore the log's own record that the game
+    really ended — *unless* we clicked all 25 cells ourselves, which under Extra
+    Chance is a perfect game and reveals the board without ending it.
+    """
+    from macro.minigame_board import GRID_CELLS
+    from macro.ot_solver import EXTRA_CHANCE_SHIP_HITS, ot_game_over
+
+    checked = 0
     for row in _rows("ot"):
-        clicks = row.get("clicks") or []
-        if not clicks or row.get("reason") != "done":
+        shape = _ot_game_shape(row)
+        if shape is None:
             continue
-        blues = sum(1 for click in clicks if click.get("emoji") == "spB")
+        blues, hits_at_last_blue, revealed = shape
+        clicks = row.get("clicks") or []
         assert row.get("clicks_budget") == 4
-        assert blues == row.get("clicks_paid") == 4
-        assert clicks[-1]["emoji"] == "spB", "a finished game ends on a blue"
+        assert blues == row.get("clicks_paid")
+        if len(clicks) >= GRID_CELLS:
+            continue  # perfect game: we revealed it, Mudae did not
+        if not revealed:
+            # Never finished: the last blue must have been survivable.
+            assert hits_at_last_blue < EXTRA_CHANCE_SHIP_HITS, row.get("time")
+            continue
+        checked += 1
+        assert clicks[-1]["emoji"] == "spB", "ends on a blue"
+        assert ot_game_over(blues, hits_at_last_blue), row.get("time")
+    assert checked, "no finished $ot games in the log"
+
+
+def test_ot_rare_ship_frequencies_still_match_the_shipped_weights():
+    """`OT_RARE_WEIGHTS` is measured, so the log is allowed to contradict it.
+
+    It used to be the $oh per-cell spawn rates, which predicted 1.2 reds and
+    0.2 rainbows across the rare slots we had and were badly wrong on both.
+    This does not re-fit the numbers — 26 slots is far too few — it only fails
+    when a colour has drifted far enough that they should be re-derived.
+    """
+    from macro.ot_solver import OT_RARE_WEIGHTS, RARE_COLORS
+
+    seen: dict[str, int] = {colour: 0 for colour in RARE_COLORS}
+    for cells in _ot_boards():
+        for colour in set(cells) & set(RARE_COLORS):
+            seen[colour] += 1
+    total = sum(seen.values())
+    if total < 20:
+        pytest.skip(f"only {total} rare ship slots logged so far")
+
+    weight_total = sum(OT_RARE_WEIGHTS.values())
+    for colour, count in seen.items():
+        expected = total * OT_RARE_WEIGHTS[colour] / weight_total
+        # Poisson-ish: 3 standard deviations, floored so a rare colour turning
+        # up twice when 0.5 was expected does not fail on its own.
+        allowed = max(3.0, 3.0 * (expected ** 0.5))
+        assert abs(count - expected) <= allowed, (
+            f"{colour}: {count} of {total} rare slots vs {expected:.1f} expected"
+            " — re-derive OT_RARE_WEIGHTS"
+        )

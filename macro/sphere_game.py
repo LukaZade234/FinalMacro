@@ -464,8 +464,16 @@ async def wait_for_minigame_click_ack(
     max_retries: int = 2,
     log: Callable[[str], None] | None = None,
     on_retry_click: Callable[[], Any] | None = None,
+    on_ack_recovered: Callable[[], Any] | None = None,
 ) -> tuple[Any | None, str]:
-    """Wait for Mudae to acknowledge a minigame click, with retries and fetch fallback."""
+    """Wait for Mudae to acknowledge a minigame click, with retries and fetch fallback.
+
+    ``on_ack_recovered`` is awaited whenever the acknowledgement had to be
+    fetched over HTTP because nothing arrived on the gateway. One of those is
+    ordinary; a run of them means the gateway has stopped delivering while
+    still claiming to be connected, which costs ``edit_timeout`` *per click* —
+    a 22-click ``$ot`` board took five minutes that way on 2026-08-30.
+    """
 
     async def _wait_for_grid_edit() -> Any | None:
         result = await actions.wait_for(
@@ -574,6 +582,8 @@ async def wait_for_minigame_click_ack(
         if fetched is not None:
             if log:
                 log("click ack recovered via fetch — continuing")
+            if on_ack_recovered is not None:
+                await on_ack_recovered()
             return fetched, get_reward_content()
 
         current_reward = get_reward_content()

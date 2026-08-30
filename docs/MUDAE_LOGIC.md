@@ -482,16 +482,40 @@ and dark use their measured means (76 / 104), as in `$oh`.
 | 8   | 4       | 18         | 7          | 3,082,032        |
 | 9   | 5       | 20         | 5          | 2,485,616        |
 
-**Only blue costs a click**, and the budget is 4. `macro/ot_solver.py`
-assumes the game ends on the 4th blue regardless of ship hits. Mudae's
-"Extra Chance" reportedly suspends that below 5 ship hits, but neither
-logged game ever reached 4 blues while under 5 hits, so nothing we have
-confirms it — `EXTRA_CHANCE` is the switch, and flipping it is a rules
-change that needs a real board first.
+**Only blue costs a click**, and the budget is 4.
 
-Under that reading ship hits never matter, so **clicking any cell with
-`P(blue) = 0` is strictly dominant** — free SP, free information, no risk.
-The only real decision is which cell to probe when nothing is certain.
+#### Extra Chance — the hidden rule
+
+A blue ends the board **only when it is the 4th-or-later blue *and* at least
+5 non-blue cells have already been clicked.** Below 5 hits the blue is
+granted instead, tagged `(Extra chance)` in the reward line, and play
+continues — repeatably. That is why a perfect game is *8* Extra Chances:
+11 blues on a 6-colour board, minus the 3 that were never fatal anyway.
+
+Hits are counted at the moment of the blue click. Crossing 5 hits on a ship
+cell arms the ending without triggering it; the **next blue** is what ends
+the board.
+
+Confirmed by the ten games of 2026-08-30, which split cleanly:
+
+| games | ship hits at the 4th blue | what Mudae did |
+| ----- | ------------------------- | -------------- |
+| 9     | 6, 8, 10, 10, 12, 13, 14, 16, 16 | locked the grid and revealed the board |
+| 1     | **3** | left the grid clickable |
+
+The macro was still stopping itself at 4 blues, so on that tenth board it
+walked away from a live game with 18 cells unclicked — which is why that row
+in `data/minigame_log.json` is full of `spU`. `macro/ot_solver.ot_game_over`
+now owns the rule, `EXTRA_CHANCE` switches it, and the old reading is kept so
+`scripts/ot_bakeoff.py` can price the difference.
+
+**This inverts the game.** While hits are under 5 *nothing* can end the
+board: blues are free and the four ship hits are the scarce resource. Clear
+the blues and every remaining cell is a certain ship, free forever — the
+whole 25. The old rule made "click any `P(blue) = 0` cell" strictly
+dominant; the new one makes it a mistake while the phase is live, because a
+certain ship stays collectable afterwards but the hit token does not come
+back.
 
 The solver does not enumerate those millions of placements. A configuration
 is a (teal, green, yellow) triple — there are only **5,520** legal ones —
@@ -501,21 +525,92 @@ one identity: the configurations that leave cell `c` empty are exactly the
 packings of the free region **without** `c`. Exact, and 0.28s from a cold
 cache falling to ~0.002s once three cells are known.
 
-Because ship hits never matter under that rule, **clicking any `P(blue) = 0`
-cell is strictly dominant**, and that harvest is most of a good game. The one
-real decision is the probe when nothing is certain: `ev(c) − 60·P(blue at c)`.
-Probing by plain EV is the intuitive rule and measurably the worst of that
-family — see `docs/TODO.md` for the sweep, including why the penalty is tuned
-to the low end and why a one-ply lookahead was measured and rejected.
+#### The policy — two phases
+
+*While Extra Chance is live* (`hunt`): hold the certain ships back and score
+`ev(c) + 600·P(blue at c)`, chasing the blues that can never be clicked
+safely later.
+
+*Afterwards*: every certain ship is free, so harvest first, then probe by
+`ev(c) − 60·P(blue at c)` — the same expression with the opposite sign. Once
+the budget is spent but the board is still alive, only certain ships are
+safe, so the harvest does all the work and the probe only runs when nothing
+is certain at all. Scoring that last probe by what it *unlocks* was tried and
+still loses (968.1 vs 971.1 on the real boards), so `lookahead` stays a dead
+end everywhere.
+
+The two halves have **different boundaries**, measured on 120 generated
+boards per colour count per generator (uniform / sequential, paired t vs the
+old solver):
+
+| `N` | blues | deferring only | + blue bonus (600) |
+| --- | ----- | -------------- | ------------------ |
+| 6   | 11    | +129 (t 3.7) / +142 (t 2.3) | **+176 (t 4.0) / +206 (t 3.9)** |
+| 7   |  9    | +109 / −7 | **+219 (t 2.6) / +15** |
+| 8   |  7    | +30 / −56 | −46 / −111 (t −2.6) |
+| 9   |  5    | −15 / +13 | −118 (t −3.7) / −154 (t −3.9) |
+
+Deferring is on everywhere: a clear win at 6 colours under both generators
+and never significantly negative anywhere. The bonus is on only at 6–7
+(`OT_BLUE_BONUS_COLORS`), because at 8–9 there are just 5–7 blues, the four
+ship hits run out before the hunt lands one, and the budget is better spent
+resolving the board — `--sweep-blue-bonus` is negative at every bonus from
+150 up on both. Nothing adaptive rescued 8–9 (`K/(5−h)`, `K·(5−h)/5`, and
+scaling by blue density all still lost). With the bonus off, 8–9 is a wash —
+the two generators do not even agree on its sign — which is exactly why the
+switch exists rather than one global setting.
+
+On the **27 real boards**: **915 SP against the 745.5 those boards actually
+paid**, **100.2% of the all-ships ceiling** (blues pay too, so a cleared board
+lands above it), **7 of them cleared outright** — **+168.9 SP over the old
+solver, t = 3.72**. Only **9.6%** of the total board SP is left unclicked, and
+none of it is recoverable by the endgame: on every board that lost SP the
+endgame collected *everything* that was certain when the hunt ended. Fixing only the end condition
+and keeping the old policy changes *nothing* on these 16, because the old
+probe always reaches 5 hits before its 4th blue; it would have saved the
+10:45 board, which is not in the set precisely because it was abandoned.
+
+#### `OT_RARE_WEIGHTS` is measured, not borrowed
+
+The rare length-2 ship colours used to be weighted by the Colblitz `$oh`
+per-cell *spawn* rates (L 2.96 / D 1.46 / R 0.22 / W 0.04), on the assumption
+that ship rarity tracks sphere rarity. **It does not.** Across the 26 rare
+slots then available, those weights predict 1.2 reds and 0.2 rainbows
+where **4 and 3** turned up. Since rainbow pays 500, an unidentified length-2
+cell on a 7-colour board was valued at ~92 SP against a true ~208, and the
+solver walked past rare ships. The weights are now the observed counts
+(L 13 / D 6 / R 4 / W 3); `tests/test_minigame_log_models.py` re-checks them
+against the log rather than pinning them.
+
+Two things this sample cannot yet settle. Seventeen of the twenty-seven
+boards carry exactly one rare, and that one is **light 14 times to dark 3** —
+far more lopsided than the weights predict, so the single-rare draw may follow
+a different rule from the multi-rare one. And `OT_CELL_SP`
+still values light/dark at the `$oh` means (76 / 104), while the eight `$ot`
+light clicks logged so far resolved to 40–200 (mean ≈ 86) and the two darks to
+5 and 35. The per-click `resolved` lists are in `data/minigame_log.json`, so
+both become measurable as boards accumulate.
+
+#### What `$ot` actually pays
+
+`base_value` in the minigame log is `SPHERE_BASE_SP`, and that is **not** the
+award. `2 × base_value + 36 × clicks` reproduces 5 of the 10 logged rewards
+exactly (`+1202`, `+2770`, `+1404`, `+3940`, `+662`) and is within 3% on 4
+more. The per-click term matters strategically — one more click is worth ≥ 56
+real SP whatever colour it is — but the multiplier is account-scoped (`$oq`
+grids print their own `Multiplier: 3x`), so it stays out of the solver and
+lives in `ot_replay.OT_CLICK_BONUS_SP` as a reporting figure only.
 
 Validated against real boards in `tests/test_minigame_log_models.py`: every
 logged board is straight-line, matches its declared colour count, and is
 reachable by the enumerator; blue clicks all cost budget and ship clicks
-never do; finished games end on the 4th blue.
+never do; and a finished game's last blue always satisfies `ot_game_over`
+while the unfinished one does not.
 
 Score policies with `scripts/ot_bakeoff.py` (`--known`, `--from-log`,
-`--trials`, `--sweep-risk`). Replaying the two hand-played boards gives
-**826 SP against the 597.5 scored by hand**.
+`--trials`, `--by-colors`, `--sweep-risk`, `--sweep-blue-bonus`). Because the
+bonus wins at 6–7 and loses at 8–9, an aggregate mean averages a real effect
+against a real regression — use `--by-colors` for anything you act on.
 
 **`$ot` is manual only.** The Run page has a **Play $ot** button
 (`macro/ot_game.py`), but `$ot` is deliberately *not* in
@@ -529,7 +624,7 @@ while the solver is being tried against real boards.
 | `$oh`   | 5×5 sphere grid            | `macro/sphere_game.py` |
 | `$oc`   | Color-matching sphere game | `macro/oc_game.py`     |
 | `$oq`   | World / path sphere game   | `macro/oq_game.py`     |
-| `$ot`   | 5×5 battleship             | `macro/ot_solver.py` (solver only — not played live) |
+| `$ot`   | 5×5 battleship             | `macro/ot_game.py` + `macro/ot_solver.py` (**Play $ot** button only — never automatic) |
 
 
 ---
@@ -604,6 +699,16 @@ the Run counter ignores it.
 (`MessageKind.SPHERE_CLICK`, excluding `spM`). `SphereReactionRules.types_allowed`
 still governs which colours to click. After the daily budget is used, Mudae
 stops spawning the buttons — the reactor does not add its own skip.
+- **Dark and light pay out as another colour.** Dark prints
+`<:spD:…> turns into <:spW:…>` and then pays on the next line under `spW`;
+light prints `:spL: breaks down into :spB: + … => +312`. The sphere that was
+clicked — the one that spent the perk-9 slot — is the **source**, so
+`parse_sphere_click` takes `sphere_type` from the transform header and records
+the outcome separately as `sphere_resolved`. Reading the payout line instead
+made the Run panel and the sphere log claim a rainbow was clicked, and the two
+disagreed depending on whether the newline survived. `SPHERE_TRANSFORM_EMOJIS`
+in `mudae/constants.py` is the set that behaves this way; the same rule already
+applied to `$oh` via `classify_oh_click`.
 
 
 

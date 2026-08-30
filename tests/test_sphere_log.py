@@ -122,6 +122,45 @@ def test_record_sphere_click_colorblind_type_is_base_colour(tmp_path, monkeypatc
     assert entry["sphere_type"] == "spT"
 
 
+def test_sphere_log_keeps_the_dark_click_and_what_it_paid_out_as():
+    """The row keeps both halves of a dark click.
+
+    ``sphere_type`` is the button that was clicked -- the one perk 9 spent a
+    slot on -- and ``sphere_resolved`` is the colour it paid out as, which is
+    where the SP came from.
+    """
+    import mudae.sphere_log as sphere_log
+
+    sphere_log._events.clear()
+    set_recording_account("acc1", "Main")
+    snapshot = MudaeMessageSnapshot(
+        message_id=3,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=42,
+        guild_name="Guild",
+        author_id=1,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[],
+        buttons=[],
+        created_at="14:30:00",
+    )
+    entry = record_sphere_earning(
+        snapshot,
+        {
+            "amount": 2072,
+            "claimed_by": "me",
+            "sphere_type": "spD",
+            "sphere_resolved": ["spW"],
+        },
+        source="sphere_click",
+    )
+    assert entry["sphere_type"] == "spD"
+    assert entry["sphere_resolved"] == ["spW"]
+
+
 def test_build_stats_by_source():
     entries = [
         {

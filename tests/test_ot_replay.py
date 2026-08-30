@@ -78,11 +78,24 @@ def test_board_emoji_round_trip():
 
 @pytest.mark.parametrize("entry", KNOWN_BOARDS, ids=lambda e: e["name"])
 def test_playing_a_board_respects_the_rules(entry):
-    result = simulate_ot_board(entry["cells"])
-    assert result["clicks_paid"] <= DEFAULT_CLICKS_BUDGET
+    cells = entry["cells"]
+    result = simulate_ot_board(cells)
     assert result["clicks"] <= GRID_CELLS
-    assert 0 < result["base_value"] <= result["ship_sp"] + DEFAULT_CLICKS_BUDGET * 10
-    assert result["n_colors"] == colors_on(entry["cells"])
+    assert result["clicks_paid"] + result["ship_hits"] == result["clicks"]
+    # Extra Chance lets the blues run past the budget, so the only bound left is
+    # the board: every cell, blues included.
+    assert 0 < result["base_value"] <= sum(OT_CELL_SP[c] for c in cells)
+    assert result["n_colors"] == colors_on(cells)
+
+
+@pytest.mark.parametrize("entry", KNOWN_BOARDS, ids=lambda e: e["name"])
+def test_the_old_reading_still_stops_on_the_fourth_blue(entry):
+    """`extra_chance=False` has to keep behaving exactly as it shipped."""
+    result = simulate_ot_board(entry["cells"], policy="risk", extra_chance=False)
+    assert result["clicks_paid"] <= DEFAULT_CLICKS_BUDGET
+    assert 0 < result["base_value"] <= (
+        result["ship_sp"] + DEFAULT_CLICKS_BUDGET * OT_CELL_SP["B"]
+    )
 
 
 @pytest.mark.parametrize("policy", [p for p in PROBE_POLICIES if p != "lookahead"])
@@ -94,7 +107,7 @@ def test_every_probe_policy_terminates(policy):
     """
     for entry in (KNOWN_BOARDS[0], KNOWN_BOARDS[4]):
         result = simulate_ot_board(entry["cells"], policy=policy)
-        assert result["clicks_paid"] <= DEFAULT_CLICKS_BUDGET
+        assert result["clicks"] <= GRID_CELLS
         assert result["base_value"] > 0
 
 
@@ -107,13 +120,46 @@ def test_a_ship_cell_never_costs_a_click():
     assert ship_sp(board) == sum(OT_CELL_SP[c] for c in board if c != BLUE)
 
 
-def test_the_solver_beats_the_hand_played_scores():
-    """Both logged boards were played by a human; the solver must do better."""
+def test_the_solver_beats_the_scores_these_boards_actually_got():
+    """``logged_sp`` is what each board really paid.
+
+    ``log-*`` were played by a human and ``run-10xx`` by the pre-Extra-Chance
+    solver, so beating those is the point of the change. The later ``run-*``
+    boards were scored by *this* policy, so on those the bar is only "do not
+    regress" — which is why the margin here is modest and why the sharp
+    comparison lives in `test_extra_chance_beats_the_old_reading_where_blues_are_dense`,
+    which replays both readings through today's code.
+    """
+    scored = logged = 0.0
     for entry in KNOWN_BOARDS:
         if entry["logged_sp"] is None:
             continue
-        played = simulate_ot_board(entry["cells"])
-        assert played["base_value"] > entry["logged_sp"], entry["name"]
+        scored += simulate_ot_board(entry["cells"])["base_value"]
+        logged += entry["logged_sp"]
+    assert scored > logged * 1.05
+
+
+def test_extra_chance_beats_the_old_reading_where_blues_are_dense():
+    """The measured win, pinned on real boards, both readings through this code.
+
+    6-colour boards carry 11 blues and the old rule stopped after 4 of them.
+    Across 120 generated boards apiece this is +176 SP (t = 3.97) uniform and
+    +206 (t = 3.90) sequential; the nine real 6-colour boards agree at +188.
+    It is not a clean sweep — a couple of boards go the other way, which is what
+    a mean of +188 on nine boards should look like — so this checks the size of
+    the win and that most boards share in it, not that every one does.
+    """
+    boards = [e for e in KNOWN_BOARDS if colors_on(e["cells"]) == 6]
+    assert len(boards) >= 5, "not enough 6-colour boards to say anything"
+    deltas = [
+        simulate_ot_board(entry["cells"])["base_value"]
+        - simulate_ot_board(
+            entry["cells"], policy="risk", extra_chance=False
+        )["base_value"]
+        for entry in boards
+    ]
+    assert sum(deltas) / len(deltas) > 100.0, deltas
+    assert sum(1 for d in deltas if d > 0) * 3 >= len(deltas) * 2, deltas
 
 
 def test_nine_colour_boards_are_nearly_free():
@@ -188,21 +234,29 @@ def test_clicks_split_cleanly_into_paid_blues_and_free_ships():
         assert result["clicks_paid"] + result["ship_hits"] == result["clicks"]
 
 
-def test_extra_chance_is_a_real_switch_not_a_comment(monkeypatch):
-    """Flipping the rule must actually change how a board plays out.
+def test_extra_chance_is_a_real_switch_not_a_comment():
+    """Both readings must stay playable, and they must differ.
 
-    ``EXTRA_CHANCE`` is off because no logged game can confirm it. This pins
-    that the constant is wired to something, so the harness can price the rule
-    if a real board ever settles it — the same policy simply gets to keep
-    clicking past the 4th blue until it has hit 5 ship cells.
+    The old one is kept so the bakeoff can price the change and so there is
+    something to fall back to; a switch nothing exercises rots. Holding the
+    *policy* fixed isolates the rule: same probe, one simply gets to keep
+    clicking past the 4th blue until it has hit 5 ship cells, so it can never
+    click less.
     """
     board = KNOWN_BOARDS[0]["cells"]
-    conservative = simulate_ot_board(board)
-    assert conservative["clicks_paid"] == DEFAULT_CLICKS_BUDGET
+    conservative = simulate_ot_board(board, policy="risk", extra_chance=False)
+    generous = simulate_ot_board(board, policy="risk", extra_chance=True)
 
-    monkeypatch.setattr("macro.ot_replay.EXTRA_CHANCE", True)
-    monkeypatch.setattr("macro.ot_solver.EXTRA_CHANCE", True)
-    generous = simulate_ot_board(board)
-    # Same policy, strictly more clicks allowed, so never worse.
+    assert conservative["clicks_paid"] == DEFAULT_CLICKS_BUDGET
     assert generous["clicks"] >= conservative["clicks"]
     assert generous["base_value"] >= conservative["base_value"]
+
+    # And the shipped policy changes *how* it plays, not only when it stops:
+    # most real boards now end having taken more blues than the budget allows,
+    # which under the old reading was impossible by definition.
+    past_budget = [
+        entry["name"]
+        for entry in KNOWN_BOARDS
+        if simulate_ot_board(entry["cells"])["clicks_paid"] > DEFAULT_CLICKS_BUDGET
+    ]
+    assert len(past_budget) > len(KNOWN_BOARDS) // 2, past_budget

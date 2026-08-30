@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+
+from tests.test_discord_recovery import _FakeClient
 from unittest.mock import AsyncMock, patch
 
 from macro.roll_cycle import RollCycleEngine
@@ -22,7 +24,7 @@ def test_switch_channel_updates_id_and_clears_cached_state():
     monitor._messages[1] = SimpleNamespace(message_id=1)
     monitor._pending_macro_command = "tu"
     monitor._connected = True
-    monitor._client = SimpleNamespace(user=SimpleNamespace(name="Tester"))
+    monitor._client = _FakeClient(user=SimpleNamespace(name="Tester"))
 
     async def fake_label() -> str:
         return "#mudae (222)"
@@ -43,7 +45,7 @@ def test_switch_channel_keeps_macro_active():
     monitor = ChannelMonitor(token="token", channel_id=111)
     monitor.macro_active = True
     monitor._connected = True
-    monitor._client = SimpleNamespace(user=SimpleNamespace(name="Tester"))
+    monitor._client = _FakeClient(user=SimpleNamespace(name="Tester"))
 
     async def fake_label() -> str:
         return "#mudae (222)"

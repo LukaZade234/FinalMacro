@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -11,7 +12,7 @@ import discord
 from discord import Client as DiscordClient
 
 from mudae.command_ack import message_has_mudae_command_ack, reaction_is_mudae_command_ack
-from mudae.discord_errors import is_transient_discord_error
+from mudae.discord_errors import is_fatal_runtime_error, is_transient_discord_error
 from mudae.claim_context import ClaimContextTracker
 from mudae.command_context import CommandContextTracker
 from mudae.parsers.embed import get_character_owner, is_character_embed, is_ownership_footer
@@ -28,6 +29,13 @@ OnParsedCallback = Callable[[MudaeMessageSnapshot, ParseResult], None]
 _MESSAGE_CACHE_MAX = 300
 _SEND_ATTEMPTS = 3
 _SEND_RETRY_SEC = 2.0
+# Button clicks get the same treatment as sends. The backoff is shorter because
+# a minigame board expires in 2 minutes, so three attempts cost at most 4.5s.
+_CLICK_ATTEMPTS = 3
+_CLICK_RETRY_SEC = 1.5
+# How often `ensure_connected` re-checks while giving discord.py's own
+# resume a chance to land before a full reconnect.
+_RESUME_POLL_SEC = 0.25
 
 class ChannelMonitor:
     """Connect with a user token and capture every message in a channel."""
@@ -48,6 +56,12 @@ class ChannelMonitor:
         self._client: DiscordClient | None = None
         self._ready = asyncio.Event()
         self._connected = False
+        self._last_event_at = 0.0
+        # Last transport failure, for callers that write a durable log.
+        # `_emit_status` only reaches the GUI status bar, which nothing
+        # keeps — so a refused click was still unexplained in the session
+        # log even once the exception stopped being swallowed.
+        self.last_transport_error = ""
         self._commands = CommandContextTracker()
         self._claims = ClaimContextTracker()
         self._messages: dict[int, discord.Message] = {}
@@ -126,9 +140,15 @@ class ChannelMonitor:
                 last_exc = exc
                 if not is_transient_discord_error(exc) or attempt >= _SEND_ATTEMPTS:
                     raise
+                self.last_transport_error = f"{type(exc).__name__}: {exc}"
                 self._emit_status(
                     f"Send failed ({exc}) — retry {attempt}/{_SEND_ATTEMPTS - 1}"
                 )
+                # Retrying a send down a dead gateway just burns the attempts.
+                # `RollCycleEngine` wraps its own sends in a reconnect, but the
+                # minigames call straight through to here, so this is the only
+                # place that covers them.
+                await self.ensure_connected()
                 await asyncio.sleep(_SEND_RETRY_SEC * attempt)
         if last_exc is not None:
             raise last_exc
@@ -253,29 +273,89 @@ class ChannelMonitor:
         finally:
             self._tick_waiters.pop(message_id, None)
 
-    async def click_button(self, message_id: int, custom_id: str) -> bool:
-        message = self._messages.get(message_id)
-        if message is None:
-            channel = await self._get_text_channel()
-            try:
-                message = await channel.fetch_message(message_id)
-                self._remember_message(message)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                return False
+    async def _message_for_click(
+        self, message_id: int, *, refresh: bool
+    ) -> "discord.Message | None":
+        """The message to click on, ``None`` when it is gone for good.
+
+        ``NotFound`` / ``Forbidden`` are permanent and answered with ``None``;
+        every other ``HTTPException`` is left to propagate so the caller can
+        classify and retry it.
+        """
+        if not refresh:
+            cached = self._messages.get(message_id)
+            if cached is not None:
+                return cached
+        channel = await self._get_text_channel()
+        try:
+            message = await channel.fetch_message(message_id)
+        except (discord.NotFound, discord.Forbidden):
+            return None
+        self._remember_message(message)
+        return message
+
+    @staticmethod
+    def _find_button(
+        message: "discord.Message", custom_id: str
+    ) -> "discord.Button | None":
         for row in message.components or []:
             if not isinstance(row, discord.ActionRow):
                 continue
             for child in row.children:
-                if not isinstance(child, discord.Button):
-                    continue
-                if child.custom_id != custom_id:
-                    continue
-                try:
-                    child.message = message
-                    await child.click()
-                    return True
-                except Exception:
+                if isinstance(child, discord.Button) and child.custom_id == custom_id:
+                    return child
+        return None
+
+    async def click_button(self, message_id: int, custom_id: str) -> bool:
+        """Press a component button, retrying transport blips.
+
+        This used to be ``except Exception: return False``, which made a
+        mid-game stall impossible to diagnose: on 2026-08-30 a ``$ot`` board
+        died at ``click failed — stopping`` with six free cells still on it and
+        nothing in the log saying why. Every failure now names itself, transient
+        ones are retried the way :meth:`send_command` already retried sends, and
+        a dropped gateway reconnects before the retry rather than failing every
+        remaining click of the game.
+
+        ``False`` means the click is not going to work — the message or the
+        button is gone, the error is not retryable, or the attempts ran out.
+        """
+        last_error = ""
+        for attempt in range(1, _CLICK_ATTEMPTS + 1):
+            try:
+                # A stale cached copy is the likeliest reason a button vanishes,
+                # so every attempt after the first refetches the message.
+                message = await self._message_for_click(
+                    message_id, refresh=attempt > 1
+                )
+                if message is None:
+                    self._emit_status(f"Click failed: message {message_id} is gone")
                     return False
+                button = self._find_button(message, custom_id)
+                if button is None:
+                    last_error = f"no button {custom_id} on the message"
+                    if attempt < _CLICK_ATTEMPTS:
+                        continue  # refetch and look again
+                    break
+                button.message = message
+                await button.click()
+                self.last_transport_error = ""
+                return True
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                if is_fatal_runtime_error(exc) or attempt >= _CLICK_ATTEMPTS:
+                    break
+                if not is_transient_discord_error(exc):
+                    break
+                self._emit_status(
+                    f"Click failed ({exc}) — retry {attempt}/{_CLICK_ATTEMPTS - 1}"
+                )
+                # A retry cannot help while the gateway is down, and every
+                # later click of this game would fail the same way.
+                await self.ensure_connected()
+                await asyncio.sleep(_CLICK_RETRY_SEC * attempt)
+        self.last_transport_error = last_error or "unknown error"
+        self._emit_status(f"Click failed: {self.last_transport_error}")
         return False
 
     async def fetch_message_snapshot(self, message_id: int) -> MudaeMessageSnapshot | None:
@@ -304,6 +384,7 @@ class ChannelMonitor:
     async def _handle_message(self, message: discord.Message, *, edited: bool) -> None:
         if message.channel.id != self.channel_id:
             return
+        self._last_event_at = time.monotonic()
         self._remember_message(message)
         snapshot = snapshot_from_message(message, edited=edited)
 
@@ -377,8 +458,21 @@ class ChannelMonitor:
         @self._client.event
         async def on_ready() -> None:
             self._connected = True
+            self._last_event_at = time.monotonic()
             await self._emit_channel_status("Connected")
             self._ready.set()
+
+        @self._client.event
+        async def on_disconnect() -> None:
+            # discord.py fires this for ordinary resume cycles too, so this
+            # only records the state — `ensure_connected` waits for the
+            # library's own resume before escalating to a full reconnect.
+            self._connected = False
+
+        @self._client.event
+        async def on_resumed() -> None:
+            self._connected = True
+            self._last_event_at = time.monotonic()
 
         @self._client.event
         async def on_message(message: discord.Message) -> None:
@@ -418,7 +512,47 @@ class ChannelMonitor:
 
     @property
     def is_connected(self) -> bool:
-        return self._connected
+        """True when the gateway is up *and* the client is still open.
+
+        ``_connected`` on its own was only ever set by ``on_ready`` and cleared
+        by an explicit :meth:`disconnect`, so after the first connect it was
+        permanently ``True``. Every ``if not self.is_connected: reconnect``
+        guard in the tree was therefore dead code — including the ones in
+        :meth:`click_button` and :meth:`send_command`.
+        """
+        client = self._client
+        if client is None or not self._connected:
+            return False
+        return not client.is_closed()
+
+    def seconds_since_last_event(self) -> float:
+        """How long since the gateway delivered anything for this channel.
+
+        A zombie gateway looks identical to a quiet channel from the outside,
+        so this is only meaningful to a caller that *knows* it should have
+        heard something by now — a minigame that just had to recover a click
+        acknowledgement over HTTP, for instance.
+        """
+        if not self._last_event_at:
+            return 0.0
+        return max(0.0, time.monotonic() - self._last_event_at)
+
+    async def ensure_connected(self, *, settle: float = 3.0) -> bool:
+        """Reconnect if the gateway is down, giving discord.py a chance first.
+
+        discord.py resumes dropped sockets on its own, and a full
+        :meth:`force_reconnect` is far more disruptive than waiting a moment,
+        so this only escalates when the client has not come back by itself.
+        """
+        if self.is_connected:
+            return True
+        # Counted rather than clock-driven so the wait is deterministic and a
+        # test that stubs out `sleep` does not spin for three real seconds.
+        for _ in range(max(1, int(settle / _RESUME_POLL_SEC))):
+            await asyncio.sleep(_RESUME_POLL_SEC)
+            if self.is_connected:
+                return True
+        return await self.force_reconnect()
 
 
 # Backwards-compatible alias

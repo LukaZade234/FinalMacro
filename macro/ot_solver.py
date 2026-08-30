@@ -46,23 +46,33 @@ lookahead (:data:`LOOKAHEAD_TOP_K`).
 Rules the policy is built on
 ----------------------------
 * Ship cells are **free**; only blue costs a click. The budget is 4.
-* :data:`EXTRA_CHANCE` is off: the game is assumed to end on the 4th blue
-  regardless of how many ship cells have been hit. Mudae's "Extra Chance"
-  reportedly suspends that below 5 ship hits, but neither logged game ever
-  reached 4 blues while under 5 hits, so nothing here can confirm it and the
-  conservative reading is the one that cannot throw a game away.
-* Under that rule ship hits never matter, which makes clicking any cell with
-  ``P(blue) = 0`` strictly dominant — free SP, free information, no risk.
-  The only real decision is which cell to probe when nothing is certain.
+* **Extra Chance is real** (:data:`EXTRA_CHANCE`, confirmed 2026-08-30 — see
+  :func:`ot_game_over`). A blue ends the board only if it is the 4th-or-later
+  blue *and* at least :data:`EXTRA_CHANCE_SHIP_HITS` ship cells have already
+  been clicked. Below that the blue is granted as ``(Extra chance)`` and play
+  continues, repeatably.
+* So while ship hits are under 5, **no click can end the board**. Blues are
+  free and the four ship hits are the scarce resource: clear the blues and
+  every remaining cell is a certain ship, free forever.
 
 The probe rule
 --------------
-Take every certain ship first, then probe by
-``ev(c) - RISK_PENALTY_SP * P(blue at c)``. Maximising plain EV — the obvious
-rule, and the one the 7 real boards prefer — is measurably the *worst* member
-of that family once there are enough boards to tell; see
-:data:`RISK_PENALTY_SP` for the sweep and for why the penalty is tuned low
-rather than high.
+Two phases, and the second is the one that shipped first.
+
+*While Extra Chance is live* the certain ships are deliberately **not** taken —
+clicking one spends a ship hit for SP that stays collectable afterwards anyway.
+The probe scores ``ev(c) + OT_BLUE_BONUS_SP * P(blue at c)``, hunting the blues
+that can never be clicked safely later.
+
+*Afterwards* — 5 hits reached, or Extra Chance off — every certain ship is free
+and taken first, then the probe is ``ev(c) - RISK_PENALTY_SP * P(blue at c)``.
+Same expression, opposite sign. Maximising plain EV is the obvious rule and
+measurably the *worst* member of that family; see :data:`RISK_PENALTY_SP`.
+
+The two halves have different boundaries, which is why they are separate
+constants — see :data:`OT_BLUE_BONUS_COLORS`. Together they are worth **+168.9
+SP a board (t = 3.72) on the 27 real boards**, 100.2% of the all-ships ceiling
+(blues pay too, so a cleared board lands above it), with 7 cleared outright.
 """
 
 from __future__ import annotations
@@ -110,21 +120,36 @@ OT_CELL_SP: dict[str, float] = {
     "W": float(SPHERE_BASE_SP["spW"]),
 }
 
-# Relative chance of each rare being one of the board's length-2 ships. No
-# published table exists, so these are the Colblitz $oh per-cell spawn rates
-# on the assumption that ship rarity tracks sphere rarity. Seven known boards
-# are far too few to fit this — treat it as an assumption the bakeoff can
-# sweep, not a measurement.
-OT_RARE_WEIGHTS: dict[str, float] = {"L": 2.96, "D": 1.46, "R": 0.22, "W": 0.04}
+# Relative chance of each rare being one of the board's length-2 ships, first
+# measured over 26 rare slots and re-checked at 41 (27 boards), which held:
+# observed L 48.8 / D 29.3 / R 14.6 / W 7.3 % against the 50.0 / 23.1 / 15.4 /
+# 11.5 % these weights predict — every colour inside Poisson noise.
+#
+# This used to be the Colblitz $oh per-cell *spawn* rates (L 2.96 / D 1.46 /
+# R 0.22 / W 0.04) on the assumption that ship rarity tracks sphere rarity. The
+# real boards say it does not, and not by a little: those weights predict 1.2
+# reds and 0.2 rainbows across 26 slots, where 4 and 3 actually turned up. The
+# effect on play is large, because rainbow is worth 500 — under the old prior an
+# unidentified length-2 cell on a 7-colour board was valued at ~92 SP against a
+# true ~208, so the solver systematically walked past rare ships.
+#
+# It is still a small sample and not evenly spread: 17 of the 27 boards carry
+# exactly one rare, and that one is light 14 times to dark 3 — a good deal more
+# lopsided than these weights predict, so the single-rare draw may follow a
+# different rule from the multi-rare one. Not enough boards to model that yet. Treat this as the best available measurement rather than a fitted
+# model, and re-derive it as boards accumulate — `scripts/ot_bakeoff.py` sweeps
+# it, and `tests/test_minigame_log_models.py` checks it against the live log.
+OT_RARE_WEIGHTS: dict[str, float] = {"L": 13.0, "D": 6.0, "R": 4.0, "W": 3.0}
 
 DEFAULT_CLICKS_BUDGET = 4
-# See the module docstring. Flipping this on is a rules change, not a policy
-# change, and needs a real board to confirm it first. When on, blues stop
-# ending the game until EXTRA_CHANCE_SHIP_HITS ship cells have been hit —
-# which would make "probe first, harvest last" the winning shape instead.
-# `macro.ot_replay.simulate_ot_board` honours it too, so the harness can price
-# the difference before anyone commits to it.
-EXTRA_CHANCE = False
+# Extra Chance: a blue does not end the board until EXTRA_CHANCE_SHIP_HITS ship
+# cells have been clicked. Confirmed on 2026-08-30 by ten logged games that
+# split cleanly: nine reached their 4th blue with 6-16 ship hits and the grid
+# locked; the tenth reached it with 3 hits and the grid stayed live, so the
+# macro stopped on a playable board and threw 18 cells away. `ot_game_over` is
+# the only place the rule lives; every entry point takes it as an argument so
+# `scripts/ot_bakeoff.py` can still A/B against the old reading.
+EXTRA_CHANCE = True
 EXTRA_CHANCE_SHIP_HITS = 5
 
 _EMOJI_TO_OT: dict[str, str] = {
@@ -141,6 +166,51 @@ _EMOJI_TO_OT: dict[str, str] = {
 }
 
 _COLORS_RE = re.compile(r"number\s+of\s+different\s+colou?rs\s*:\s*\*{0,2}(\d+)", re.IGNORECASE)
+
+
+# --- The end condition ------------------------------------------------------
+
+
+def ot_game_over(
+    blues_spent: int,
+    ship_hits: int,
+    *,
+    budget: int = DEFAULT_CLICKS_BUDGET,
+    extra_chance: bool = EXTRA_CHANCE,
+) -> bool:
+    """True once a blue click has ended the board.
+
+    Only a *blue* click can end a game, so callers must ask after a blue and not
+    after a ship hit — crossing :data:`EXTRA_CHANCE_SHIP_HITS` on a ship cell
+    leaves the board live until the next blue.
+
+    Under ``extra_chance`` the 4th blue is granted as ``(Extra chance)`` while
+    fewer than :data:`EXTRA_CHANCE_SHIP_HITS` ship cells have been clicked, so
+    ``blues_spent`` can run well past ``budget``. Without it the 4th blue always
+    ends the game, which is the reading the solver shipped with.
+    """
+    if blues_spent < budget:
+        return False
+    return not extra_chance or ship_hits >= EXTRA_CHANCE_SHIP_HITS
+
+
+def extra_chance_live(
+    blues_spent: int,
+    ship_hits: int,
+    *,
+    budget: int = DEFAULT_CLICKS_BUDGET,
+    extra_chance: bool = EXTRA_CHANCE,
+) -> bool:
+    """True while no click at all can end the board.
+
+    This is the phase the hunt policy plays: blues are free, and the ship hits
+    left before :data:`EXTRA_CHANCE_SHIP_HITS` are the scarce resource. Note it
+    does not depend on ``blues_spent`` — under 5 hits, a blue is survivable
+    whether it is the 1st or the 9th — but the argument is kept so callers read
+    the same way as :func:`ot_game_over`.
+    """
+    del blues_spent, budget  # kept for symmetry with ot_game_over
+    return extra_chance and ship_hits < EXTRA_CHANCE_SHIP_HITS
 
 
 # --- Board geometry ---------------------------------------------------------
@@ -691,8 +761,13 @@ def _enumerate(fleet: OtFleet, observations: Mapping[int, str]) -> OtMarginals:
 # greedy EV looks best (1043 SP); at 200 generated boards it is the *worst* of
 # the family under both generators, because it walks into blue cells that a
 # little caution would have avoided. Seven boards could not see that.
-PROBE_POLICIES = ("greedy", "safe", "risk", "mixed", "lookahead")
-DEFAULT_PROBE_POLICY = "risk"
+#
+# `hunt` is the whole Extra Chance strategy, not just a probe expression: it
+# holds back the certain ships and chases blues while nothing can end the board,
+# then hands over to HUNT_ENDGAME_POLICY. Every other name is the
+# pre-Extra-Chance behaviour, kept so the bakeoff can measure against it.
+PROBE_POLICIES = ("greedy", "safe", "risk", "mixed", "lookahead", "hunt")
+DEFAULT_PROBE_POLICY = "hunt"
 
 # "mixed" adds an information term to the EV, the way $oq's shipped hunt scores
 # `P(purple) + 0.1 x Gini`. The units are SP per bit.
@@ -717,10 +792,56 @@ MIXED_INFO_WEIGHT = 10.0
 # committing side of that cliff.
 RISK_PENALTY_SP = 60.0
 
+# What a blue is worth *beyond* its own 10 SP while Extra Chance is live: it is
+# a free click now and a cell that can never be clicked safely later. The same
+# knob as RISK_PENALTY_SP with the sign flipped, which is why `hunt` and `risk`
+# share one expression.
+OT_BLUE_BONUS_SP = 600.0
+
+# ...but only where blues are dense enough for the hunt to land one. SP against
+# the pre-Extra-Chance solver, 120 generated boards per colour count per
+# generator (uniform / sequential), `*` = significant:
+#
+#   colours  blues  deferring only          + blue bonus (600)
+#   6        11     +129 (t 3.7)* / +142*   +176 (t 4.0)* / +206 (t 3.9)*
+#   7         9     +109 (t 1.5)  /   -7    +219 (t 2.6)* /  +15
+#   8         7      +30 (t 0.7)  /  -56     -46          / -111 (t -2.6)*
+#   9         5      -15 (t -1.1) /  +13    -118 (t -3.7)*/ -154 (t -3.9)*
+#
+# Two different boundaries, which is why these are two constants. Deferring the
+# certain ships is a clear win at 6 colours under both generators and never
+# significantly negative anywhere, so it stays on at every colour count. The
+# bonus is worth having only at 6-7: by 8 there are just 5-7 blues, the four
+# ship hits run out before the hunt lands one, and the budget is better spent
+# resolving the board. `--sweep-blue-bonus 120 --colors 8` and `--colors 9` are
+# negative at every bonus from 150 up — significantly so from 300 under both
+# generators at 9, and from 300 under `sequential` at 8. Nothing adaptive
+# rescued it either: K/(5-hits), K*(5-hits)/5 and scaling by blue density were
+# all tried and all still lose at 8-9.
+OT_BLUE_BONUS_COLORS = frozenset({6, 7})
+
 # One-ply lookahead re-derives marginals per (candidate, outcome), so it scores
 # only the most promising candidates. Five outcomes x this many candidates is
 # ~0.06s mid-game and a few seconds on the second click of the game.
 LOOKAHEAD_TOP_K = 6
+
+
+# What `hunt` hands over to once Extra Chance is spent: the ordinary game gets
+# the ordinary rule.
+#
+# `lookahead` was tried here specifically, on the theory that once the budget is
+# gone a probe should be scored by what it *unlocks* — this branch is only
+# reached with nothing certain, so there is no remaining harvest for a blue to
+# destroy and the usual stock-versus-flow objection does not apply. It still
+# does not win: 968.1 vs 971.1 SP on the 16 real boards and -18.7 SP (t = 1.31)
+# over 60 generated ones, for seconds a board. Another entry for the
+# `lookahead` dead end in docs/TODO.md rather than an exception to it.
+HUNT_ENDGAME_POLICY = "risk"
+
+
+def blue_bonus_for(fleet: OtFleet) -> float:
+    """The hunt's blue bonus for this board, 0 where it measured negative."""
+    return OT_BLUE_BONUS_SP if fleet.n_colors in OT_BLUE_BONUS_COLORS else 0.0
 
 
 def _hidden_clickable(buttons: list[dict[str, Any]]) -> list[int]:
@@ -756,18 +877,27 @@ def _lookahead_score(
     marginals: OtMarginals,
     cell: int,
     hidden: list[int],
-    blues_left: int,
+    blues_spent: int,
+    ship_hits: int,
+    extra_chance: bool,
 ) -> float:
     """Expected SP from clicking ``cell``, plus whatever that reveal unlocks.
 
-    A blue that spends the last click ends the board, so it unlocks nothing —
-    which is the whole reason a probe can be worth less than its own EV.
+    A blue that ends the board unlocks nothing — which is the whole reason a
+    probe can be worth less than its own EV. Which blues those are is
+    :func:`ot_game_over`'s call, not a guess about the budget.
     """
     score = 0.0
     others = [index for index in hidden if index != cell]
     for outcome, probability in marginals.outcomes(cell):
         payout = marginals.outcome_sp(cell, outcome)
-        if outcome == BLUE and blues_left <= 1 and not EXTRA_CHANCE:
+        ends = outcome == BLUE and ot_game_over(
+            blues_spent + 1,
+            ship_hits,
+            budget=fleet.clicks_budget,
+            extra_chance=extra_chance,
+        )
+        if ends:
             score += probability * payout
             continue
         after = dict(observations)
@@ -784,8 +914,11 @@ def choose_ot_cell(
     *,
     marginals: OtMarginals | None = None,
     policy: str = DEFAULT_PROBE_POLICY,
-    blues_left: int = DEFAULT_CLICKS_BUDGET,
+    blues_spent: int = 0,
+    ship_hits: int = 0,
+    extra_chance: bool = EXTRA_CHANCE,
     risk_penalty: float = RISK_PENALTY_SP,
+    blue_bonus: float | None = None,
 ) -> int | None:
     """Index of the next cell to click, or ``None`` when there is nothing left."""
     if not hidden:
@@ -796,11 +929,34 @@ def choose_ot_cell(
         # count. Stay deterministic rather than guessing at random.
         return hidden[0]
 
+    certain = [cell for cell in hidden if marginals.is_certain_ship(cell)]
+    certain_set = set(certain)
+    uncertain = [cell for cell in hidden if cell not in certain_set]
+
+    if policy == "hunt" and extra_chance_live(
+        blues_spent, ship_hits, budget=fleet.clicks_budget, extra_chance=extra_chance
+    ):
+        # Nothing can end the board yet, so the certain ships are *not* free:
+        # each one spends a ship hit for SP that stays collectable once the
+        # phase is over. Defer them and spend the phase on the blues instead —
+        # they are the cells that can never be clicked safely later.
+        bonus = blue_bonus_for(fleet) if blue_bonus is None else blue_bonus
+        return max(
+            uncertain or hidden,
+            key=lambda cell: (
+                marginals.ev(cell) + bonus * marginals.p_blue(cell),
+                -cell,
+            ),
+        )
+
     # Certain ships are free SP and cannot end the game, so they always come
     # first; the ordering only matters because the board expires in 2 minutes.
-    certain = [cell for cell in hidden if marginals.is_certain_ship(cell)]
     if certain:
         return max(certain, key=lambda cell: (marginals.ev(cell), -cell))
+
+    # Past the phase, `hunt` is the ordinary game and probes like it.
+    if policy == "hunt":
+        policy = HUNT_ENDGAME_POLICY
 
     if policy == "safe":
         return min(hidden, key=lambda cell: (marginals.p_blue(cell), -marginals.ev(cell), cell))
@@ -827,7 +983,14 @@ def choose_ot_cell(
             shortlist,
             key=lambda cell: (
                 _lookahead_score(
-                    fleet, observations, marginals, cell, hidden, blues_left
+                    fleet,
+                    observations,
+                    marginals,
+                    cell,
+                    hidden,
+                    blues_spent,
+                    ship_hits,
+                    extra_chance,
                 ),
                 -cell,
             ),
@@ -841,13 +1004,25 @@ def choose_ot_click(
     *,
     fleet: OtFleet,
     blues_spent: int = 0,
+    ship_hits: int = 0,
     policy: str = DEFAULT_PROBE_POLICY,
+    extra_chance: bool = EXTRA_CHANCE,
     risk_penalty: float = RISK_PENALTY_SP,
+    blue_bonus: float | None = None,
     rng: Any | None = None,
 ) -> dict[str, Any] | None:
-    """Pick the next button to click, or ``None`` when the game is over."""
+    """Pick the next button to click, or ``None`` when there is nothing to click.
+
+    **The caller owns the end of the game.** Under Extra Chance the board ends
+    on an *event* — a blue click — not on a state, so there is no predicate here
+    that could tell a live board from a finished one: 9 blues and 5 ship hits is
+    over if the last click was the blue and live if it was the ship hit. Call
+    :func:`ot_game_over` after each blue instead. Without Extra Chance the 4th
+    blue always ends it, which *is* a state, so that one case is short-circuited
+    here as a convenience.
+    """
     del rng  # picks are deterministic; kept for parity with the other solvers
-    if not EXTRA_CHANCE and blues_spent >= fleet.clicks_budget:
+    if not extra_chance and blues_spent >= fleet.clicks_budget:
         return None
     hidden = [index for index in _hidden_clickable(buttons) if index not in observations]
     cell = choose_ot_cell(
@@ -855,8 +1030,11 @@ def choose_ot_click(
         observations,
         hidden,
         policy=policy,
-        blues_left=max(0, fleet.clicks_budget - blues_spent),
+        blues_spent=blues_spent,
+        ship_hits=ship_hits,
+        extra_chance=extra_chance,
         risk_penalty=risk_penalty,
+        blue_bonus=blue_bonus,
     )
     if cell is None:
         return None
@@ -869,6 +1047,9 @@ def solver_stats(
     *,
     hidden: list[int] | None = None,
     policy: str = DEFAULT_PROBE_POLICY,
+    blues_spent: int = 0,
+    ship_hits: int = 0,
+    extra_chance: bool = EXTRA_CHANCE,
 ) -> dict[str, Any]:
     cells = (
         hidden
@@ -877,7 +1058,19 @@ def solver_stats(
     )
     marginals = enumerate_ot(fleet, observations)
     certain = [cell for cell in cells if marginals.is_certain_ship(cell)]
-    best = choose_ot_cell(fleet, observations, cells, marginals=marginals, policy=policy)
+    hunting = policy == "hunt" and extra_chance_live(
+        blues_spent, ship_hits, budget=fleet.clicks_budget, extra_chance=extra_chance
+    )
+    best = choose_ot_cell(
+        fleet,
+        observations,
+        cells,
+        marginals=marginals,
+        policy=policy,
+        blues_spent=blues_spent,
+        ship_hits=ship_hits,
+        extra_chance=extra_chance,
+    )
     return {
         "configurations": marginals.total,
         "certain_ships": len(certain),
@@ -885,7 +1078,9 @@ def solver_stats(
         "best_index": -1 if best is None else best,
         "best_ev": 0.0 if best is None else marginals.ev(best),
         "best_p_blue": 0.0 if best is None else marginals.p_blue(best),
-        "phase": "harvest" if certain else "probe",
+        # "hunt" says the certain ships are being held back on purpose, which
+        # would otherwise read as the solver ignoring free SP.
+        "phase": "hunt" if hunting else ("harvest" if certain else "probe"),
     }
 
 
@@ -895,8 +1090,19 @@ def format_solver_stats(
     *,
     hidden: list[int] | None = None,
     policy: str = DEFAULT_PROBE_POLICY,
+    blues_spent: int = 0,
+    ship_hits: int = 0,
+    extra_chance: bool = EXTRA_CHANCE,
 ) -> str:
-    stats = solver_stats(fleet, observations, hidden=hidden, policy=policy)
+    stats = solver_stats(
+        fleet,
+        observations,
+        hidden=hidden,
+        policy=policy,
+        blues_spent=blues_spent,
+        ship_hits=ship_hits,
+        extra_chance=extra_chance,
+    )
     if not stats["configurations"]:
         return "solver: no fleet placement matches observations"
     best = stats["best_index"]

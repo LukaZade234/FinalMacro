@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 
 _TRANSIENT_MARKERS = (
-    "503",
+    "500",
     "502",
+    "503",
     "504",
+    "internal server error",
     "service unavailable",
     "bad gateway",
     "gateway timeout",
@@ -24,6 +26,18 @@ _TRANSIENT_MARKERS = (
     "temporary failure",
     "errno 104",  # Connection reset by peer
     "errno 32",  # Broken pipe
+    "errno 110",  # Connection timed out
+    # Rate limiting. discord.py sleeps through most 429s itself, but a long
+    # `retry_after` or a Cloudflare ban surfaces as an exception — and a rate
+    # limit is the most retryable thing there is. `$ot` under Extra Chance
+    # presses 12-25 buttons a board where the old rule pressed 12-20, so this
+    # is the game that finds the ceiling.
+    "429",
+    "too many requests",
+    "rate limit",
+    # Our own waits and aiohttp's both surface as timeouts.
+    "timeout",
+    "timed out",
 )
 
 

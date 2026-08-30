@@ -95,6 +95,13 @@ SPHERE_BASE_SP: dict[str, int] = {
 # Clicking one of these counts as winning the minigame (got the jackpot).
 SPHERE_WIN_EMOJIS = frozenset({"sp", "spR", "spW"})
 
+# Spend a click and pay out as *another* colour: dark becomes one sphere
+# (``:spD: turns into :spW:``), light splits into several
+# (``:spL: breaks down into :spB: + …``). Mudae then prints the payout under
+# the result, so anything that reports "which sphere was clicked" has to take
+# the source from the transform header rather than the payout line.
+SPHERE_TRANSFORM_EMOJIS = frozenset({"spD", "spL"})
+
 
 def canonical_sphere_emoji(emoji: str | None) -> str:
     """``spB2`` / ``spT2`` (colour-blind letter-in-corner) → ``spB`` / ``spT``.

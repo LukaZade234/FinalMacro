@@ -14,7 +14,12 @@ from types import SimpleNamespace
 import pytest
 
 from macro.minigame_board import GRID_CELLS
-from macro.ot_game import OtSphereGame, is_ot_grid_message, is_ot_game_over
+from macro.ot_game import (
+    _MAX_ACK_RECOVERIES,
+    OtSphereGame,
+    is_ot_game_over,
+    is_ot_grid_message,
+)
 from macro.ot_replay import KNOWN_BOARDS, ship_sp
 from macro.ot_solver import OT_CELL_SP
 
@@ -48,11 +53,35 @@ def _btn(index: int, emoji: str = "spU", *, disabled: bool = False) -> dict:
 class _FakeMudae:
     """Answers clicks against a hidden board, the way the real bot does."""
 
-    def __init__(self, cells: str, *, budget: int = 4, colours: int | None = None):
+    def __init__(
+        self,
+        cells: str,
+        *,
+        budget: int = 4,
+        colours: int | None = None,
+        extra_chance: bool = True,
+    ):
         self.cells = cells
         self.budget = budget
+        # Extra Chance: a blue only ends the board once this many ship cells
+        # have been clicked. `False` replays the pre-2026-08-30 reading.
+        self.extra_chance = extra_chance
+        self.extra_chance_hits = 5
         self.revealed: dict[int, str] = {}
         self.blues = 0
+        self.hits = 0
+        self.extras = 0
+        # Refuse the Nth click *attempt* (1-based), the way an exhausted retry
+        # does. With `fail_forever`, every attempt from there on is refused.
+        # Counting attempts rather than successes matters: a refusal does not
+        # advance the board, so the loop's next attempt is the same ordinal.
+        self.fail_click_number: int | None = None
+        self.fail_click_count = 1
+        self.fail_forever = False
+        # The nastier failure: the interaction reaches Mudae and pays out, but
+        # the response never comes back, so the caller is told it failed.
+        self.fail_but_land = False
+        self.attempts = 0
         self.clicks: list[int] = []
         self.reward_lines: list[str] = []
         self.command: tuple[str, str | None] | None = None
@@ -78,7 +107,7 @@ class _FakeMudae:
             message_id=_GRID_ID, is_mudae=True, content=text, buttons=self._buttons()
         )
 
-    def _reward(self, colour: str):
+    def _reward(self, colour: str, *, extra_chance: bool = False):
         """Mudae keeps ONE reward message and appends a line per click.
 
         The loop's helpers diff that growing list, so a fake that replaced the
@@ -92,7 +121,11 @@ class _FakeMudae:
         elif colour == "D":
             line = "<:spD:1> turns into <:spO:1> **+90**"
         else:
-            line = f"<:{_LETTER_TO_EMOJI[colour]}:1> **+{int(OT_CELL_SP[colour])}**"
+            tag = " (Extra chance)" if extra_chance else ""
+            line = (
+                f"<:{_LETTER_TO_EMOJI[colour]}:1>{tag} "
+                f"**+{int(OT_CELL_SP[colour])}**"
+            )
         self.reward_lines.append(line)
         return SimpleNamespace(
             message_id=9000,
@@ -110,17 +143,48 @@ class _FakeMudae:
 
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         index = int(str(custom_id).split("s")[1])
+        self.attempts += 1
+        if self.fail_click_number is not None and (
+            self.attempts >= self.fail_click_number
+            if self.fail_forever
+            else self.fail_click_number
+            <= self.attempts
+            < self.fail_click_number + self.fail_click_count
+        ):
+            # The monitor has already retried and given up. Either nothing
+            # happened, or — the case seen live on 2026-08-30 — the click landed
+            # and paid out and only the reply was lost.
+            if self.fail_but_land:
+                self._land(index)
+            return False
+        self._land(index)
+        return True
+
+    def _land(self, index: int) -> None:
+        """Apply a click on Mudae's side: reveal, pay out, maybe end the game."""
         colour = self.cells[index]
         self.clicks.append(index)
         self.revealed[index] = colour
+        granted = False
         if colour == "B":
             self.blues += 1
-            if self.blues >= self.budget:
+            spent = self.blues >= self.budget
+            # A blue at or past the budget is granted rather than fatal while
+            # the board is still under its ship-hit limit — and the grid stays
+            # clickable, which is how the real thing was caught.
+            granted = spent and self.extra_chance and self.hits < self.extra_chance_hits
+            self.extras += 1 if granted else 0
+            if spent and not granted:
                 self.over = True
                 self.revealed = {i: c for i, c in enumerate(self.cells)}
-        self._queue.append(self._reward(colour))
+        else:
+            self.hits += 1
+        self._queue.append(self._reward(colour, extra_chance=granted))
         self._queue.append(self._grid())
-        return True
+
+    async def fetch_message_snapshot(self, message_id: int):
+        """Re-read the grid straight from Discord, bypassing the queue."""
+        return self._grid() if message_id == _GRID_ID else None
 
     async def wait_for(self, predicate, *, timeout: float = 10.0):
         while self._queue:
@@ -183,9 +247,14 @@ def test_the_loop_plays_a_real_board_to_the_end(entry):
     assert result["reason"] == "done"
     assert mudae.command == ("ot", "$")
     # Only blue costs a click, so a good game clicks far more than its budget.
-    assert result["clicks_paid"] == mudae.blues <= 4
+    # Under Extra Chance the blues themselves can pass the budget, so the bound
+    # is the board, not the 4.
+    assert result["clicks_paid"] == mudae.blues
     assert result["clicks"] == len(mudae.clicks) > result["clicks_paid"]
+    assert result["clicks"] <= GRID_CELLS
     assert len(set(mudae.clicks)) == len(mudae.clicks), "clicked a cell twice"
+    # Whichever way it ended, it ended the way Mudae ends it.
+    assert mudae.over or len(mudae.clicks) == GRID_CELLS
 
 
 @pytest.mark.parametrize("entry", KNOWN_BOARDS, ids=lambda e: e["name"])
@@ -233,8 +302,19 @@ def test_a_transforming_ship_keeps_its_own_identity_and_its_payout():
         assert click["resolved"], "the payout colours were dropped"
 
 
-def test_the_solver_beats_the_hand_played_score_through_the_real_loop():
-    """End to end, not just in the replay harness."""
+def test_the_solver_beats_the_scores_these_boards_actually_got():
+    """End to end, not just in the replay harness.
+
+    ``logged_sp`` is what each board really paid — by hand for ``log-*``, by the
+    pre-Extra-Chance solver for ``run-10xx``, and by *this* policy for the later
+    ``run-*`` boards, which is why the margin is modest. Only the aggregate is
+    meaningful:
+    those runs were a different build (older rare weights among other things),
+    so a single board can differ for reasons that have nothing to do with this
+    change. `tests/test_ot_replay.py` does the apples-to-apples per-board
+    comparison by replaying both readings through today's code.
+    """
+    scored_total = logged_total = 0.0
     for entry in KNOWN_BOARDS:
         if entry["logged_sp"] is None:
             continue
@@ -243,8 +323,15 @@ def test_the_solver_beats_the_hand_played_score_through_the_real_loop():
             OT_CELL_SP[entry["cells"][click["cell"]]]
             for click in result["session"]["clicks"]
         )
-        assert scored > entry["logged_sp"], entry["name"]
-        assert scored <= ship_sp(entry["cells"]) + 4 * OT_CELL_SP["B"]
+        # The whole board is the ceiling now: Extra Chance can hand back every
+        # cell, blues included, so `ship_sp + 4 blues` is no longer the bound.
+        assert scored <= sum(OT_CELL_SP[c] for c in entry["cells"]), entry["name"]
+        scored_total += scored
+        logged_total += entry["logged_sp"]
+
+    assert scored_total > logged_total * 1.05, (
+        f"scored {scored_total:.0f} against {logged_total:.0f} actually paid"
+    )
 
 
 def test_the_log_reports_the_fleet_and_the_blue_budget():
@@ -254,6 +341,241 @@ def test_the_log_reports_the_fleet_and_the_blue_budget():
     assert "11 blue cells" in opening
     assert "4 blue clicks" in opening
     assert any("blue 1/4" in line for line in logs)
+
+
+def test_extra_chance_shows_up_in_the_log_when_mudae_grants_one():
+    """The tag is the only way a future log can contradict the model.
+
+    Before this the loop stopped at the 4th blue, so it never saw one.
+    """
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    result, mudae, logs = _play(board["cells"])
+    assert mudae.extras, "this board no longer reaches an Extra Chance"
+    assert result["clicks_paid"] > mudae.budget
+    assert sum("(Extra chance)" in line for line in logs) == mudae.extras
+    assert any("(+" in line and "extra)" in line for line in logs)
+
+
+def test_mudae_granting_a_blue_we_thought_was_fatal_keeps_the_game_going():
+    """Mudae's tag outranks our predicate, not the other way round.
+
+    If the real limit were ever more generous than ``EXTRA_CHANCE_SHIP_HITS``,
+    trusting the model would stop on a live board — which is exactly the bug
+    this whole change exists to fix. So a granted blue means play on, and the
+    mismatch is logged rather than silently absorbed.
+    """
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    mudae = _FakeMudae(board["cells"])
+    mudae.extra_chance_hits = 99  # a Mudae that never stops granting
+    logs: list[str] = []
+    game = OtSphereGame(
+        mudae, SimpleNamespace(macro_active=False), log=logs.append, click_delay=0.0
+    )
+    result = asyncio.run(game.play())
+
+    # Nothing can end it, so it clears the board instead of stopping at 5 hits.
+    assert result["clicks"] == GRID_CELLS
+    assert not mudae.over
+    assert any("check EXTRA_CHANCE_SHIP_HITS" in line for line in logs)
+
+
+def test_one_refused_click_does_not_abandon_the_board():
+    """The 2026-08-30 stall, from the loop's side.
+
+    A board died at ``click failed — stopping`` with six certain ships still on
+    it. Those are free and riskless, so giving up on the first refusal is a pure
+    loss; the loop now refreshes the grid and carries on.
+    """
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    mudae = _FakeMudae(board["cells"])
+    mudae.fail_click_number = 6  # one refusal, mid-game
+    logs: list[str] = []
+    game = OtSphereGame(
+        mudae, SimpleNamespace(macro_active=False), log=logs.append, click_delay=0.0
+    )
+    result = asyncio.run(game.play())
+
+    assert any("refreshing the grid" in line for line in logs)
+    assert result["reason"] == "done"
+    # It kept playing: more clicks after the failure than before it.
+    assert result["clicks"] > 6
+    assert mudae.over or result["clicks"] == GRID_CELLS
+
+
+def test_a_click_that_lands_but_reports_failure_is_picked_up_by_the_refresh():
+    """What actually happened on 2026-08-30, reconstructed from the reward line.
+
+    The macro logged ``+1188`` spheres, but its own twelve clicks account for
+    only 1042 — a difference of exactly one ``spY (+146)``. The cell it was
+    about to press was (4,3), ``pB=0% ev=55.0``: a certain yellow. So the click
+    reached Mudae and paid out, and only the reply was lost.
+
+    Re-pressing that button would be pointless — it is already spent — so the
+    recovery has to come from re-reading the grid, which shows the cell revealed
+    and lets the solver move on with it counted.
+    """
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    mudae = _FakeMudae(board["cells"])
+    mudae.fail_click_number = 6
+    mudae.fail_but_land = True
+    logs: list[str] = []
+    game = OtSphereGame(
+        mudae, SimpleNamespace(macro_active=False), log=logs.append, click_delay=0.0
+    )
+    result = asyncio.run(game.play())
+
+    assert any("refreshing the grid" in line for line in logs)
+    assert result["reason"] == "done"
+    # The board was finished, and no cell was pressed twice.
+    assert len(set(mudae.clicks)) == len(mudae.clicks)
+    assert mudae.over or len(mudae.clicks) == GRID_CELLS
+    # The lost cell is still absent from our own click list — we never saw its
+    # result — but it must not be clicked again either.
+    assert result["clicks"] == len(mudae.clicks) - 1
+
+
+def test_a_cell_that_refuses_twice_is_skipped_rather_than_retried_forever():
+    """Asking a third time for the same button cannot help.
+
+    One skipped cell is a far smaller loss than an abandoned board, so the
+    solver is told to pick somewhere else instead.
+    """
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    mudae = _FakeMudae(board["cells"])
+    mudae.fail_click_number = 6
+    mudae.fail_click_count = 2  # the refresh-and-retry is refused too
+    logs: list[str] = []
+    game = OtSphereGame(
+        mudae, SimpleNamespace(macro_active=False), log=logs.append, click_delay=0.0
+    )
+    result = asyncio.run(game.play())
+
+    assert any("keeps refusing — skipping it" in line for line in logs), logs
+    assert result["reason"] == "done"
+    assert result["clicks"] > 6, "it should have carried on elsewhere"
+
+
+def test_the_log_says_why_the_transport_refused():
+    """`on_status` only reaches the GUI status bar, which nothing keeps.
+
+    The 2026-08-30 board stopped at "click failed — stopping" with no reason
+    recorded anywhere, which is what made it guesswork to diagnose.
+    """
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    mudae = _FakeMudae(board["cells"])
+    mudae.fail_click_number = 4
+    mudae.fail_forever = True
+    monitor = SimpleNamespace(
+        macro_active=False,
+        last_transport_error="HTTPException: 429 Too Many Requests",
+    )
+    logs: list[str] = []
+    game = OtSphereGame(mudae, monitor, log=logs.append, click_delay=0.0)
+    asyncio.run(game.play())
+
+    assert any("429 Too Many Requests" in line for line in logs), logs
+
+
+def test_a_board_that_keeps_refusing_says_what_it_cost():
+    """Giving up is allowed; giving up quietly is not."""
+    board = next(e for e in KNOWN_BOARDS if e["name"] == "run-1032")
+    mudae = _FakeMudae(board["cells"])
+    mudae.fail_click_number = 4
+    mudae.fail_forever = True
+    logs: list[str] = []
+    game = OtSphereGame(
+        mudae, SimpleNamespace(macro_active=False), log=logs.append, click_delay=0.0
+    )
+    asyncio.run(game.play())
+
+    stop = next(line for line in logs if "stopping" in line)
+    assert "refused" in stop and "cells left" in stop, stop
+
+
+def _stalled_game(silence: float, *, reconnects=None):
+    """An `$ot` game whose monitor reports a gateway that has gone quiet."""
+    monitor = SimpleNamespace(
+        macro_active=False,
+        seconds_since_last_event=lambda: silence,
+    )
+    calls: list[bool] = []
+
+    async def _ensure_connected():
+        calls.append(True)
+        return True if reconnects is None else reconnects
+
+    monitor.ensure_connected = _ensure_connected
+    logs: list[str] = []
+    game = OtSphereGame(
+        _FakeMudae(KNOWN_BOARDS[0]["cells"]),
+        monitor,
+        log=logs.append,
+        click_delay=0.0,
+    )
+    return game, calls, logs
+
+
+def test_a_silent_gateway_is_reconnected_rather_than_waited_out():
+    """The 18:32 board: 22 clicks, every ack fetched, five minutes, no reward.
+
+    `is_connected` was True the whole time and HTTP worked, so nothing noticed.
+    Each recovered ack costs a full `edit_timeout`, so the only fix that
+    restores normal speed is reconnecting the socket.
+    """
+    game, calls, logs = _stalled_game(silence=60.0)
+
+    async def run() -> None:
+        for _ in range(_MAX_ACK_RECOVERIES):
+            await game._on_ack_recovered()
+
+    asyncio.run(run())
+    assert calls == [True]
+    assert any("reconnecting" in line for line in logs), logs
+
+
+def test_one_recovered_ack_is_not_enough_to_reconnect():
+    game, calls, _logs = _stalled_game(silence=60.0)
+    asyncio.run(game._on_ack_recovered())
+    assert calls == []
+
+
+def test_a_live_gateway_means_the_edit_was_slow_not_the_socket_dead():
+    """Events still arriving rules out a zombie, so a reconnect would not help."""
+    game, calls, _logs = _stalled_game(silence=2.0)
+
+    async def run() -> None:
+        for _ in range(_MAX_ACK_RECOVERIES + 3):
+            await game._on_ack_recovered()
+
+    asyncio.run(run())
+    assert calls == []
+
+
+def test_the_board_is_reconnected_at_most_once():
+    game, calls, _logs = _stalled_game(silence=60.0)
+
+    async def run() -> None:
+        for _ in range(_MAX_ACK_RECOVERIES * 4):
+            await game._on_ack_recovered()
+
+    asyncio.run(run())
+    assert calls == [True], "one reconnect a board, however bad it gets"
+
+
+def test_a_failing_reconnect_never_aborts_the_board():
+    game, _calls, logs = _stalled_game(silence=60.0)
+
+    async def _boom():
+        raise RuntimeError("gateway is on fire")
+
+    game._monitor.ensure_connected = _boom
+
+    async def run() -> None:
+        for _ in range(_MAX_ACK_RECOVERIES):
+            await game._on_ack_recovered()
+
+    asyncio.run(run())  # must not raise
+    assert any("reconnect failed" in line for line in logs), logs
 
 
 # --- Failure paths ----------------------------------------------------------
