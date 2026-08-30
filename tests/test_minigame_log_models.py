@@ -1,4 +1,4 @@
-"""Validate the $oq and $oh models against real logged boards.
+"""Validate the $oq, $oh and $ot models against real logged boards.
 
 These pin the *game rules* the solvers assume, using boards Mudae actually
 generated. The log lives outside the repo (it carries guild/channel ids, so
@@ -217,3 +217,102 @@ def test_unveiled_cells_are_uniform_random_not_adjacent():
     assert abs(observed - expected) < 0.06, (
         f"unveils land adjacent {observed:.1%} of the time vs {expected:.1%} by chance"
     )
+
+
+# --- $ot --------------------------------------------------------------------
+#
+# The whole solver rests on two claims the grid message makes: ships are
+# straight contiguous runs, and `Number of different colors: N` means the fleet
+# is teal-4, green-3, yellow-3 and N-4 length-2 ships. Both are checked here
+# against boards Mudae actually produced, so a rules change shows up as a test
+# failure rather than as quietly worse play.
+
+
+def _ot_boards() -> list[str]:
+    from macro.ot_replay import board_from_emojis
+
+    out = []
+    for row in _rows("ot"):
+        cells = board_from_emojis(row["board"])
+        if cells is not None:
+            out.append(cells)
+    if not out:
+        pytest.skip("no fully revealed $ot boards in the log")
+    return out
+
+
+def test_ot_ships_are_straight_contiguous_runs():
+    """'Identical colors follow one another on the same row or column.'"""
+    from macro.ot_replay import ship_segments
+    from macro.ot_solver import SEGMENTS
+
+    for cells in _ot_boards():
+        masks = ship_segments(cells)
+        assert masks is not None, cells
+        for colour, mask in masks.items():
+            length = mask.bit_count()
+            assert mask in SEGMENTS[length], f"{colour} in {cells} is not a straight ship"
+
+
+def test_ot_fleet_matches_the_declared_colour_count():
+    """N colours means teal-4, green-3, yellow-3 and N-4 dominoes, orange among them."""
+    from macro.ot_replay import ship_segments
+    from macro.ot_solver import fleet_for_colors
+
+    for cells in _ot_boards():
+        masks = ship_segments(cells)
+        fleet = fleet_for_colors(len(set(cells)))
+        assert masks["T"].bit_count() == 4
+        assert masks["G"].bit_count() == 3
+        assert masks["Y"].bit_count() == 3
+        dominoes = [c for c, m in masks.items() if m.bit_count() == 2]
+        assert len(dominoes) == fleet.two_ships
+        assert "O" in dominoes
+        assert set(dominoes) - {"O"} <= {"L", "D", "R", "W"}
+        assert cells.count("B") == fleet.blue_cells
+
+
+def test_ot_boards_are_reachable_by_the_enumerator():
+    """Each logged board survives being told its own contents."""
+    from macro.ot_solver import enumerate_ot, fleet_for_colors
+
+    for cells in _ot_boards():
+        fleet = fleet_for_colors(len(set(cells)))
+        observations = {index: colour for index, colour in enumerate(cells)}
+        assert enumerate_ot(fleet, observations).total == 1, cells
+
+
+def test_ot_blue_cells_pay_the_same_ten_sp_as_everywhere_else():
+    """Blue is not worthless in $ot — the logged clicks scored it at 10."""
+    from macro.ot_solver import OT_CELL_SP
+
+    blues = [
+        click
+        for row in _rows("ot")
+        for click in (row.get("clicks") or [])
+        if click.get("emoji") == "spB"
+    ]
+    assert blues, "no blue clicks logged"
+    assert all(click["base_sp"] == OT_CELL_SP["B"] for click in blues)
+    # ...and every one of them was charged against the budget, while no ship
+    # click ever was. That asymmetry is the whole game.
+    assert all(click["paid"] for click in blues)
+    ships = [
+        click
+        for row in _rows("ot")
+        for click in (row.get("clicks") or [])
+        if click.get("emoji") != "spB"
+    ]
+    assert ships and not any(click["paid"] for click in ships)
+
+
+def test_ot_games_end_on_the_fourth_blue():
+    """The conservative end condition the solver assumes, as logged."""
+    for row in _rows("ot"):
+        clicks = row.get("clicks") or []
+        if not clicks or row.get("reason") != "done":
+            continue
+        blues = sum(1 for click in clicks if click.get("emoji") == "spB")
+        assert row.get("clicks_budget") == 4
+        assert blues == row.get("clicks_paid") == 4
+        assert clicks[-1]["emoji"] == "spB", "a finished game ends on a blue"

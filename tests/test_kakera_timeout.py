@@ -202,7 +202,20 @@ def test_kakera_timeout_calls_resync_hook():
     asyncio.run(_case())
 
 
-def test_kakera_timeout_resync_skipped_on_non_perk8():
+def test_kakera_timeout_resyncs_on_a_normal_character_too():
+    """An uncertain click desyncs the count whoever the character is.
+
+    A paid click on an ordinary character still spends one of the daily 40
+    unless it is a bypass colour, and the click may have landed even though the
+    wait failed — so the count has to come from ``$ohu8``, not from us.
+
+    This resync was unconditional until the click-result refactor in 9999ff3
+    gated it on ``has_perk_8``. The symptom was the Run page showing 39/40
+    while Mudae said 40/40: a purple on a non-perk-8 roll paid out, the wait
+    timed out, nothing was recorded, and nothing reconciled it for the rest of
+    the day. ``sphere_reactor`` resyncs on every timeout; so does this now.
+    """
+
     async def _case() -> None:
         state = AccountState(power_percent=100.0, power_max_percent=155.0)
         config = MacroConfig(
@@ -230,7 +243,7 @@ def test_kakera_timeout_resync_skipped_on_non_perk8():
             clicks = await reactor.react(message_id=5, fields=_fields())
 
         assert clicks == 0
-        assert called == []
+        assert called == [True]
 
     asyncio.run(_case())
 
@@ -271,5 +284,74 @@ def test_kakera_perk8_timeout_resyncs_even_if_retry_succeeds():
 
         assert clicks == 1
         assert called == [True]
+
+    asyncio.run(_case())
+
+
+def test_free_kakera_clicks_trigger_a_perk8_resync():
+    """Chaos free kakera never pass through the budget accounting.
+
+    ``_click_free_kakera`` is a separate path from ``react``, so
+    ``counts_toward_perk8_budget`` / ``record_kakera_clicks`` never run for the
+    buttons a chaos spawn grants on a character we own. Whether Mudae charges
+    them against the daily 40 is not something the macro can tell from the
+    click, so it asks ``$ohu8`` instead of guessing — otherwise the local count
+    silently sits below Mudae's for the rest of the day.
+    """
+
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(prefix="$", kakera_reaction=KakeraReactionRules(enabled=True))
+        actions = _FakeActionsWithQueue()
+        actions._outcomes.extend(
+            [
+                ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="ok", fields={}),
+                ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="ok", fields={}),
+            ]
+        )
+        called: list[bool] = []
+
+        async def _resync() -> None:
+            called.append(True)
+
+        reactor = KakeraReactor(
+            actions,
+            config,
+            state,
+            log=lambda _m: None,
+            on_click_timeout=_resync,
+        )
+        buttons = [
+            {"custom_id": "free1", "emoji": "kakeraC"},
+            {"custom_id": "free2", "emoji": "kakeraG"},
+        ]
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            await reactor._click_free_kakera(7, buttons, character="Ariel")
+
+        assert actions.clicks == ["free1", "free2"]
+        # One resync for the burst, not one per button.
+        assert called == [True]
+
+    asyncio.run(_case())
+
+
+def test_no_resync_when_there_were_no_free_kakera_to_click():
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(prefix="$", kakera_reaction=KakeraReactionRules(enabled=True))
+        actions = _FakeActionsWithQueue()
+        called: list[bool] = []
+
+        async def _resync() -> None:
+            called.append(True)
+
+        reactor = KakeraReactor(
+            actions, config, state, log=lambda _m: None, on_click_timeout=_resync
+        )
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            await reactor._click_free_kakera(7, [{"emoji": "kakeraC"}], character="X")
+
+        assert actions.clicks == []
+        assert called == []
 
     asyncio.run(_case())

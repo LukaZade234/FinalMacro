@@ -91,10 +91,11 @@ changes.
 | `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs |
 | `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
-| `sphere_game.py` / `oc_game.py` / `oq_game.py` | Individual minigames |
+| `sphere_game.py` / `oc_game.py` / `oq_game.py` / `ot_game.py` | Individual minigames. `$ot` is **manual only** — a Run-page button, never play-all and never after the daily refill. |
 | `oh_replay.py` | `$oh` simulator + replay of real logged boards (no solver yet; greedy lives in `sphere_game.py`) |
 | `oc_solver.py` / `oc_replay.py` | `$oc` geometric hunt + remaining-need-aware collect lookahead; replay of **real logged boards** (preferred) or calibrated synthetic ones |
 | `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
+| `ot_solver.py` / `ot_replay.py` | `$ot` battleship: fleet inference by a **memoised counting DP** over 5,520 ship triples (never enumerating the millions of placements), harvest-then-probe policy, replay of the 7 real boards or generated ones. |
 | `minigame_board.py` | 5×5 board / click helpers for the minigame log. ``normalize_sphere_emoji`` folds colour-blind ``spB2`` / ``spT2`` into ``spB`` / ``spT``. |
 | `settings_apply.py` | Push a settings preset to the server |
 | `state.py` | `AccountState`, `MacroPhase` |

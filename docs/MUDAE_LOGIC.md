@@ -318,14 +318,15 @@ schedule pauses it, drains `$us`, then resumes hourly.
 
 `$ohu` reports daily uses left / stored for `$oh`, `$oc`, `$oq`, `$ot`.
 **Play all minigames** queries `$ohu`, then spends `$oh` / `$oc` / `$oq`.
-`$ot` is parsed but not played yet. Extra `$oq` / `$ot` from perk 10 on
+`$ot` has its own **Play $ot** button but is left out of play-all and of
+the after-refill auto-play on purpose (see the `$ot` section below). Extra `$oq` / `$ot` from perk 10 on
 the first `$oh` of the day are counted (play-all spends the extra `$oq`).
 Playing a game with no uses left gets
 `You don't have enough $oh for today. Time to wait before the refill: 3h 08 min.`
 (`$oc` / `$oq` / `$ot` in place of `$oh`); the activity log reports
 out of minigames instead of a grid timeout.
 
-Each finished `$oh` / `$oc` / `$oq` writes one row to `data/minigame_log.json`
+Each finished `$oh` / `$oc` / `$oq` / `$ot` writes one row to `data/minigame_log.json`
 (Statistics → Minigames): the 5×5 after the final reveal, clicks in order,
 whether we hit red/rainbow, and **base SP** from `SPHERE_BASE_SP` — not the
 chat `+N`, which includes bonuses. `$oq` hunt uses MIXED (`P(purple)+0.1×Gini`).
@@ -453,13 +454,82 @@ replays real boards and reports paired deltas with a t-statistic; the
 default synthetic mode is calibrated against the table above but is still
 a model, so confirm anything important against the log.
 
+### `$ot` — battleship, and why the fleet is known up front
+
+The grid message states the whole rule set, including the fleet size:
+
+```
+You can click 4 times on the buttons below (2 minutes).
+All colors are free (they don't consume clicks) except for the blue spheres
+Identical colors follow one another on the same row or column. For example,
+there is a line or a column having ALL the green spheres following one another.
+Spheres to find: teal = 4, green = 3, yellow = 3, rarer spheres = 2.
+
+Number of different colors: 6
+```
+
+Ships are straight contiguous runs and may touch. Teal (4), green (3) and
+yellow (3) are always present; **`Number of different colors: N` means
+`N − 4` length-2 ships** — always orange, plus `N − 5` rares drawn from
+light / dark / red / rainbow. Which rares is not stated, only how many.
+Every cell pays its usual `SPHERE_BASE_SP`, blue included at 10 SP; light
+and dark use their measured means (76 / 104), as in `$oh`.
+
+| `N` | 2-ships | ship cells | blue cells | fleet placements |
+| --- | ------- | ---------- | ---------- | ---------------- |
+| 6   | 2       | 14         | 11         | 597,408          |
+| 7   | 3       | 16         | 9          | 1,890,960        |
+| 8   | 4       | 18         | 7          | 3,082,032        |
+| 9   | 5       | 20         | 5          | 2,485,616        |
+
+**Only blue costs a click**, and the budget is 4. `macro/ot_solver.py`
+assumes the game ends on the 4th blue regardless of ship hits. Mudae's
+"Extra Chance" reportedly suspends that below 5 ship hits, but neither
+logged game ever reached 4 blues while under 5 hits, so nothing we have
+confirms it — `EXTRA_CHANCE` is the switch, and flipping it is a rules
+change that needs a real board first.
+
+Under that reading ship hits never matter, so **clicking any cell with
+`P(blue) = 0` is strictly dominant** — free SP, free information, no risk.
+The only real decision is which cell to probe when nothing is certain.
+
+The solver does not enumerate those millions of placements. A configuration
+is a (teal, green, yellow) triple — there are only **5,520** legal ones —
+plus a set of disjoint dominoes on what is left, and the dominoes are
+*counted* by a memoised DP rather than listed. Per-cell marginals come from
+one identity: the configurations that leave cell `c` empty are exactly the
+packings of the free region **without** `c`. Exact, and 0.28s from a cold
+cache falling to ~0.002s once three cells are known.
+
+Because ship hits never matter under that rule, **clicking any `P(blue) = 0`
+cell is strictly dominant**, and that harvest is most of a good game. The one
+real decision is the probe when nothing is certain: `ev(c) − 60·P(blue at c)`.
+Probing by plain EV is the intuitive rule and measurably the worst of that
+family — see `docs/TODO.md` for the sweep, including why the penalty is tuned
+to the low end and why a one-ply lookahead was measured and rejected.
+
+Validated against real boards in `tests/test_minigame_log_models.py`: every
+logged board is straight-line, matches its declared colour count, and is
+reachable by the enumerator; blue clicks all cost budget and ship clicks
+never do; finished games end on the 4th blue.
+
+Score policies with `scripts/ot_bakeoff.py` (`--known`, `--from-log`,
+`--trials`, `--sweep-risk`). Replaying the two hand-played boards gives
+**826 SP against the 597.5 scored by hand**.
+
+**`$ot` is manual only.** The Run page has a **Play $ot** button
+(`macro/ot_game.py`), but `$ot` is deliberately *not* in
+`PLAYABLE_MINIGAMES`, so **play-all skips it and it never starts itself
+after the daily refill** — unlike `$oh` / `$oc` / `$oq`. That is on purpose
+while the solver is being tried against real boards.
+
 
 | Command | What it is                 | Engine                 |
 | ------- | -------------------------- | ---------------------- |
 | `$oh`   | 5×5 sphere grid            | `macro/sphere_game.py` |
 | `$oc`   | Color-matching sphere game | `macro/oc_game.py`     |
 | `$oq`   | World / path sphere game   | `macro/oq_game.py`     |
-| `$ot`   | Tracked in `$ohu` only     | —                      |
+| `$ot`   | 5×5 battleship             | `macro/ot_solver.py` (solver only — not played live) |
 
 
 ---
@@ -494,6 +564,15 @@ Purple stays free. Costs assume a chaos key (7.5% perk-8, 15% normal).
 N hours is a capacity floor, not a cutoff — slow perk-8 keeps rolling
 until 40/40 or reset. The Run page shows the live saver state while the
 toggle is on.
+
+**The local click count is a stand-in, and Mudae is the authority.** Between
+`$ohu8` queries the macro counts its own paid clicks
+(`counts_toward_perk8_budget`), which drifts whenever a click's outcome is
+uncertain — the click can land even though the wait times out — or whenever a
+click happens outside that accounting, as chaos **free kakera** do. Both cases
+force a live `$ohu8` resync rather than a guess. (The uncertain-click resync
+was briefly narrowed to perk-8 characters only, which showed up as the Run page
+reading 39/40 against Mudae's 40/40 for a whole day.)
 
 State is persisted on the **channel profile** (`daily_resets.perk8`) so a
 restart does not re-query until refill. Minigame uses (`daily_resets.minigames`)
@@ -634,7 +713,8 @@ not as `$oh` minigame earnings.
 - Extra `$oq` **/** `$ot` **uses** are stored on that `$oh` session
 (`oq_bonus` / `ot_bonus`). Statistics → Minigames → `$oh` shows the
 totals. Play-all spends the extra `$oq` (like bonus `$oc` from hidden
-clicks). Extra `$ot` is counted in `$ohu` availability but not played yet.
+clicks). Extra `$ot` is counted in `$ohu` availability but play-all never
+spends it — `$ot` is the **Play $ot** button only.
 
 ---
 
@@ -770,7 +850,8 @@ only `$settings` + `$bonus` text.
 - Slash-command rolls.
 - Multi-account concurrent connections (config supports it; runtime is
 one Discord session — see Phase D in `ARCHITECTURE.md`).
-- Playing `$ot`.
+- Playing `$ot` **automatically**. There is a **Play $ot** button, but it is
+never part of play-all and never fires after the daily refill.
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`
 (parsers are trusted for storage; power max and perk 9 cap are the
 exceptions already wired).

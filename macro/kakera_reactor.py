@@ -138,7 +138,7 @@ class KakeraReactor:
 
         clicks = 0
         budget_clicks = 0
-        perk8_wait_timed_out = False
+        wait_timed_out = False
         base_cost = kakera_base_cost_from_state(self.state)
         for choice in candidates:
             if not choice.custom_id:
@@ -158,8 +158,14 @@ class KakeraReactor:
                 rules=rules,
                 perk8=has_perk_8,
             )
-            if result.wait_timed_out and has_perk_8:
-                perk8_wait_timed_out = True
+            # Any uncertain click can desync the count, not just a perk-8 one:
+            # a click on an ordinary character still spends the daily 40 unless
+            # it is a bypass colour, and the click may have landed even though
+            # the wait failed. `sphere_reactor` already resyncs on every
+            # timeout; this used to require `has_perk_8` and so left a normal
+            # roll's uncertain click unreconciled until the next day.
+            if result.wait_timed_out:
+                wait_timed_out = True
             if result.confirmed:
                 clicks += 1
                 if counts_toward_perk8_budget(
@@ -202,8 +208,8 @@ class KakeraReactor:
                 self.on_perk8_exhausted()
         elif decision.should_click:
             self.log(f"kakera click failed {character}")
-        if perk8_wait_timed_out:
-            await self._resync_after_timeout()
+        if wait_timed_out:
+            await self._request_click_resync()
         return clicks
 
     async def _resolve_decision(
@@ -518,7 +524,13 @@ class KakeraReactor:
         else:
             self.log(f"kakera click timeout {character}: no Mudae response seen")
 
-    async def _resync_after_timeout(self) -> None:
+    async def _request_click_resync(self) -> None:
+        """Ask Mudae for the true perk-8 count when ours may be wrong.
+
+        The local counter is a stand-in for ``$ohu8``; whenever a click's
+        outcome is uncertain, or was made outside the budget accounting, the
+        only way back to the truth is to ask.
+        """
         cb = self.on_click_timeout
         if cb is None:
             return
@@ -692,6 +704,15 @@ class KakeraReactor:
         *,
         character: str,
     ) -> None:
+        """Click the free kakera a chaos spawn granted on a character we own.
+
+        These are real kakera reactions, but they never pass through
+        ``counts_toward_perk8_budget`` / ``record_kakera_clicks`` — the budget
+        accounting lives in :meth:`react`, and this is a separate path. Rather
+        than guess whether Mudae charges them against the daily 40, resync from
+        ``$ohu8`` afterwards and take its answer.
+        """
+        clicked = False
         for index, btn in enumerate(buttons):
             custom_id = str(btn.get("custom_id") or "")
             if not custom_id:
@@ -707,7 +728,7 @@ class KakeraReactor:
                 kind="kakera",
                 emoji=emoji,
             )
-            await self._click_with_power_recovery(
+            result = await self._click_with_power_recovery(
                 message_id=message_id,
                 choice=choice,
                 cost=0.0,
@@ -717,8 +738,11 @@ class KakeraReactor:
                 perk8=False,
                 handle_spawns=False,
             )
+            clicked = clicked or result.confirmed or result.wait_timed_out
             if index + 1 < len(buttons):
                 await asyncio.sleep(_KAKERA_BETWEEN_CLICKS_SEC)
+        if clicked:
+            await self._request_click_resync()
 
     async def _claim_chaos_wish(
         self,

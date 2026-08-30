@@ -172,6 +172,11 @@ Item {
                     onClicked: App.playOqSphere()
                 }
                 BoxedButton {
+                    text: "$ot"
+                    enabled: run.canPlayMinigame
+                    onClicked: App.playOtSphere()
+                }
+                BoxedButton {
                     text: "Play all"
                     variant: "go"
                     enabled: run.canPlayMinigame

@@ -641,6 +641,12 @@ Item {
                 }
 
                 ConsoleButton {
+                    text: "$ot"
+                    enabled: run.canPlayMinigame
+                    onClicked: App.playOtSphere()
+                }
+
+                ConsoleButton {
                     text: "Play all"
                     variant: "go"
                     enabled: run.canPlayMinigame

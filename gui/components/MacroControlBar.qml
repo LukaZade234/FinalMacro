@@ -20,6 +20,7 @@ ColumnLayout {
         App.runActionPending === "oh"
         || App.runActionPending === "oc"
         || App.runActionPending === "oq"
+        || App.runActionPending === "ot"
         || App.runActionPending === "minigames"
 
     readonly property bool checkBusy:
@@ -35,6 +36,7 @@ ColumnLayout {
     signal playOhClicked()
     signal playOcClicked()
     signal playOqClicked()
+    signal playOtClicked()
     signal playAllMinigamesClicked()
     signal playUsClicked()
 
@@ -210,6 +212,17 @@ ColumnLayout {
             textColor: Theme.fgPrimary
             onClicked: bar.playOqClicked()
         }
+
+        ActionButton {
+            text: "Play $ot"
+            loading: App.runActionPending === "ot"
+            enabled: bar.connected && !bar.macroEngineRunning && !bar.minigameBusy && !bar.checkBusy
+            Layout.fillWidth: true
+            buttonHeight: 32
+            fillColor: Theme.bgLight
+            textColor: Theme.fgPrimary
+            onClicked: bar.playOtClicked()
+        }
     }
 
     ActionButton {
@@ -228,7 +241,7 @@ ColumnLayout {
     Label {
         visible: bar.showActions
         Layout.fillWidth: true
-        text: "Single play buttons run one minigame each. Play all uses every minigame you have available."
+        text: "Single play buttons run one minigame each. Play all uses every minigame you have available — $ot is manual only for now, so it is not included and never runs on its own."
         color: Theme.fgMuted
         font.pixelSize: 10
         wrapMode: Text.WordWrap

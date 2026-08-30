@@ -47,6 +47,7 @@ from macro.us_stop import (
 from macro.sphere_game import OhSphereGame
 from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
+from macro.ot_game import OtSphereGame
 from macro.minigames import PlayAllMinigames
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
@@ -218,6 +219,7 @@ class AppBridge(QObject):
         self._oh_running = False
         self._oc_running = False
         self._oq_running = False
+        self._ot_running = False
         self._minigames_running = False
         self._minigame_availability: dict[str, int] = {}
         self._settings_apply_running = False
@@ -889,6 +891,8 @@ class AppBridge(QObject):
         elif pending == "oc" and not self._oc_running and not self._minigames_running:
             self._set_run_action_pending("")
         elif pending == "oq" and not self._oq_running and not self._minigames_running:
+            self._set_run_action_pending("")
+        elif pending == "ot" and not self._ot_running:
             self._set_run_action_pending("")
         elif pending == "minigames" and not self._minigames_running:
             self._set_run_action_pending("")
@@ -2472,7 +2476,9 @@ class AppBridge(QObject):
             if log:
                 log("minigame stats skipped (no result or not connected)")
             return
-        if result.get("reason") in {"exhausted", "no grid"}:
+        # "no fleet" is $ot failing to read the colour count off the grid —
+        # nothing was clicked, so there is no board to record.
+        if result.get("reason") in {"exhausted", "no grid", "no fleet"}:
             return
         session = result.get("session")
         if not isinstance(session, dict):
@@ -2874,6 +2880,7 @@ class AppBridge(QObject):
             self._oh_running
             or self._oc_running
             or self._oq_running
+            or self._ot_running
             or self._minigames_running
         )
 
@@ -3487,6 +3494,57 @@ class AppBridge(QObject):
                 await self._release_gateway_after_manual_minigame()
                 self._finish_minigame_session(activity, recorder, reason)
                 self._oq_running = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def playOtSphere(self) -> None:
+        """Play one ``$ot`` by hand.
+
+        Deliberately manual-only: ``$ot`` is not in ``PLAYABLE_MINIGAMES``, so
+        play-all skips it and it never runs itself after the daily refill. The
+        solver is new and wants real boards before it is trusted unattended.
+        """
+        blocked = self._manual_minigame_blocked_status(game="ot")
+        if blocked:
+            self._set_status(blocked)
+            return
+
+        activity, recorder = self._begin_minigame_session("ot")
+        game = OtSphereGame(self._actions, self._monitor, log=activity.write)
+        self._ot_running = True
+        self._set_run_action_pending("ot")
+
+        async def _run() -> None:
+            reason = "finished"
+            try:
+                gate = await self._ensure_gateway_for_manual_minigame()
+                if gate:
+                    reason = "error"
+                    activity.write(gate)
+                    self._set_status(gate)
+                    return
+                result = await game.play(prefix=self._macro_config.prefix)
+                self._apply_minigame_play_status(result)
+                self._record_minigame_session(
+                    result, recorder=recorder, log=activity.write
+                )
+                reward = int(result.get("reward") or 0)
+                clicks = int(result.get("clicks") or 0)
+                if reward > 0:
+                    self._record_minigame_spheres("ot", reward, clicks=clicks)
+            except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                reason = "error"
+                activity.write(f"$ot error: {exc}")
+            finally:
+                await self._release_gateway_after_manual_minigame()
+                self._finish_minigame_session(activity, recorder, reason)
+                self._ot_running = False
                 QMetaObject.invokeMethod(
                     self,
                     "_clear_run_action_pending",
