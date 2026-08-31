@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from mudae.buttons import format_button, is_claim_button, is_sphere_button
+from mudae.buttons import (
+    claim_method_from_buttons,
+    format_button,
+    is_sphere_button,
+)
 from mudae.parsers.embed import (
     get_character_owner,
     has_claim_option,
@@ -66,6 +70,7 @@ ROLL_FIELD_KEYS: tuple[str, ...] = (
     "claimed",
     "owner",
     "can_claim",
+    "claim_method",
     "claim_rank",
     "like_rank",
     "has_claim_button",
@@ -266,11 +271,22 @@ def _format_buttons(buttons: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [format_button(btn) for btn in buttons]
 
 
-def _claim_button_available(buttons: list[dict[str, Any]]) -> bool:
-    return any(
-        is_claim_button(btn) and not bool(btn.get("disabled", False))
-        for btn in buttons
-    )
+def _claim_method(
+    buttons: list[dict[str, Any]],
+    *,
+    claimed: bool,
+    is_profile: bool,
+) -> str | None:
+    """How this roll can be claimed: ``"button"``, ``"reaction"``, or ``None``.
+
+    Delegates the button/reaction question to
+    :func:`mudae.buttons.claim_method_from_buttons` and adds the two roll-level
+    reasons a claim is off the table whatever the components say: someone
+    already owns the character, or the embed is a profile rather than a roll.
+    """
+    if claimed or is_profile:
+        return None
+    return claim_method_from_buttons(buttons) or None
 
 
 def parse_roll(
@@ -342,7 +358,12 @@ def parse_roll(
     fields["buttons"] = buttons if buttons else None
     fields["has_claim_button"] = has_claim_option(snapshot)
     fields["has_sphere_button"] = any(is_sphere_button(btn) for btn in snapshot.buttons)
-    fields["can_claim"] = (not claimed) and _claim_button_available(snapshot.buttons)
+    fields["claim_method"] = _claim_method(
+        snapshot.buttons,
+        claimed=claimed,
+        is_profile=bool(fields.get("is_profile")),
+    )
+    fields["can_claim"] = fields["claim_method"] is not None
 
     name = character_name or "Unknown"
     summary = f"$roll · {name}"

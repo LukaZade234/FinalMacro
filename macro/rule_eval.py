@@ -178,7 +178,11 @@ def passes_character_claim(
     if fields.get("claimed"):
         return ClaimDecision(False, False, "character already claimed")
     if not fields.get("can_claim"):
-        return ClaimDecision(False, False, "no enabled claim button")
+        # `can_claim` covers both mechanics — an enabled claim button, or a
+        # roll with no buttons at all, which is claimed by reacting to it. So
+        # false here means the claim option is genuinely gone (a disabled
+        # button, i.e. the window closed), not merely "buttons are off".
+        return ClaimDecision(False, False, "claim window closed")
 
     claim_blocked = state.claim_available is False
     if claim_blocked:

@@ -232,6 +232,13 @@ class DiscordActions:
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         return await self._monitor.click_button(message_id, custom_id)
 
+    async def add_reaction(self, message_id: int, emoji: str) -> bool:
+        """React to a message — the claim path when a roll has no claim button."""
+        react = getattr(self._monitor, "add_reaction", None)
+        if react is None:
+            return False
+        return bool(await react(message_id, emoji))
+
     async def fetch_message_snapshot(self, message_id: int) -> MudaeMessageSnapshot | None:
         """Re-fetch a message so stale cached fields (e.g. buttons) can be refreshed."""
         fetch = getattr(self._monitor, "fetch_message_snapshot", None)

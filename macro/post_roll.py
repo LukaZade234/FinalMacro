@@ -8,7 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from mudae.buttons import is_claim_button
+from mudae.buttons import claim_method_from_buttons, is_claim_button
+from mudae.constants import CLAIM_REACTION_EMOJI
 from mudae.types import MessageKind
 
 from macro.actions import DiscordActions
@@ -289,29 +290,67 @@ class PostRollHandler:
         self._log("$rt OK — claim slot available")
         return True
 
-    async def _try_claim(self, record: RollRecord) -> None:
+    def _claim_method(self, record: RollRecord) -> str:
+        """``"button"`` / ``"reaction"`` / ``""`` for this record.
+
+        The roll parser already decided this from the components
+        (:func:`mudae.buttons.claim_method_from_buttons`); records built
+        elsewhere (a chaos wish spawn, an old snapshot) may predate the field,
+        so fall back to reading their buttons the same way.
+        """
+        method = record.fields.get("claim_method")
+        if method in {"button", "reaction"}:
+            return str(method)
+        if record.fields.get("claimed"):
+            return ""
+        return claim_method_from_buttons(record.fields.get("buttons") or [])
+
+    async def _send_claim(self, record: RollRecord, method: str) -> bool:
+        """Press the claim button, or react to the roll when there is none."""
+        name = record.character_name or "?"
+        if method == "reaction":
+            # Buttons are off for this server or account: Mudae takes any emoji
+            # on the roll as the claim. Same claim slot, same rules, different
+            # transport — everything after this point is unchanged.
+            self._log(f"Claiming {name} by reaction ({CLAIM_REACTION_EMOJI})…")
+            reacted = await self._actions.add_reaction(
+                record.message_id, CLAIM_REACTION_EMOJI
+            )
+            if not reacted:
+                self._log(f"Claim reaction failed for {name}")
+            return reacted
+
         buttons = record.fields.get("buttons") or []
         claim_btn = next(
             (b for b in buttons if is_claim_button(b) and not b.get("disabled")),
             None,
         )
-        if not claim_btn:
+        custom_id = (claim_btn or {}).get("custom_id") or ""
+        if not custom_id:
+            self._log(f"Claim button on {name} has no id — skipped")
+            return False
+        self._log(f"Claiming {name}…")
+        clicked = await self._actions.click_button(record.message_id, custom_id)
+        if not clicked:
+            self._log(f"Claim click failed for {name}")
+        return clicked
+
+    async def _try_claim(self, record: RollRecord) -> None:
+        method = self._claim_method(record)
+        if not method:
             if record.fields.get("claimed"):
                 owner = record.fields.get("owner") or "someone else"
                 self._log(f"{record.character_name or '?'} was already claimed by {owner}")
             else:
+                # Not "no button": a roll with no buttons at all is the
+                # react-to-claim case and never lands here. This is a claim
+                # button Mudae has *disabled*, i.e. the window has closed.
                 self._log(
-                    f"No usable claim button on {record.character_name or '?'} "
-                    "(claim window may have expired)"
+                    f"Claim window closed on {record.character_name or '?'} "
+                    "(claim button disabled)"
                 )
             return
-        custom_id = claim_btn.get("custom_id") or ""
-        if not custom_id:
-            return
-        self._log(f"Claiming {record.character_name or '?'}…")
-        clicked = await self._actions.click_button(record.message_id, custom_id)
-        if not clicked:
-            self._log(f"Claim click failed for {record.character_name or '?'}")
+        if not await self._send_claim(record, method):
             return
         parsed = await self._actions.wait_for_claim(timeout=8.0)
         if parsed is None:

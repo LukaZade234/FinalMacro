@@ -76,7 +76,7 @@ changes.
 | `roll_context.py` | Per-account bag of config, state, actions, monitor |
 | `config.py` | `MacroConfig` + claim / kakera / sphere / `$us` rule blocks |
 | `rule_eval.py` | Pure decisions (claim / kakera / sphere) from parsed fields |
-| `post_roll.py` / `kakera_reactor.py` / `sphere_reactor.py` | Apply those decisions |
+| `post_roll.py` / `kakera_reactor.py` / `sphere_reactor.py` | Apply those decisions. `post_roll` claims by clicking the button, or by reacting when the roll has none (buttons off for the server or account) |
 | `chaos_followup.py` | Extra hourly rolls + discounted chaos-kakera power cost |
 | `claim_window.py` | Final-hour test (claim reset == rolls reset) |
 | `rt_manager.py` / `dk_manager.py` / `reaction_power.py` | `$rt`, `$dk`, power bar |
@@ -112,7 +112,7 @@ changes.
 | `discord_reader.py` | `ChannelMonitor` — user-token client, one channel. `is_connected` tracks `on_disconnect` / `on_resumed` and `client.is_closed()` (it used to be set once by `on_ready` and never cleared, so every reconnect guard was dead code); `ensure_connected()` waits for discord.py's own resume before forcing one, and `seconds_since_last_event()` exposes a silent gateway to callers that know they should have heard something. `send_command` and `click_button` both retry transient failures, reconnect when the gateway has dropped, and report the reason; a click also refetches the message between attempts, since a stale cached copy is the usual reason a button "vanishes". |
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP**. Colour-blind ``spB2`` / ``spT2`` collapse via ``canonical_sphere_emoji``. |
-| `buttons.py` | Classify embed buttons (claim / kakera / sphere) |
+| `buttons.py` | Classify embed buttons (claim / kakera / sphere); decide button-vs-reaction claiming from a roll's components |
 | `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets) |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, `chaos`, …) |

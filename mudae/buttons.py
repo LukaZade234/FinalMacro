@@ -133,6 +133,32 @@ def is_claim_button(btn: dict[str, Any]) -> bool:
     )
 
 
+def claim_method_from_buttons(buttons: list[dict[str, Any]]) -> str:
+    """Which claim mechanic a message offers, read off its components alone.
+
+    Claim buttons are not universal: a server (``$togglebutton``) or the user's
+    own settings can switch them off, and an unclaimed roll then arrives with no
+    components at all and is claimed by *reacting* to it with any emoji. The
+    roll itself is the authority on which mode is live, so no ``$settings``
+    parse is needed — the buttons are either there or they are not.
+
+    * ``"button"`` — an enabled claim button to press.
+    * ``"reaction"`` — no claim button at all, so this is a react-to-claim
+      message.
+    * ``""`` — a claim button exists but is disabled: button mode with the
+      claim window already shut, which is *not* a reason to fall back to a
+      react Mudae would ignore.
+    """
+    has_claim = False
+    for btn in buttons:
+        if not is_claim_button(btn):
+            continue
+        has_claim = True
+        if not bool(btn.get("disabled", False)):
+            return "button"
+    return "" if has_claim else "reaction"
+
+
 def is_kakera_button(btn: dict[str, Any]) -> bool:
     if btn.get("kind") == "kakera":
         return True

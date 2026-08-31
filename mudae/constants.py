@@ -14,6 +14,11 @@ MUDAE_BOT_IDS = frozenset({
 
 CLAIM_EMOJIS = frozenset({"💍", "💖", "💝", "\U0001f498"})
 
+# Servers (or users) with claim buttons switched off claim by *reacting* to the
+# roll instead. Mudae accepts any emoji there, so the macro uses the green tick
+# it already knows — the same mark Mudae reacts with to acknowledge a command.
+CLAIM_REACTION_EMOJI = "\u2705"
+
 # Sphere button emoji names (sp + color letter, e.g. spY).
 # Optional trailing digits are colour-blind variants (``spB2`` = blue with a
 # letter in the corner). Same colour as the unsuffixed name.

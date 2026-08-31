@@ -358,6 +358,43 @@ class ChannelMonitor:
         self._emit_status(f"Click failed: {self.last_transport_error}")
         return False
 
+    async def add_reaction(self, message_id: int, emoji: str) -> bool:
+        """React to a message, retrying transport blips like :meth:`click_button`.
+
+        This is the claim path on servers (or accounts) with claim buttons off,
+        where a roll carries no components and any emoji claims it, so a lost
+        reaction costs the same as a lost click and is retried the same way.
+
+        ``False`` means the reaction is not going to land — the message is
+        gone, the error is not retryable, or the attempts ran out.
+        """
+        last_error = ""
+        for attempt in range(1, _CLICK_ATTEMPTS + 1):
+            try:
+                message = await self._message_for_click(
+                    message_id, refresh=attempt > 1
+                )
+                if message is None:
+                    self._emit_status(f"React failed: message {message_id} is gone")
+                    return False
+                await message.add_reaction(emoji)
+                self.last_transport_error = ""
+                return True
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                if is_fatal_runtime_error(exc) or attempt >= _CLICK_ATTEMPTS:
+                    break
+                if not is_transient_discord_error(exc):
+                    break
+                self._emit_status(
+                    f"React failed ({exc}) — retry {attempt}/{_CLICK_ATTEMPTS - 1}"
+                )
+                await self.ensure_connected()
+                await asyncio.sleep(_CLICK_RETRY_SEC * attempt)
+        self.last_transport_error = last_error or "unknown error"
+        self._emit_status(f"React failed: {self.last_transport_error}")
+        return False
+
     async def fetch_message_snapshot(self, message_id: int) -> MudaeMessageSnapshot | None:
         """Re-fetch a message from Discord (used when edits are slow to arrive)."""
         try:

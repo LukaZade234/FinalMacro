@@ -420,6 +420,73 @@ def test_click_button_refetches_when_the_button_is_not_on_the_cached_copy():
     assert seen == [False, True], "second attempt must refetch the message"
 
 
+class _FakeReactMessage:
+    """A message whose ``add_reaction`` can be made to fail."""
+
+    def __init__(self, failures: int = 0, error: str = "429 Too Many Requests"):
+        self.reactions: list[str] = []
+        self.attempts = 0
+        self._failures = failures
+        self._error = error
+
+    async def add_reaction(self, emoji: str) -> None:
+        self.attempts += 1
+        if self.attempts <= self._failures:
+            raise Exception(self._error)
+        self.reactions.append(emoji)
+
+
+def _monitor_with_message(message, *, connected: bool = True):
+    from mudae.discord_reader import ChannelMonitor
+
+    monitor = ChannelMonitor("token", 123)
+    monitor._connected = connected
+    monitor._client = _FakeClient()
+    monitor._message_for_click = AsyncMock(return_value=message)  # type: ignore[method-assign]
+    return monitor
+
+
+def test_add_reaction_retries_a_rate_limit_like_a_click():
+    """A claim react is a claim: losing one to a 429 loses the character."""
+    message = _FakeReactMessage(failures=2)
+    monitor = _monitor_with_message(message)
+    statuses: list[str] = []
+    monitor.on_status = statuses.append
+
+    async def run() -> None:
+        with patch("mudae.discord_reader.asyncio.sleep", new=AsyncMock()):
+            assert await monitor.add_reaction(999, "\u2705") is True
+
+    asyncio.run(run())
+    assert message.attempts == 3
+    assert message.reactions == ["\u2705"]
+    assert any("retry 1/2" in line for line in statuses)
+
+
+def test_add_reaction_does_not_retry_a_permanent_error():
+    message = _FakeReactMessage(failures=99, error="Unknown emoji")
+    monitor = _monitor_with_message(message)
+
+    async def run() -> None:
+        with patch("mudae.discord_reader.asyncio.sleep", new=AsyncMock()):
+            assert await monitor.add_reaction(999, "\u2705") is False
+
+    asyncio.run(run())
+    assert message.attempts == 1
+
+
+def test_add_reaction_reports_a_message_that_is_gone():
+    monitor = _monitor_with_message(None)
+    statuses: list[str] = []
+    monitor.on_status = statuses.append
+
+    async def run() -> None:
+        assert await monitor.add_reaction(999, "\u2705") is False
+
+    asyncio.run(run())
+    assert any("is gone" in line for line in statuses), statuses
+
+
 def test_discord_reader_imports_transient_error_helper():
     from mudae import discord_reader
 

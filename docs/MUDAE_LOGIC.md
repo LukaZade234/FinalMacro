@@ -77,9 +77,38 @@ time (`macro/reaction_power.py`).
 ## Claims
 
 Claiming a character uses the claim **button** on the roll embed (💍 / 💖 /
-similar). Some servers hide buttons and require an emoji reaction instead.
-The macro only supports **button claims**. Claim-via-emoji (`$togglebutton` off /
-`$claimreact`) stays unimplemented until a later slice *uses* parsed `$settings`.
+similar) *where buttons exist*. `$togglebutton` (per server) and the user's own
+settings can switch them off, and an unclaimed roll then arrives with no
+components at all — you claim it by **reacting** to the roll with any emoji.
+The macro supports both.
+
+**It reads the mode off the roll, not off `$settings`.** The two settings can
+disagree (a server can have buttons on while the account has them off), and the
+roll is the only place their combination actually shows up, so nothing here
+depends on `$settings` being parsed:
+
+| roll's components | mode | `claim_method` |
+| --- | --- | --- |
+| an **enabled** claim button | button | `"button"` |
+| **no** claim button at all | reaction | `"reaction"` |
+| a **disabled** claim button | button, window shut | `None` |
+
+`mudae.buttons.claim_method_from_buttons` owns that table; `parse_roll` adds the
+two roll-level vetoes (already claimed, or a profile embed rather than a roll)
+and sets `can_claim = claim_method is not None`, which is what every claim rule
+downstream gates on. The disabled-button row matters: that is button mode with
+the claim window already closed, and reacting there would do nothing, so it must
+not be confused with the button-less case.
+
+`PostRollHandler._send_claim` (`macro/post_roll.py`) then either clicks or
+reacts; everything after the claim is sent — the `wait_for_claim` reply, the
+`CLAIM_INTERVAL` sync, marking the slot spent — is the same path either way.
+The reaction is `CLAIM_REACTION_EMOJI` (`✅`, `mudae/constants.py`), the same
+green tick Mudae itself uses to acknowledge a command; Mudae accepts *any*
+emoji, so the choice is cosmetic and picking a custom one is a future polish
+item. `ChannelMonitor.add_reaction` retries transport blips exactly like
+`click_button`, since a lost claim react loses the character just as a lost
+click does.
 
 You get one claim slot per claim interval (`$setclaim`, often 60–180 minutes).
 `$rt` (reset claim) is a separate token that grants an extra claim; it has
@@ -92,7 +121,8 @@ Implemented in `macro/claim_window.py`.
 
 **Macro claim rules** (`CharacterClaimRules` / `passes_character_claim`):
 
-1. Wish ping + claim button → claim **immediately** (interrupt the roll loop).
+1. Wish ping on a claimable roll (button *or* reaction) → claim
+  **immediately** (interrupt the roll loop).
   If the slot is on cooldown and `$rt` is available and `auto_use_rt` is on,
    spend `$rt` and claim.
 2. Kakera value ≥ `min_kakera`, or claim rank ≤ `max_claim_rank` → claim
@@ -102,8 +132,9 @@ Implemented in `macro/claim_window.py`.
 4. Eligible leftovers are compared at the **end of the batch**; the best one
   is claimed then.
 
-Already-claimed characters and embeds with no enabled claim button are
-skipped.
+Already-claimed characters, profile embeds, and rolls whose claim button Mudae
+has disabled are skipped. A roll with **no** button is not skipped — that is the
+reaction case above.
 
 **"Once per interval" rejection.** If the claim slot's real state has drifted
 from what the last `$tu` reported (e.g. connecting mid-window), a claim button
