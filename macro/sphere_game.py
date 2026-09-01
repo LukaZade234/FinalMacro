@@ -255,6 +255,45 @@ def total_reward_from_content(content: str) -> int:
     return total
 
 
+def oc_grants_from_content(content: str) -> int:
+    """Total ``$oc`` uses the reward tracker has granted so far.
+
+    A hidden (``spU``) payout line is a bonus ``$oc`` game rather than spheres,
+    and the number on it is *how many* uses it granted — an ``$oh`` played with
+    a multiplier grants that many at once, and says so: ``:spU: **+4 $oc**``.
+    Counting the lines instead of reading their numbers threw three of those
+    four uses away.
+    """
+    total = 0
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if "turns into" in lower or "breaks down into" in lower:
+            continue
+        match = _PAYOUT_RE.search(line)
+        if not match:
+            continue
+        emoji = normalize_sphere_emoji(
+            (match.group("emoji1") or match.group("emoji2") or "").strip()
+        )
+        if emoji != SPHERE_HIDDEN_EMOJI:
+            continue
+        total += int((match.group("amount") or "0").replace(",", ""))
+    return total
+
+
+def new_oc_grants(before: str, after: str) -> int:
+    """``$oc`` uses added to the reward tracker since ``before``.
+
+    The tracker is append-only (the same assumption
+    :func:`new_reward_outcome_types` makes), so the difference of the two
+    totals is what the latest click granted.
+    """
+    return max(0, oc_grants_from_content(after) - oc_grants_from_content(before))
+
+
 def reward_line_types(content: str) -> list[str]:
     """Emoji names from each payout line in the reward tracker message."""
     return [emoji for kind, emoji in _reward_events(content) if kind == "payout"]
@@ -323,8 +362,17 @@ def parse_reward_clicks(content: str) -> list[dict[str, Any]]:
             continue
         skip_payout = ""
         if emoji == SPHERE_HIDDEN_EMOJI:
+            # ``+4 $oc`` is four uses on one line (an $oh played at x4), so the
+            # number is the grant count. Fall back to one if it somehow reads 0
+            # — the line only exists because a use was granted.
+            granted = int((match.group("amount") or "0").replace(",", ""))
             clicks.append(
-                {"emoji": "spU", "resolved": [], "paid": True, "oc_bonus": 1}
+                {
+                    "emoji": "spU",
+                    "resolved": [],
+                    "paid": True,
+                    "oc_bonus": granted or 1,
+                }
             )
             continue
         paid = emoji not in SPHERE_FREE_EMOJIS and "(free)" not in lower
@@ -835,6 +883,7 @@ class OhSphereGame:
                     clicked_emoji=emoji,
                     reward_types=new_reward_outcome_types(before_reward, reward_content),
                     grid_emoji=grid_emoji,
+                    oc_grants=new_oc_grants(before_reward, reward_content),
                 )
                 oc_grant = int(classified.get("oc_bonus") or 0)
                 session_clicks.append(

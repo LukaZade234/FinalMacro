@@ -161,12 +161,21 @@ def classify_oh_click(
     clicked_emoji: str,
     reward_types: list[str],
     grid_emoji: str = "",
+    oc_grants: int | None = None,
 ) -> dict[str, Any]:
     """Identity of an $oh click vs what it paid out.
 
     Light/dark stay ``spL``/``spD`` for spawn stats; ``resolved`` is the
     fragment / transform used for base SP. A hidden click whose reward line
     is ``spU`` is a bonus ``$oc`` use, not a colour.
+
+    ``oc_grants`` is how many ``$oc`` uses those hidden lines actually granted,
+    read off the reward tracker by
+    :func:`macro.sphere_game.new_oc_grants`. It matters because one line can
+    grant several: an ``$oh`` played with a multiplier writes ``+4 $oc`` on a
+    single ``spU`` line. Callers that only have the emoji names (and so cannot
+    know the number) leave it ``None`` and fall back to counting the lines,
+    which is right whenever the multiplier is 1.
     """
     clicked = normalize_sphere_emoji(clicked_emoji)
     rewards = [normalize_sphere_emoji(item) for item in reward_types if item]
@@ -176,7 +185,9 @@ def classify_oh_click(
         return {
             "emoji": "spU",
             "resolved": [],
-            "oc_bonus": sum(1 for item in rewards if item == "spU"),
+            "oc_bonus": int(oc_grants) if oc_grants else sum(
+                1 for item in rewards if item == "spU"
+            ),
         }
 
     if clicked == "spL":

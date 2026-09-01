@@ -746,7 +746,7 @@ Item {
                                         Layout.fillWidth: true
                                         text: cellLabel(modelData.cell)
                                               + (modelData.paid ? "" : " free")
-                                              + (modelData.oc_bonus ? " +$oc" : "")
+                                              + (modelData.oc_bonus ? " +" + modelData.oc_bonus + " $oc" : "")
                                         color: Theme.fgSecondary
                                         font.pixelSize: 11
                                         elide: Text.ElideRight

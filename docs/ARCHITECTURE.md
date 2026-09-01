@@ -102,7 +102,8 @@ changes.
 | `activity_log.py` / `session_log.py` | In-app log + on-disk session |
 | `runtime_store.py` / `daily_store.py` | Resume `$tu` / daily resets across restarts |
 | `connection_recovery.py` | Reconnect after Discord blips |
-| `actions.py` | Thin send/click helpers over the monitor |
+| `maintenance.py` | Backoff ladder (5 / 10 / 30 min, then stop) while Mudae is rebooting |
+| `actions.py` | Thin send/click helpers over the monitor; owns the account's `MaintenanceWatch` |
 
 ### `mudae/`
 
@@ -116,7 +117,8 @@ changes.
 | `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets) |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, `chaos`, …) |
-| `parsers/pipeline.py` | Classify + parse a snapshot |
+| `parsers/pipeline.py` | Classify + parse a snapshot. Recognises Mudae's "under maintenance" reply **first**, ahead of the step that pairs a reply with the command that was sent |
+| `parsers/maintenance.py` | Mudae's reboot reply and its stated window |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
 | `stats_index.py` | In-memory daily cube + paged `recent` rows for Statistics (never dumps the full log to QML) |

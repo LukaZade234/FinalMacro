@@ -11,6 +11,7 @@ from mudae.parsers.claim import is_custom_claim, is_marriage_claim
 from mudae.parsers.claim_interval import is_claim_interval_message
 from mudae.parsers.dk import is_dk_claim
 from mudae.parsers.reaction_power import is_kakera_react_denied
+from mudae.parsers.maintenance import is_maintenance_message
 from mudae.parsers.minigame_exhausted import is_minigame_exhausted_message
 from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
@@ -46,6 +47,11 @@ def has_claim_buttons(snapshot: MudaeMessageSnapshot) -> bool:
 
 def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
     content = snapshot_text(snapshot)
+
+    # First: while Mudae is rebooting this text stands in for *every* reply, so
+    # it must not be read as whatever command was sent.
+    if is_maintenance_message(content):
+        return MessageKind.MAINTENANCE
 
     if snapshot.edited and snapshot.embeds:
         embed = snapshot.embeds[0]

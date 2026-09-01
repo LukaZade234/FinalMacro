@@ -21,6 +21,7 @@ from mudae.parsers.shop import parse_shop, parse_shop_snapshot
 from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
+from mudae.parsers.maintenance import is_maintenance_message, parse_maintenance
 from mudae.parsers.minigame_exhausted import (
     is_minigame_exhausted_message,
     parse_minigame_exhausted,
@@ -56,6 +57,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.CLAIM_INTERVAL: "claim interval",
     MessageKind.ROLL_LIMIT: "roll limit",
     MessageKind.MINIGAME_EXHAUSTED: "minigame exhausted",
+    MessageKind.MAINTENANCE: "maintenance",
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
     MessageKind.SHOP: "$shop",
@@ -151,6 +153,12 @@ def parse_mudae_message(
     reply_parts: int = 1,
 ) -> ParseResult:
     content = snapshot.content or ""
+    # Before anything that pairs the reply with the command that was sent:
+    # while Mudae is rebooting this one text answers every command, so pairing
+    # it with ``$tu`` would run ``parse_tu`` on it and yield a blank but
+    # otherwise valid sheet.
+    if is_maintenance_message(content):
+        return parse_maintenance(content)
     if is_roll_limit_message(content):
         return parse_roll_limit(content)
     if is_minigame_exhausted_message(content):
@@ -233,6 +241,8 @@ def parse_mudae_message(
         return parse_roll_limit(snapshot.content)
     if kind == MessageKind.MINIGAME_EXHAUSTED:
         return parse_minigame_exhausted(snapshot.content)
+    if kind == MessageKind.MAINTENANCE:
+        return parse_maintenance(snapshot.content)
     if kind == MessageKind.OWNERSHIP_UPDATE:
         return parse_ownership_update(snapshot)
     if kind == MessageKind.CHARACTER_EMBED and snapshot.embeds:

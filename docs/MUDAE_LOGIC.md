@@ -492,6 +492,17 @@ gives 156.5 SP against 153.4 in live play. Two cautions baked into it:
   stop claiming known spheres to farm a random drop it cannot actually aim
   at. The bakeoff prints both valuations so no conclusion rests on it.
 
+**The `$oc` grant scales with the `$oh` multiplier.** An `$oh` played as
+`$oh 4` spends four uses and multiplies its rewards, the `$oc` grant
+included, and Mudae writes the whole amount on one hidden-sphere line:
+`<:spU:…> **+4 $oc**`. The number is the count of uses, not spheres — the
+same amount slot a coloured line uses for SP, which is why
+`total_reward_from_content` skips `spU` lines. `macro/sphere_game.py`
+reads it with `oc_grants_from_content` / `new_oc_grants` and passes it to
+`classify_oh_click(oc_grants=…)`; play-all then adds it to the `$oc`
+budget. Counting the *lines* instead (what the macro did until this was
+found) banks one use out of four and silently drops the rest.
+
 **Headroom.** A prototype policy search over clicks-left thresholds beats
 the greedy by only **~1.5–2.5%**, and that margin is flat from 1 to 10
 initial reveals — buying the initial-reveal perk raises the score a lot
@@ -1052,9 +1063,47 @@ only `$settings` + `$bonus` text.
 
 
 
+## Maintenance and outages
+
+Mudae goes down for a reboot every so often. While it is down it answers
+**every** command with the same text instead of the reply that was asked
+for — `$tu`, `$wa`, `$oh`, anything:
+
+```
+Command under maintenance!
+(For 3 minutes, reboot)
+```
+
+**It has to be recognised before the reply is paired with the command.**
+`mudae/parsers/pipeline.parse_mudae_message` matches a Mudae message to the
+command the macro just typed (`mudae.commands.resolve_command`) rather than
+to the message's own shape, so without a check ahead of that a maintenance
+reply to `$tu` was handed to `parse_tu` and came back as a valid-looking but
+empty sheet. The hourly loop read "0 rolls, reset passed", sent `$tu` again,
+and did that once every three seconds for the length of the outage. The
+check is the first thing `parse_mudae_message` does, and
+`mudae/parsers/maintenance.py` owns it (`MessageKind.MAINTENANCE`).
+
+**The backoff is the macro's own, not Mudae's estimate.** The parenthesised
+window is parsed and logged, but Mudae keeps printing "(For 3 minutes)"
+well past three minutes, so it is advisory. `macro/maintenance.py` holds the
+ladder — **5, then 10, then 30 minutes** — and once it is spent the macro
+stops, on the grounds that three quarters of an hour is not a reboot. A
+command that Mudae answers normally resets the ladder, so a second outage
+later starts at five minutes again.
+
+`MaintenanceWatch` lives on `DiscordActions`, which every Mudae message for
+that account passes through (`feed`), so the outage is noticed whichever
+command hit it and every command shares one ladder — an outage first seen on
+`$ohu` and then on a roll keeps counting up instead of restarting.
+`RollCycleEngine._maintenance_halt` is what waits: it returns `"retry"`
+after the pause, `"stop"` when the ladder is spent or the user pressed Stop,
+and `""` when there is no outage, so the caller's ordinary failure handling
+still applies. It is checked wherever the loops used to stop outright — a
+failed `$tu` and a failed roll, in both the hourly and the `$us` cycle.
+
 ## What the macro does not do (yet)
 
-- Claim by emoji reaction (servers with `$togglebutton` off).
 - External sniping of other people's rolls.
 - Slash-command rolls.
 - Multi-account concurrent connections (config supports it; runtime is

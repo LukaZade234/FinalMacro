@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Any
 
+from macro.maintenance import MaintenanceWatch
 from mudae.parsers.classify import snapshot_is_kakera_claim, snapshot_text
 from mudae.parsers.reaction_power import is_kakera_react_denied
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
@@ -198,10 +199,14 @@ class DiscordActions:
     def __init__(self, monitor: Any) -> None:
         self._monitor = monitor
         self._queue: asyncio.Queue[tuple[MudaeMessageSnapshot, ParseResult]] = asyncio.Queue()
+        # Every Mudae message on this account passes through ``feed``, so this
+        # is the one place that sees an outage whichever command hit it.
+        self.maintenance = MaintenanceWatch()
 
     def feed(self, snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> None:
         if not snapshot.is_mudae:
             return
+        self.maintenance.observe(snapshot, parsed)
         while self._queue.qsize() >= _MAX_QUEUE_SIZE:
             try:
                 self._queue.get_nowait()

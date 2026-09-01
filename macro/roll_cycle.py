@@ -30,6 +30,7 @@ from macro.runtime_store import (
     snapshot_from_state,
 )
 from macro.live_clock import remaining_minutes
+from macro.maintenance import MaintenanceWatch, format_maintenance_wait
 from macro.us_schedule import (
     in_local_window,
     seconds_until_window_end,
@@ -141,6 +142,10 @@ class RollCycleEngine:
         self._daily_get = daily_resets_get
         self._daily_save = daily_resets_save
         self._channel_settings: dict[str, Any] = {}
+        # ``DiscordActions`` owns the real watch so every command on the account
+        # shares one backoff ladder. This stands in when the engine is driven by
+        # something else that has no watch of its own.
+        self._maintenance_fallback = MaintenanceWatch()
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._roll_stop = RollStopTracker()
@@ -269,6 +274,45 @@ class RollCycleEngine:
 
     def _log_debug(self, text: str) -> None:
         self._activity.debug(text)
+
+    @property
+    def _maintenance(self) -> MaintenanceWatch:
+        return getattr(self._actions, "maintenance", None) or self._maintenance_fallback
+
+    async def _maintenance_halt(self, label: str) -> str:
+        """Wait out a Mudae reboot after a command came back "under maintenance".
+
+        Returns ``""`` when no outage was seen (the caller's own failure
+        handling applies), ``"retry"`` after pausing so the caller can try the
+        step again, or ``"stop"`` when the backoff ladder is spent — or the
+        user stopped the macro during the pause.
+
+        Every command shares one ladder, so an outage first noticed on ``$ohu``
+        and then on a roll keeps counting up instead of restarting at five
+        minutes.
+        """
+        watch = self._maintenance
+        if not watch.pending:
+            return ""
+        watch.clear()
+        note = ""
+        if watch.minutes is not None:
+            note = f" (Mudae says ~{watch.minutes} min"
+            note += f", {watch.reason})" if watch.reason else ")"
+        wait = watch.next_wait_seconds()
+        if wait is None:
+            self._log(
+                f"{label}: Mudae still under maintenance after "
+                f"{watch.attempts} retries — stopping"
+            )
+            return "stop"
+        self._log(
+            f"{label}: Mudae is under maintenance{note} — waiting "
+            f"{format_maintenance_wait(wait)} before retry {watch.attempts}"
+        )
+        self._state.phase = MacroPhase.IDLE
+        self._notify()
+        return "retry" if await self._sleep_interruptible(wait) else "stop"
 
     async def _force_discord_reconnect(self) -> bool:
         return await self._recovery.force_reconnect()
@@ -598,6 +642,9 @@ class RollCycleEngine:
             self._state.phase = MacroPhase.IDLE
             self._notify()
             return False
+        # Mudae answered, so any outage is over: start the backoff ladder from
+        # the bottom again if it goes down later.
+        self._maintenance.reset()
         self._apply_tu_fields(parsed.fields)
         self._sync_perk8_refill_from_tu(parsed.fields)
         self._sync_claim_window_from_tu()
@@ -726,6 +773,12 @@ class RollCycleEngine:
 
                     if not tu_fresh:
                         if not await self.run_tu():
+                            halt = await self._maintenance_halt("Macro")
+                            if halt == "stop":
+                                break
+                            if halt == "retry":
+                                tu_fresh = False
+                                continue
                             self._log("$tu failed — stopping")
                             break
                     tu_fresh = False
@@ -759,6 +812,12 @@ class RollCycleEngine:
                         tu_fresh = True
                         continue
                     if done == 0 and not claimed:
+                        halt = await self._maintenance_halt("Macro")
+                        if halt == "stop":
+                            break
+                        if halt == "retry":
+                            tu_fresh = False
+                            continue
                         self._log("Roll failed — stopping")
                         break
                     if claimed:
@@ -1550,6 +1609,11 @@ class RollCycleEngine:
                     await self._run_priority_pause()
                     if not skip_tu:
                         if not await self.run_tu():
+                            halt = await self._maintenance_halt("$us mode")
+                            if halt == "stop":
+                                break
+                            if halt == "retry":
+                                continue
                             self._log("$us mode: $tu failed — stopping")
                             break
 
@@ -1686,6 +1750,12 @@ class RollCycleEngine:
                             )
                             continue
                         if done == 0 and not claimed:
+                            halt = await self._maintenance_halt("$us mode")
+                            if halt == "stop":
+                                break
+                            if halt == "retry":
+                                skip_tu = False
+                                continue
                             self._log("$us mode: normal roll failed — stopping")
                             break
                         await self._claim_best_at_session_end(
@@ -1810,6 +1880,12 @@ class RollCycleEngine:
                             f"${self._config.prefix}us {request} — checking $tu"
                         )
                         if not await self.run_tu():
+                            halt = await self._maintenance_halt("$us mode")
+                            if halt == "stop":
+                                break
+                            if halt == "retry":
+                                skip_tu = False
+                                continue
                             self._log("$us mode: $tu failed — stopping")
                             break
                         await self._maybe_refresh_perk8_status()
