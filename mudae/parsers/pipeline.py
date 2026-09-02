@@ -22,6 +22,7 @@ from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.maintenance import is_maintenance_message, parse_maintenance
+from mudae.parsers.minigame import parse_minigame_board
 from mudae.parsers.minigame_exhausted import (
     is_minigame_exhausted_message,
     parse_minigame_exhausted,
@@ -57,6 +58,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.CLAIM_INTERVAL: "claim interval",
     MessageKind.ROLL_LIMIT: "roll limit",
     MessageKind.MINIGAME_EXHAUSTED: "minigame exhausted",
+    MessageKind.MINIGAME_BOARD: "minigame board",
     MessageKind.MAINTENANCE: "maintenance",
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
@@ -241,6 +243,8 @@ def parse_mudae_message(
         return parse_roll_limit(snapshot.content)
     if kind == MessageKind.MINIGAME_EXHAUSTED:
         return parse_minigame_exhausted(snapshot.content)
+    if kind == MessageKind.MINIGAME_BOARD:
+        return parse_minigame_board(snapshot)
     if kind == MessageKind.MAINTENANCE:
         return parse_maintenance(snapshot.content)
     if kind == MessageKind.OWNERSHIP_UPDATE:
@@ -331,6 +335,8 @@ def _parse_command_response(
             result = parse_marriage(snapshot.content)
         elif kind == MessageKind.CLAIM:
             result = parse_claim(snapshot.content)
+        elif kind == MessageKind.MINIGAME_BOARD:
+            result = parse_minigame_board(snapshot)
         elif kind == MessageKind.ROLL_OWNERSHIP:
             result = parse_roll_ownership(snapshot)
         elif kind == MessageKind.CLAIM_INTERVAL:

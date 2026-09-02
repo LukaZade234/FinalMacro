@@ -411,14 +411,27 @@ Item {
                             checked: draft.sphere_reaction.enabled
                             onToggled: setDraftField("sphere_reaction", "enabled", checked)
                         }
+                        // Inert while budget mode is on: the EV bar picks the
+                        // colours there. Greyed rather than hidden, so turning
+                        // budget mode off restores a visible list.
                         ColorChipPicker {
                             Layout.fillWidth: true
                             title: "Allowed sphere colors"
                             options: sphereOptions
+                            enabled: !draft.sphere_reaction.budget_aware
+                            opacity: enabled ? 1.0 : 0.45
                             selected: draft.sphere_reaction.types_allowed || []
                             onSelectionChanged: function(ids) {
                                 setDraftField("sphere_reaction", "types_allowed", ids)
                             }
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !!draft.sphere_reaction.budget_aware
+                            text: "The EV bar picks colours in budget mode — this list is ignored."
+                            color: Theme.fgMuted
+                            font.pixelSize: 10
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }

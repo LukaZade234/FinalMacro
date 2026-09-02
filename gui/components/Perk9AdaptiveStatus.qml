@@ -38,13 +38,28 @@ Item {
     function leftText() {
         if (!status || status.spawns_left === null || status.spawns_left === undefined)
             return "unknown"
+        // The pool remainder the forecast sits under, so a much smaller number
+        // than "rolled / pool" implies does not read as a bug.
+        if (status.spawns_ceiling !== null && status.spawns_ceiling !== undefined
+                && status.spawns_ceiling !== status.spawns_left)
+            return status.spawns_left + " of " + status.spawns_ceiling
         return String(status.spawns_left)
     }
 
     function barText() {
-        if (!status || status.threshold === null || status.threshold === undefined)
+        if (!status)
+            return "—"
+        if (status.spend_down)
+            return "spending down"
+        if (status.threshold === null || status.threshold === undefined)
             return "—"
         return "≥ " + status.threshold + " SP"
+    }
+
+    function rateText() {
+        if (!status || !status.hazard)
+            return "learning this account's rate"
+        return "learned rate " + status.hazard + " spawns per roll"
     }
 
     function looserText() {
@@ -252,6 +267,17 @@ Item {
                     }
                 }
             }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: root.showBody
+            text: root.status && root.status.spend_down
+                ? "Last hour before reset — any sphere is worth a leftover click"
+                : root.rateText()
+            color: Theme.fgMuted
+            font.pixelSize: 10
+            wrapMode: Text.WordWrap
         }
 
         Text {

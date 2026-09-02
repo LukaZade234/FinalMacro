@@ -24,6 +24,7 @@ class MessageKind(str, Enum):
     CLAIM_INTERVAL = "claim_interval"
     ROLL_LIMIT = "roll_limit"
     MINIGAME_EXHAUSTED = "minigame_exhausted"
+    MINIGAME_BOARD = "minigame_board"
     MAINTENANCE = "maintenance"
     CHARACTER_EMBED = "character_embed"
     CLAIM_BUTTONS = "claim_buttons"

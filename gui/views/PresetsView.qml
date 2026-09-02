@@ -591,14 +591,28 @@ Item {
                             enabled_: rules.sphere_reaction ? rules.sphere_reaction.enabled : false
                             onEnabledToggled: function(value) { patch("sphere_reaction", "enabled", value) }
 
+                            // Budget mode picks colours from the EV bar instead,
+                            // so the list is inert — greyed rather than hidden,
+                            // so turning budget mode off restores a visible one.
                             ColorChipPicker {
                                 Layout.fillWidth: true
                                 title: "Sphere colors (none = any)"
                                 options: sphereOptions
+                                enabled: !(rules.sphere_reaction && rules.sphere_reaction.budget_aware)
+                                opacity: enabled ? 1.0 : 0.45
                                 selected: rules.sphere_reaction ? (rules.sphere_reaction.types_allowed || []) : []
                                 onSelectionChanged: function(ids) {
                                     patch("sphere_reaction", "types_allowed", ids)
                                 }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                visible: !!(rules.sphere_reaction && rules.sphere_reaction.budget_aware)
+                                text: "The EV bar picks colours in budget mode — this list is ignored."
+                                color: Theme.fgMuted
+                                font.pixelSize: 10
+                                wrapMode: Text.WordWrap
                             }
 
                             Perk9BudgetPanel {

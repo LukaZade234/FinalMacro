@@ -20,9 +20,12 @@ from typing import Any
 from macro.perk9_daily import (
     Perk9DailyRecord,
     apply_record_to_state,
+    learned_hazard,
     load_perk9_record,
     persist_click_progress,
+    record_hazard_interval,
     refresh_exhausted_if_refill_passed,
+    rolled_today_estimate,
     save_perk9_record,
     should_query_ohu9_on_refill,
     should_skip_ohu9_until_refill,
@@ -125,6 +128,11 @@ class Perk9Runtime:
         self._on_idle = on_idle
         self._response_timeout = response_timeout_sec
         self._pending = False
+        # Open stretch of ordinary rolling being measured: ``(rolled, rolls)``
+        # when it started. ``None`` between stretches — during a ``$us`` drain,
+        # or once the click budget is spent and Mudae stops spawning buttons, so
+        # the local ``rolled`` estimate would no longer track reality.
+        self._hazard_mark: tuple[int, int] | None = None
 
     # --- persisted daily state ---
 
@@ -178,6 +186,71 @@ class Perk9Runtime:
         if count <= 0:
             return
         self._ctx.state.record_perk9_spawn(count)
+
+    def note_roll(self, us_roll: bool = False) -> None:
+        """One roll went out; keep the learned-rate accounting straight.
+
+        Ordinary rolls are the denominator of the rate. ``$us`` rolls are not:
+        they spawn perk-9 buttons like any other roll, but a drain can tear
+        through a large slice of the pool in half an hour, and counting that as
+        this account's normal pace would inflate the estimate for every later
+        day. A ``$us`` roll therefore closes the stretch being measured and the
+        next stretch starts from the post-drain ``rolled`` — the depletion the
+        drain caused is respected, its rolls are not counted.
+        """
+        state = self._ctx.state
+        if us_roll:
+            self._close_hazard_interval()
+            return
+        if self._hazard_mark is None:
+            self._open_hazard_interval()
+        state.record_perk9_regular_roll()
+
+    def _at_click_cap(self) -> bool:
+        cap = int(getattr(self._ctx.state, "perk9_click_max", 0) or 0)
+        return cap > 0 and int(self._ctx.state.perk9_clicks_today) >= cap
+
+    def _open_hazard_interval(self, rolled: int | None = None) -> None:
+        """Start measuring a stretch of ordinary rolling from a known ``rolled``."""
+        state = self._ctx.state
+        if rolled is None:
+            # Only Mudae's own number survives the click budget running out.
+            if self._at_click_cap():
+                return
+            rolled = rolled_today_estimate(state)
+        if rolled is None or state.perk9_roll_pool is None:
+            return
+        self._hazard_mark = (int(rolled), int(state.perk9_regular_rolls_today))
+
+    def _close_hazard_interval(self, rolled: int | None = None) -> None:
+        """Fold the open stretch into the learned rate and stop measuring."""
+        mark = self._hazard_mark
+        self._hazard_mark = None
+        if mark is None:
+            return
+        state = self._ctx.state
+        if rolled is None:
+            if self._at_click_cap():
+                # Buttons stopped spawning, so the local count froze while the
+                # real one kept climbing — the stretch is unmeasurable.
+                return
+            rolled = rolled_today_estimate(state)
+        if rolled is None:
+            return
+        rolled_from, rolls_from = mark
+        rolls = int(state.perk9_regular_rolls_today) - rolls_from
+        if rolls <= 0:
+            return
+        daily = self.load_daily()
+        record = record_hazard_interval(
+            load_perk9_record(daily),
+            pool=state.perk9_roll_pool,
+            rolled_from=rolled_from,
+            rolled_to=int(rolled),
+            rolls=rolls,
+        )
+        self.save_daily(save_perk9_record(daily, record))
+        state.perk9_hazard = learned_hazard(record.hazard_history)
 
     def persist_click_progress(self) -> None:
         """Write the live click counter into the persisted daily record."""
@@ -257,8 +330,24 @@ class Perk9Runtime:
             return gate
         _daily, record = self._load_refreshed()
         if not (self._pending or should_query_ohu9_on_refill(record)):
+            self.checkpoint_hazard()
             return Perk9Action.USE_CACHED
         return await self.refresh(force=True)
+
+    def checkpoint_hazard(self) -> None:
+        """Bank the stretch measured so far and start the next one.
+
+        ``$ohu9`` goes out about once a day, so without this a stretch opened at
+        session start would only ever close at the *next* day's query — which
+        spans the reset and is discarded — and the rate would never be learned
+        at all. The local ``rolled`` estimate is exact until the click budget
+        runs out, which ``_close_hazard_interval`` already checks, so an hourly
+        checkpoint costs nothing and needs no extra command.
+        """
+        if self._hazard_mark is None:
+            return
+        self._close_hazard_interval()
+        self._open_hazard_interval()
 
     async def _query_ohu9(
         self,
@@ -307,7 +396,11 @@ class Perk9Runtime:
         record = refresh_exhausted_if_refill_passed(record)
         self.save_daily(save_perk9_record(daily, record))
 
+        day_before = state.perk9_clicks_day
         state.rollover_perk9_if_needed()
+        if state.perk9_clicks_day != day_before:
+            # Yesterday's open stretch cannot be closed against today's counts.
+            self._hazard_mark = None
         if record.last_click_max is not None:
             state.perk9_click_max = int(record.last_click_max)
         if record.last_clicked is not None:
@@ -327,6 +420,17 @@ class Perk9Runtime:
             # estimate counts down from here until the next $ohu9.
             state.perk9_spawns_at_sync = int(state.perk9_spawns_today)
         state.sync_perk9_unknown_clicks()
+
+        # Mudae's own ``rolled`` is the one number the click budget running out
+        # cannot stale — buttons stop spawning at the cap, but the pool keeps
+        # emptying — so it both closes the stretch being measured and opens the
+        # next one.
+        if record.rolled_today is not None:
+            self._close_hazard_interval(rolled=int(record.rolled_today))
+            self._open_hazard_interval(rolled=int(record.rolled_today))
+        state.perk9_hazard = learned_hazard(
+            load_perk9_record(self.load_daily()).hazard_history
+        )
 
         used = int(state.perk9_clicks_today)
         cap = int(state.perk9_click_max)

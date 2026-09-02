@@ -62,6 +62,15 @@ class AccountState:
     perk9_roll_pool: int | None = None
     # Tracked between ``$ohu9`` syncs so the macro does not re-query every session.
     perk9_spawns_today: int = 0
+    # Rolls made today that are representative of this account's normal pace, so
+    # the perk-9 arrival rate can be inverted from them. ``$us`` rolls are
+    # excluded: they still spawn buttons, but a burst of them tears through the
+    # pool far faster than ordinary rolling and would inflate the learned rate.
+    perk9_regular_rolls_today: int = 0
+    # Perk-9 spawns per roll, averaged over the account's recent days
+    # (``macro.perk9_daily.learned_hazard``). ``None`` until enough regular
+    # rolls have been seen, which keeps the estimate on the pool ceiling alone.
+    perk9_hazard: float | None = None
     # Spawn count at the last ``$ohu9`` sync, so spawns seen since then can be
     # subtracted from Mudae's ``pool - rolled`` between queries.
     perk9_spawns_at_sync: int = 0
@@ -162,6 +171,14 @@ class AccountState:
             self.perk9_clicks_today = 0
             self.perk9_spawns_today = 0
             self.perk9_spawns_at_sync = 0
+            self.perk9_regular_rolls_today = 0
+            # The perk-9 pool refills with the day. Leaving yesterday's count
+            # here says "only 6 of 154 characters are still rollable", which
+            # makes the adaptive threshold think the day is nearly over and drop
+            # its bar to zero on the first roll after the reset. ``None`` stays
+            # ``None``: that means "never measured", not "none rolled".
+            if self.perk9_rolled_today is not None:
+                self.perk9_rolled_today = 0
             self.perk9_click_emojis = []
             self.perk9_unknown_clicks = 0
 
@@ -177,6 +194,13 @@ class AccountState:
             return
         self.rollover_perk9_if_needed()
         self.perk9_spawns_today += int(count)
+
+    def record_perk9_regular_roll(self, count: int = 1) -> None:
+        """One ordinary (non-``$us``) roll, the denominator of the learned rate."""
+        if count <= 0:
+            return
+        self.rollover_perk9_if_needed()
+        self.perk9_regular_rolls_today += int(count)
 
     def note_key_limit(self, limit: int | None) -> bool:
         """Record Mudae's hourly key cap. True the first time it is seen."""

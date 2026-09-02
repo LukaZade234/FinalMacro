@@ -528,18 +528,22 @@ def passes_sphere_reaction(
             return True
         return _sphere_matches_filter(emoji, rules.types_allowed)
 
-    selected = [b for b in sphere_buttons if matches_filter(b)]
-    if not selected:
-        return ReactionDecision(
-            reason=f"no sphere button matched filter [{','.join(rules.types_allowed)}]"
-        )
-
     budget_ctx = threshold_ctx if rules.budget_aware else None
-    if budget_ctx is not None:
+    if budget_ctx is None:
+        selected = [b for b in sphere_buttons if matches_filter(b)]
+        if not selected:
+            return ReactionDecision(
+                reason=f"no sphere button matched filter [{','.join(rules.types_allowed)}]"
+            )
+    else:
+        # The EV bar replaces ``types_allowed`` rather than narrowing it. The
+        # list is bottom-heavy — blue and teal are five spawns in six — so
+        # filtering first threw away almost every button the bar would have
+        # cleared at the end of the day, and the clicks expired unspent.
         # Megasphere is free and never spends a perk-9 slot, so it skips the gate.
         kept = [
             b
-            for b in selected
+            for b in sphere_buttons
             if _sphere_emoji(b) in SPHERE_ROLL_FREE_EMOJIS
             or budget_ctx.should_click(_sphere_emoji(b))
         ]
@@ -561,6 +565,8 @@ def passes_sphere_reaction(
             f" perk9 EV bar {budget_ctx.threshold():.0f}"
             f" ({budget_ctx.clicks_left} left)"
         )
+        if budget_ctx.spend_down:
+            reason += " — spending down before reset"
     elif rules.types_allowed:
         reason += f" filter [{','.join(rules.types_allowed)}]"
     return ReactionDecision(buttons=choices, reason=reason)

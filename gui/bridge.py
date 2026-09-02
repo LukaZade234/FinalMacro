@@ -1312,6 +1312,14 @@ class AppBridge(QObject):
                     "pool": pool,
                     "rolled": rolled,
                     "manual": rules.expected_daily_opportunities or 0,
+                    # ``None`` until the account's own arrival rate has been
+                    # measured; the panel says so rather than showing a number
+                    # fitted on somebody else's account.
+                    "hazard": (
+                        round(float(hazard), 4)
+                        if (hazard := getattr(state, "perk9_hazard", None))
+                        else None
+                    ),
                 },
                 "measured": (
                     {e: round(v * 100.0, 2) for e, v in measured.items()}

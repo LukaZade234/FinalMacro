@@ -529,3 +529,89 @@ def test_sync_rebaselines_the_spawn_countdown():
     assert ctx.state.perk9_spawns_at_sync == 60
     status = adaptive_status(ctx.state, ctx.config.sphere_reaction)
     assert status["spawns_left"] == 94
+
+
+# --- learning this account's perk-9 arrival rate ---
+
+
+def _ohu9_fields(*, rolled: int, pool: int = 154, clicked: int = 0, cap: int = 20):
+    return {
+        "perk9_rolled_today": rolled,
+        "perk9_roll_pool": pool,
+        "perk9_clicked_today": clicked,
+        "perk9_click_max": cap,
+    }
+
+
+def test_us_rolls_are_not_counted_towards_the_learned_rate():
+    runtime, ctx, _store = _runtime()
+    runtime.apply_parsed(_ohu9_fields(rolled=0))
+    runtime.note_roll()
+    runtime.note_roll(us_roll=True)
+    runtime.note_roll()
+    assert ctx.state.perk9_regular_rolls_today == 2
+
+
+def test_a_us_burst_mid_day_does_not_inflate_the_learned_rate():
+    """The burst's depletion is respected; its rolls are not counted.
+
+    A drain can clear a large slice of the pool in half an hour. Dividing the
+    day's whole ``rolled`` by the regular rolls alone would blame those
+    characters on ordinary rolling and roughly treble the estimate, which is
+    exactly the over-strict bar this change exists to remove. Cutting the burst
+    out — ending the stretch before it, restarting after it — recovers the
+    steady rate instead.
+    """
+    runtime, ctx, _store = _runtime()
+    state = ctx.state
+    runtime.apply_parsed(_ohu9_fields(rolled=0))
+
+    # 500 ordinary rolls that turned up 23 perk-9 characters (h0 ≈ 0.05).
+    for i in range(500):
+        runtime.note_roll()
+        if i % 22 == 0 and state.perk9_spawns_today < 23:
+            state.record_perk9_spawn()
+    assert state.perk9_spawns_today == 23
+
+    # A $us drain clearing 57 more of the pool inside half an hour.
+    runtime.note_roll(us_roll=True)
+    for _ in range(57):
+        state.record_perk9_spawn()
+    for _ in range(299):
+        runtime.note_roll(us_roll=True)
+
+    # 500 more ordinary rolls, back at the steady rate against a thinner pool.
+    for i in range(500):
+        runtime.note_roll()
+        if i % 45 == 0 and state.perk9_spawns_today < 91:
+            state.record_perk9_spawn()
+    runtime.apply_parsed(_ohu9_fields(rolled=91))
+
+    assert state.perk9_regular_rolls_today == 1000
+    assert abs(state.perk9_hazard - 0.05) < 0.005
+
+
+def test_no_learned_rate_until_enough_ordinary_rolling():
+    """Until then the estimate stays unmeasured, which is the old behaviour."""
+    runtime, ctx, _store = _runtime()
+    runtime.apply_parsed(_ohu9_fields(rolled=0))
+    for _ in range(20):
+        runtime.note_roll()
+    ctx.state.record_perk9_spawn(3)
+    runtime.apply_parsed(_ohu9_fields(rolled=3))
+    assert ctx.state.perk9_hazard is None
+
+
+def test_the_learned_rate_is_not_measured_once_buttons_stop_spawning():
+    """At the click cap Mudae stops spawning, so the local count goes stale.
+
+    Closing a stretch against a frozen local count would understate the rate for
+    every later day, so the stretch is dropped instead.
+    """
+    runtime, ctx, _store = _runtime()
+    state = ctx.state
+    runtime.apply_parsed(_ohu9_fields(rolled=0, clicked=20, cap=20))
+    for _ in range(500):
+        runtime.note_roll()
+    runtime.note_roll(us_roll=True)
+    assert state.perk9_hazard is None

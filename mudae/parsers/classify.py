@@ -12,6 +12,7 @@ from mudae.parsers.claim_interval import is_claim_interval_message
 from mudae.parsers.dk import is_dk_claim
 from mudae.parsers.reaction_power import is_kakera_react_denied
 from mudae.parsers.maintenance import is_maintenance_message
+from mudae.parsers.minigame import is_minigame_board
 from mudae.parsers.minigame_exhausted import is_minigame_exhausted_message
 from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
@@ -79,6 +80,12 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.KAKERA_CLAIM
     if is_sphere_click_message(content):
         return MessageKind.SPHERE_CLICK
+    # Before the claim heuristics: a minigame grid carries several bold
+    # phrases and no character at all, and ``is_custom_claim`` only counts
+    # bold names. Every click re-edits the same grid, so misreading one costs
+    # a dozen bogus claims per game.
+    if is_minigame_board(snapshot):
+        return MessageKind.MINIGAME_BOARD
     if is_marriage_claim(content):
         return MessageKind.MARRIAGE
     if is_custom_claim(content):

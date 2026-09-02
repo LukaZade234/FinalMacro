@@ -274,12 +274,31 @@ def test_estimate_opportunities_prefers_the_unrolled_pool():
 
 
 def test_estimate_opportunities_is_capped_by_rolls_left_in_the_day():
+    """The rolls-left arm is a spawn forecast, not a raw roll count.
+
+    It used to return the 120 rolls themselves, which counted every roll as if
+    it were a perk-9 spawn — roughly 50× too many, so the arm never bound and
+    the pool ceiling alone drove the bar. Scaling by the account's own measured
+    arrival rate is what makes it a real forecast.
+    """
     state = AccountState()
     state.perk9_rolled_today = 0
     state.perk9_roll_pool = 900
     state.rolls_left = 0
-    # 12h to the UTC reset at 10 rolls/hour cannot produce 900 more spawns.
-    assert estimate_opportunities_left(state, rolls_per_hour=10, now=_NOON) == 120
+    state.perk9_hazard = 0.37
+    # 12h to the UTC reset at 10 rolls/hour is 120 rolls; at 0.37 spawns per
+    # roll against a barely-touched 900 pool that is ~43 spawns, not 900.
+    assert estimate_opportunities_left(state, rolls_per_hour=10, now=_NOON) == 43
+
+
+def test_estimate_opportunities_keeps_the_pool_ceiling_without_a_learned_rate():
+    """Cold start is the old behaviour, never some other account's constant."""
+    state = AccountState()
+    state.perk9_rolled_today = 0
+    state.perk9_roll_pool = 900
+    state.rolls_left = 0
+    assert state.perk9_hazard is None
+    assert estimate_opportunities_left(state, rolls_per_hour=10, now=_NOON) == 900
 
 
 def test_estimate_opportunities_honours_the_manual_override():
@@ -326,10 +345,24 @@ def test_reaction_ignores_the_context_when_budget_mode_is_off():
     assert decision.should_click
 
 
-def test_reaction_still_honours_the_static_filter_first():
-    """Budget mode narrows the allow-list; it never widens it."""
+def test_budget_mode_replaces_the_static_filter_rather_than_narrowing_it():
+    """In budget mode the EV bar is the only gate, so it can widen the list.
+
+    Filtering first is what let clicks expire: ``types_allowed`` is typically
+    missing blue and teal, five spawns in six, so almost every button the bar
+    would have cleared at the end of the day never reached it.
+    """
     fields = {"buttons": [_sphere_button("spR")]}
     rules = _rules(types_allowed=["spW"])
+    decision = passes_sphere_reaction(
+        fields, rules, AccountState(), threshold_ctx=_context(12, 20)
+    )
+    assert decision.should_click
+
+
+def test_the_static_filter_still_rules_when_budget_mode_is_off():
+    fields = {"buttons": [_sphere_button("spR")]}
+    rules = SphereReactionRules(enabled=True, budget_aware=False, types_allowed=["spW"])
     decision = passes_sphere_reaction(
         fields, rules, AccountState(), threshold_ctx=_context(12, 20)
     )

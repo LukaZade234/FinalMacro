@@ -201,14 +201,21 @@ Item {
             spawns += " / " + s.spawns_total
         var left = (s.spawns_left === null || s.spawns_left === undefined)
             ? "unknown" : String(s.spawns_left)
+        // The pool remainder the forecast sits under, so a much smaller
+        // "left today" than "rolled / pool" implies does not read as a bug.
+        if (s.spawns_ceiling !== null && s.spawns_ceiling !== undefined
+                && s.spawns_ceiling !== s.spawns_left)
+            left += " of " + s.spawns_ceiling
         var bar = (s.threshold === null || s.threshold === undefined)
             ? "—" : ("≥ " + s.threshold + " SP")
+        if (s.spend_down)
+            bar = "spending down"
         return [
             { label: "clicks", value: s.clicks_used + " / " + (s.clicks_max || "?"),
               tone: numberOr(s.clicks_left, 1) === 0 ? "" : "accent" },
             { label: "spawns seen", value: spawns, tone: "" },
             { label: "left today", value: left, tone: "" },
-            { label: "EV bar", value: bar, tone: "good" }
+            { label: "EV bar", value: bar, tone: s.spend_down ? "accent" : "good" }
         ]
     }
 

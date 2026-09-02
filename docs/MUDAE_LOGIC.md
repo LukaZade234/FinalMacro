@@ -848,8 +848,13 @@ daily cap. `double_chance` / `additional_spheres` come from `$bonus`
 (`perk9_sphere_value_pct`) — all via `macro/sheet_caps.py`. The bar falls as
 spawns run out and reaches **0** once `r ≤ c`: unused clicks expire at the
 UTC reset, so the last ones are worth spending on anything. Megasphere skips
-the gate (free, spends no slot). Budget mode only ever **narrows**
-`types_allowed`, never widens it.
+the gate (free, spends no slot).
+
+In budget mode the bar **replaces** `types_allowed` rather than narrowing it,
+and the Presets colour list is greyed out to say so. Filtering first is what
+made clicks expire: a typical list omits `spB` and `spT`, five spawns in six,
+so almost nothing the bar would have cleared at the end of the day ever
+reached it. With the toggle off the static list is still the only gate.
 
 Base SP and spawn rates default to Colblitz's published p9calc table
 (138,925 observed rolls) and are **editable per colour in the preset**
@@ -870,11 +875,60 @@ Frequencies are conditional on a button appearing, so they total 100% and one
 unit of `r` is one spawn, not one roll. A preset stores only the colours the
 user edited; the rest stay at these defaults. Set a colour to 0 to drop it.
 
-Remaining spawns come from `$ohu9`'s `(Perk 9) Rolled today: 44/154`
-(`parse_perk9_rolled_pool`; `pool − rolled` is a hard ceiling), clamped by
-rolls left before the UTC reset, and overridden by
-`expected_daily_opportunities` when set. Without any of those signals the
-context is `None` and the static filter applies.
+#### How many spawns are still coming (`r`)
+
+`$ohu9`'s `(Perk 9) Rolled today: 44/154` (`parse_perk9_rolled_pool`) gives a
+hard ceiling — the pool cannot spawn a character twice — but it is *not* a
+forecast: the tail of a pool is effectively unrollable, so `pool − rolled`
+plateaus, never falls to `c`, and the "bar → 0 at the end of the day" promise
+above never fires. Rolling samples the pool without replacement, so the arrival
+rate decays as the pool empties:
+
+```
+rolled(k) = pool × (1 − e^{−h₀k/pool})
+r         = (pool − rolled) × (1 − e^{−h₀ · rolls_left_today / pool})
+h₀        = −(pool / k) × ln( (pool − rolled_to) / (pool − rolled_from) )
+```
+
+`h₀` is spawns per roll — what share of the account's roll space its perk-9
+pool covers. It is **measured per account, never shipped as a constant**. One
+account's logs fit 0.37, but that number moves with upgrades, pool size and how
+popular the pooled characters are; an account with the same 154 characters and
+a fifth of the reach sees ~23 spawns a day, and handing it 0.37 is barely
+better than the bug. Until an account has measured its own rate the forecast
+arm is simply absent and the pool ceiling applies exactly as before.
+
+The rate is learned from stretches of ordinary rolling, bounded by `$ohu9`
+replies and by `$us` rolls, and accumulated per calendar day
+(`record_hazard_interval`), then averaged roll-weighted over the trailing
+`PERK9_HAZARD_WINDOW_DAYS` (14) — "the last 2 weeks", so an upgrade is
+reflected within about that long instead of lingering for months.
+
+**`$us` rolls are excluded.** They spawn perk-9 buttons like any other roll,
+but a drain can clear a large slice of the pool in half an hour, and counting
+that as the account's normal pace would inflate the estimate for every later
+day. A `$us` roll therefore ends the stretch being measured and the next one
+starts from the post-drain `rolled`: the depletion it caused is respected, its
+rolls are not counted. (Charging its characters to ordinary rolls instead would
+roughly treble the rate — `scripts/perk9_bakeoff.py --with-us-burst`.)
+
+`expected_daily_opportunities` still overrides everything when set. Without any
+signal at all the context is `None` and the static filter applies.
+
+`rolled` is day-scoped: the pool refills at the reset, so `rollover_perk9_if_needed`
+clears it along with the click and spawn counters, and `rolled_synced_at` records
+when `$ohu9` last read the line. That is deliberately **not** `updated_at` —
+`$ohu` and `$ohu8` merge into the same record for the click counter and the
+refill but carry no perk-9 roll line, and treating their stamp as freshness both
+suppressed the `$ohu9` due after the reset and passed yesterday's count off as
+today's.
+
+#### The last hour (`PERK9_SPENDDOWN_MINUTES`)
+
+Inside the last 60 minutes before the UTC reset the bar is forced to **0** and
+any sphere is worth a leftover click, because a click saved past the reset is
+worth nothing. This is deliberately independent of `h₀`, `r` and the value
+table — it is the one guarantee that holds no matter how wrong the forecast is.
 
 ### `$ohu9` timing (`macro/perk9_runtime.py`)
 

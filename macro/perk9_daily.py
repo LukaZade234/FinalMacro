@@ -8,7 +8,8 @@ stops spawning those buttons on its own.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import log
 from typing import Any
 
 from macro.perk8_daily import mudae_daily_date, next_daily_reset, parse_iso
@@ -18,6 +19,14 @@ from mudae.sphere_log import get_sphere_events, normalize_source
 # Default daily cap when ``$shop`` has not been fetched (10 base + 10 OP9).
 PERK9_CLICK_MAX_DEFAULT = 20
 PERK9_DAILY_KEY = "perk9"
+
+# Fewer rolls than this across the whole window and the inverted rate is noise,
+# so the estimate stays unmeasured and the caller keeps its old behaviour.
+PERK9_HAZARD_MIN_ROLLS = 200
+# "The last 2 weeks." Accounts get upgraded, which changes how much of the roll
+# space their perk-9 pool covers, so an old day must drop out of the average
+# entirely rather than fade slowly out of a running mean.
+PERK9_HAZARD_WINDOW_DAYS = 14
 
 
 def _utc_now() -> dt.datetime:
@@ -35,6 +44,27 @@ def _coerce_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _clean_hazard_history(raw: Any) -> list[dict[str, Any]]:
+    """Keep only well-formed ``{date, h0, rolls}`` rows, oldest first."""
+    rows: list[dict[str, Any]] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        date_key = str(entry.get("date") or "").strip()
+        try:
+            h0 = float(entry.get("h0"))
+            rolls = int(entry.get("rolls") or 0)
+        except (TypeError, ValueError):
+            continue
+        # ``h0`` of exactly 0 is a real observation — a stretch of rolling that
+        # turned up no perk-9 character — so only negatives are malformed.
+        if not date_key or h0 < 0 or rolls <= 0:
+            continue
+        rows.append({"date": date_key, "h0": h0, "rolls": rolls})
+    rows.sort(key=lambda row: row["date"])
+    return rows[-PERK9_HAZARD_WINDOW_DAYS:]
 
 
 def apply_perk9_click_from_parse(state: Any, fields: dict[str, Any]) -> bool:
@@ -152,6 +182,98 @@ def sync_perk9_clicks_from_log(state: Any) -> None:
         state.perk9_clicks_day = today
 
 
+def rolled_today_estimate(state: Any) -> int | None:
+    """``(Perk 9) Rolled today`` brought forward with the spawns seen since it.
+
+    ``$ohu9`` is expensive to spam, so Mudae's number is only as fresh as the
+    last query; every sphere button seen since is one more pool character
+    rolled. Goes stale once the click budget is spent, because Mudae stops
+    spawning buttons at that point — callers that need it exact must say so.
+    """
+    rolled = getattr(state, "perk9_rolled_today", None)
+    if rolled is None:
+        return None
+    seen_since_sync = max(
+        0,
+        int(getattr(state, "perk9_spawns_today", 0) or 0)
+        - int(getattr(state, "perk9_spawns_at_sync", 0) or 0),
+    )
+    return int(rolled) + seen_since_sync
+
+
+def hazard_interval(
+    *,
+    pool: int | None,
+    rolled_from: int,
+    rolled_to: int,
+    rolls: int,
+) -> tuple[float, int] | None:
+    """Depletion and roll count for one stretch of ordinary rolling.
+
+    Rolling samples the perk-9 pool without replacement, so over ``k`` rolls the
+    unrolled remainder decays geometrically:
+
+        pool − rolled_to = (pool − rolled_from) × e^{−h₀k/pool}
+
+    Returned is the numerator of that rate, ``L = −pool × ln(ratio)``, together
+    with ``k``; ``L / k`` is the stretch's ``h₀``. Keeping them apart is what
+    lets a day's stretches be summed: ``h₀`` for the day is ``ΣL / Σk``, and a
+    stretch that produced no spawns contributes ``0`` to ``ΣL`` and its rolls to
+    ``Σk``, which is exactly the evidence it carries.
+
+    Stretches must contain no ``$us`` rolls. A ``$us`` burst depletes the pool
+    without belonging to the account's normal pace, so it is cut out by ending
+    one stretch and starting the next from the post-burst ``rolled`` — the
+    depletion it caused is respected, its rolls are not counted.
+    """
+    try:
+        pool_n = int(pool) if pool is not None else 0
+        start = int(rolled_from)
+        end = int(rolled_to)
+        rolls_n = int(rolls)
+    except (TypeError, ValueError):
+        return None
+    if pool_n <= 0 or rolls_n <= 0 or end < start or start < 0:
+        return None
+    before = pool_n - start
+    if before <= 0:
+        return None
+    # A fully cleared pool would take ln(0); half a character short of it is the
+    # tightest finite thing the observation supports.
+    after = max(0.5, float(pool_n - end))
+    if after > before:
+        return None
+    return -pool_n * log(after / before), rolls_n
+
+
+def learned_hazard(history: list[dict[str, Any]] | None) -> float | None:
+    """Roll-weighted mean rate over the kept days, or ``None`` on a cold start.
+
+    Weighting by each day's roll count keeps a 40-roll evening from counting as
+    much as a full day of rolling. ``None`` means "not measured yet" — either no
+    days recorded, or too few rolls behind them for the rate to be anything but
+    noise — which leaves the caller on its previous behaviour rather than on
+    some other account's number.
+    """
+    total_rolls = 0.0
+    total = 0.0
+    for entry in history or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            h0 = float(entry.get("h0"))
+            rolls = float(entry.get("rolls") or 0)
+        except (TypeError, ValueError):
+            continue
+        if h0 < 0 or rolls <= 0:
+            continue
+        total += h0 * rolls
+        total_rolls += rolls
+    if total_rolls < PERK9_HAZARD_MIN_ROLLS or total <= 0:
+        return None
+    return total / total_rolls
+
+
 @dataclass
 class Perk9DailyRecord:
     """Persisted perk-9 / megasphere daily state for one account on one channel."""
@@ -168,6 +290,15 @@ class Perk9DailyRecord:
     # pool is already spent, which bounds the adaptive threshold's lookahead.
     rolled_today: int | None = None
     roll_pool: int | None = None
+    # When ``(Perk 9) Rolled today`` was last actually read. Tracked apart from
+    # ``updated_at`` because ``$ohu`` and ``$ohu8`` share this record for the
+    # click counter and the refill but carry no perk-9 roll line, so they stamp
+    # the record fresh while ``rolled_today`` is still yesterday's.
+    rolled_synced_at: str = ""
+    # One inverted rate per calendar day, oldest first, trimmed to the trailing
+    # ``PERK9_HAZARD_WINDOW_DAYS``. Account history rather than today's state,
+    # so unlike everything above it survives the daily rollover.
+    hazard_history: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> Perk9DailyRecord:
@@ -184,6 +315,8 @@ class Perk9DailyRecord:
             updated_at=str(data.get("updated_at") or ""),
             rolled_today=_coerce_int(data.get("rolled_today")),
             roll_pool=_coerce_int(data.get("roll_pool")),
+            rolled_synced_at=str(data.get("rolled_synced_at") or ""),
+            hazard_history=_clean_hazard_history(data.get("hazard_history")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -198,6 +331,8 @@ class Perk9DailyRecord:
             "updated_at": self.updated_at,
             "rolled_today": self.rolled_today,
             "roll_pool": self.roll_pool,
+            "rolled_synced_at": self.rolled_synced_at,
+            "hazard_history": [dict(entry) for entry in self.hazard_history],
         }
 
 
@@ -296,6 +431,7 @@ def update_record_from_ohu(
         record.stock = stock
     if rolled is not None:
         record.rolled_today = rolled
+        record.rolled_synced_at = _iso(now)
     if roll_pool is not None:
         record.roll_pool = roll_pool
     if megasphere_left is False:
@@ -314,6 +450,48 @@ def update_record_from_ohu(
             _set_refill_deadline(record, now)
     elif clicked is not None:
         record.clicks_exhausted = False
+    return record
+
+
+def record_hazard_interval(
+    record: Perk9DailyRecord,
+    *,
+    pool: int | None,
+    rolled_from: int,
+    rolled_to: int,
+    rolls: int,
+    now: dt.datetime | None = None,
+) -> Perk9DailyRecord:
+    """Fold one ``$us``-free stretch of rolling into today's learned rate.
+
+    Accumulates into **today's** entry rather than appending, so a day made of
+    several stretches — ordinary rolling interrupted by ``$us`` drains — ends up
+    as one roll-weighted number, and days beyond the trailing window are
+    dropped.
+    """
+    now = now or _utc_now()
+    measured = hazard_interval(
+        pool=pool, rolled_from=rolled_from, rolled_to=rolled_to, rolls=rolls
+    )
+    if measured is None:
+        return record
+    depletion, counted = measured
+
+    date_key = mudae_daily_date(now).isoformat()
+    history = list(record.hazard_history)
+    for entry in history:
+        if entry.get("date") == date_key:
+            prior_rolls = int(entry.get("rolls") or 0)
+            prior = float(entry.get("h0") or 0.0) * prior_rolls
+            entry["rolls"] = prior_rolls + counted
+            entry["h0"] = (prior + depletion) / entry["rolls"]
+            break
+    else:
+        history.append(
+            {"date": date_key, "h0": depletion / counted, "rolls": counted}
+        )
+    history.sort(key=lambda row: str(row.get("date") or ""))
+    record.hazard_history = history[-PERK9_HAZARD_WINDOW_DAYS:]
     return record
 
 
@@ -356,6 +534,26 @@ def should_skip_ohu9_until_refill(
     return now < refill_at
 
 
+def rolled_data_is_stale(
+    record: Perk9DailyRecord,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """True when ``rolled_today`` was last read on an earlier day (or never).
+
+    The pool refills at the reset, so yesterday's ``148/154`` read as today's
+    says almost nothing is still rollable — which tells the adaptive threshold
+    the day is nearly over and drops its bar to zero on the first roll after
+    midnight. Only ``$ohu9`` carries the line, so its own freshness has to be
+    tracked apart from the record's.
+    """
+    now = now or _utc_now()
+    synced = parse_iso(record.rolled_synced_at)
+    if synced is None:
+        return True
+    return mudae_daily_date(synced) < mudae_daily_date(now)
+
+
 def should_query_ohu9_on_refill(
     record: Perk9DailyRecord,
     *,
@@ -370,7 +568,14 @@ def should_query_ohu9_on_refill(
     updated = parse_iso(record.updated_at)
     if updated is None:
         return True
-    return mudae_daily_date(updated) < mudae_daily_date(now)
+    if mudae_daily_date(updated) < mudae_daily_date(now):
+        return True
+    # An ``$ohu8`` reply merges into this record and stamps ``updated_at``, but
+    # it has no ``(Perk 9) Rolled today`` line — so without this the first
+    # ``$ohu8`` after the reset made the record look current for the day and
+    # ``$ohu9`` was never sent at all. Only ask when the account has a perk-9
+    # pool to re-read; a pool of 0 or an unknown one has nothing to fetch.
+    return bool(record.roll_pool) and rolled_data_is_stale(record, now=now)
 
 
 def apply_record_to_state(
@@ -392,9 +597,19 @@ def apply_record_to_state(
         or (refill_at is not None and now >= refill_at)
     )
     # The pool refills with the day, so a stale ``rolled`` would understate how
-    # many perk-9 spawns are still coming.
+    # many perk-9 spawns are still coming. ``rolled_synced_at`` rather than
+    # ``updated_at`` decides that: ``$ohu8`` refreshes the record without
+    # carrying the perk-9 roll line, which would otherwise pass yesterday's
+    # count off as today's.
     state.perk9_roll_pool = record.roll_pool
-    state.perk9_rolled_today = 0 if new_day else record.rolled_today
+    if record.rolled_today is None:
+        state.perk9_rolled_today = None
+    elif new_day or rolled_data_is_stale(record, now=now):
+        state.perk9_rolled_today = 0
+    else:
+        state.perk9_rolled_today = record.rolled_today
+    # Survives the rollover: it describes the account, not the day.
+    state.perk9_hazard = learned_hazard(record.hazard_history)
 
     if (
         record.last_clicked is None

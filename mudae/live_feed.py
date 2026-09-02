@@ -2,7 +2,9 @@
 
 The Run tab should read like the channel: character cards with the reacts
 that are actually on the embed, then Mudae's follow-up lines (``+$k``,
-sphere clicks, claims). Macro skip / filter / budget chatter stays out.
+sphere clicks, claims). Macro skip / filter / budget chatter stays out, and
+so does everything else in the channel — a minigame someone plays by hand
+while the macro is connected is not part of the run.
 """
 
 from __future__ import annotations
@@ -186,9 +188,16 @@ def format_live_feed(
         return text, _severity_for(parsed.kind)
     if parsed.kind not in _CONTENT_KINDS:
         return None
+    if parsed.kind in {MessageKind.CLAIM, MessageKind.MARRIAGE} and not (
+        parsed.fields.get("winner") and parsed.fields.get("character")
+    ):
+        # A claim nobody can be named in is not a claim we recognised — the
+        # bold-name heuristic also fires on Mudae's character-info embeds.
+        return None
+    # Only real channel text is mirrored. ``parsed.summary`` is macro-side
+    # prose, so falling back to it printed lines like "Claim · ? → ?" for
+    # messages whose text lives somewhere the parser never read.
     text = flatten_discord_text(snapshot.content or "")
-    if not text:
-        text = (parsed.summary or "").strip()
     if not text:
         return None
     return text, _severity_for(parsed.kind)

@@ -434,6 +434,9 @@ class RollCycleEngine:
     def _note_perk9_spawn(self, count: int = 1) -> None:
         self._perk9.note_spawn(count)
 
+    def _note_perk9_roll(self, us_roll: bool = False) -> None:
+        self._perk9.note_roll(us_roll)
+
     def _persist_perk9_click_progress(self) -> None:
         self._perk9.persist_click_progress()
 
@@ -552,6 +555,7 @@ class RollCycleEngine:
             log=self._log,
             debug_log=self._log_debug,
             on_spawn=self._note_perk9_spawn if budget else None,
+            on_roll=self._note_perk9_roll if budget else None,
             on_click_progress=self._persist_perk9_click_progress if budget else None,
             on_click_timeout=(
                 self._resync_perk9_after_sphere_timeout if budget else None
@@ -1072,6 +1076,7 @@ class RollCycleEngine:
             message_id=snapshot.message_id,
             fields=fields,
             roll_index=roll_index,
+            us_roll=us_roll,
         )
         return _RollOutcome(ok=True, rolls_left=rl)
 

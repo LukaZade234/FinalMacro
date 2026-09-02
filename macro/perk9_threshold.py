@@ -13,7 +13,7 @@ is built by ``macro/sphere_reactor.py`` once per roll batch.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import comb
+from math import comb, exp
 from typing import Any
 
 from mudae.constants import canonical_sphere_emoji
@@ -56,6 +56,10 @@ MAX_TABLE_OPPORTUNITIES = 1000
 MIN_FREQUENCY_SAMPLES = 500
 # Click history kept on the Run panel before it would wrap.
 PERK9_HISTORY_SHOWN = 24
+# Unspent clicks expire at the UTC reset, so inside this last stretch of the day
+# every remaining sphere is worth more than the slot it costs. This is the one
+# guarantee that holds no matter how wrong the spawn forecast is.
+PERK9_SPENDDOWN_MINUTES = 60
 
 
 def _ev_key(emoji: str | None) -> str:
@@ -234,6 +238,45 @@ def estimate_sphere_colour_frequency(
     return {emoji: count / total for emoji, count in counts.items()}
 
 
+def hours_until_reset(now: Any = None) -> float:
+    """Hours left before the perk-9 budget expires at 00:00 UTC."""
+    from macro.perk8_daily import next_daily_reset
+    from mudae.clock import utc_now
+
+    moment = now or utc_now()
+    return max(0.0, (next_daily_reset(moment) - moment).total_seconds() / 3600.0)
+
+
+def is_spend_down_window(now: Any = None) -> bool:
+    """True inside the last hour of the day, when saving a click is pure loss."""
+    return hours_until_reset(now) * 60.0 <= PERK9_SPENDDOWN_MINUTES
+
+
+def forecast_spawns(*, pool: int, rolled: int, rolls_left: int, hazard: float) -> int:
+    """Perk-9 spawns still to come from ``rolls_left`` more rolls.
+
+    Rolls sample the pool without replacement, so the arrival rate decays as the
+    pool empties. Integrating that over the rolls still available today:
+
+        (pool − rolled) × (1 − exp(−hazard × rolls_left / pool))
+
+    which is the *forecast* the value table needs, as opposed to ``pool −
+    rolled`` — a ceiling on distinct characters that the tail of the day never
+    comes close to reaching.
+    """
+    try:
+        pool_n = int(pool)
+        rolled_n = int(rolled)
+        rolls_n = max(0, int(rolls_left))
+        rate = float(hazard)
+    except (TypeError, ValueError):
+        return 0
+    remaining = max(0, pool_n - rolled_n)
+    if pool_n <= 0 or remaining <= 0 or rolls_n <= 0 or rate <= 0:
+        return 0
+    return int(round(remaining * (1.0 - exp(-rate * rolls_n / pool_n))))
+
+
 def estimate_opportunities_left(
     state: Any,
     *,
@@ -243,40 +286,46 @@ def estimate_opportunities_left(
 ) -> int | None:
     """How many more perk-9 sphere spawns to expect today.
 
-    Prefers Mudae's own ``(Perk 9) Rolled today: 44/154`` from ``$ohu9``; the
-    unrolled remainder of that pool is a hard ceiling. Falls back to the rolls
-    still available before the UTC reset, since one roll yields at most one
-    perk-9 character. ``None`` means we cannot tell, so the caller keeps the
-    static filter.
+    Mudae's own ``(Perk 9) Rolled today: 44/154`` from ``$ohu9`` gives a hard
+    ceiling — the pool cannot spawn a character twice — but the tail of a pool
+    is effectively unrollable, so that number plateaus and the value table never
+    learns the day is ending. When the account's own arrival rate has been
+    measured (``state.perk9_hazard``, learned in ``macro.perk9_daily``), prefer
+    the forecast of spawns the remaining rolls will actually produce. ``None``
+    means we cannot tell, so the caller keeps the static filter.
     """
-    from mudae.clock import utc_now
+    from macro.perk9_daily import rolled_today_estimate
 
     if manual_override and int(manual_override) > 0:
         return int(manual_override)
 
     pool = getattr(state, "perk9_roll_pool", None)
-    rolled = getattr(state, "perk9_rolled_today", None)
+    # ``rolled`` is only as fresh as the last $ohu9, so the estimate brings it
+    # forward by the spawns seen since — otherwise it sits still all session.
+    rolled_now = rolled_today_estimate(state)
     from_pool: int | None = None
-    if pool is not None and rolled is not None:
-        # ``rolled`` is only as fresh as the last $ohu9, so drop the spawns seen
-        # since then — otherwise the estimate sits still all session.
-        seen_since_sync = max(
-            0,
-            int(getattr(state, "perk9_spawns_today", 0) or 0)
-            - int(getattr(state, "perk9_spawns_at_sync", 0) or 0),
-        )
-        from_pool = max(0, int(pool) - int(rolled) - seen_since_sync)
+    if pool is not None and rolled_now is not None:
+        from_pool = max(0, int(pool) - rolled_now)
 
+    hazard = getattr(state, "perk9_hazard", None)
     from_rolls: int | None = None
-    if rolls_per_hour and int(rolls_per_hour) > 0:
-        moment = now or utc_now()
-        hours_left = 24.0 - (
-            moment.hour + moment.minute / 60.0 + moment.second / 3600.0
+    if rolls_per_hour and int(rolls_per_hour) > 0 and hazard and float(hazard) > 0:
+        rolls_left_today = int(
+            round(int(rolls_per_hour) * hours_until_reset(now))
         )
-        from_rolls = int(round(int(rolls_per_hour) * max(0.0, hours_left)))
         rolls_now = getattr(state, "rolls_left", None)
         if rolls_now is not None:
-            from_rolls += max(0, int(rolls_now))
+            rolls_left_today += max(0, int(rolls_now))
+        if pool is not None and rolled_now is not None:
+            from_rolls = forecast_spawns(
+                pool=int(pool),
+                rolled=rolled_now,
+                rolls_left=rolls_left_today,
+                hazard=float(hazard),
+            )
+        else:
+            # No pool to deplete against; the undecayed rate is the best we have.
+            from_rolls = int(round(rolls_left_today * float(hazard)))
 
     candidates = [n for n in (from_pool, from_rolls) if n is not None]
     if not candidates:
@@ -292,8 +341,13 @@ class Perk9ThresholdContext:
     value_table: list[list[float]]
     opportunities_left: int
     clicks_left: int
+    spend_down: bool = False
 
     def threshold(self) -> float:
+        if self.spend_down:
+            # Last hour of the day: a saved click is worth nothing at the reset,
+            # so every colour beats holding on to it.
+            return 0.0
         return click_threshold(
             self.value_table, self.opportunities_left, self.clicks_left
         )
@@ -347,6 +401,10 @@ def adaptive_status(state: Any, rules: Any = None, *, now: Any = None) -> dict[s
         rolls_per_hour=getattr(state, "rolls_per_hour_net", None),
         now=now,
     )
+    spend_down = is_spend_down_window(now)
+    pool = getattr(state, "perk9_roll_pool", None)
+    rolled = getattr(state, "perk9_rolled_today", None)
+    hazard = getattr(state, "perk9_hazard", None)
     status: dict[str, Any] = {
         "enabled": True,
         "clicks_used": used,
@@ -354,6 +412,15 @@ def adaptive_status(state: Any, rules: Any = None, *, now: Any = None) -> dict[s
         "clicks_left": clicks_left,
         "spawns_seen": spawns_seen,
         "spawns_left": spawns_left,
+        # The pool remainder the forecast sits under, so the panel can show why
+        # "left today" is smaller than "rolled/pool" implies.
+        "spawns_ceiling": (
+            max(0, int(pool) - int(rolled))
+            if pool is not None and rolled is not None
+            else None
+        ),
+        "hazard": round(float(hazard), 4) if hazard else None,
+        "spend_down": spend_down,
         # Today's expected run: what has appeared plus what is still coming.
         "spawns_total": (
             spawns_seen + spawns_left if spawns_left is not None else None
@@ -378,6 +445,7 @@ def adaptive_status(state: Any, rules: Any = None, *, now: Any = None) -> dict[s
         double_chance_pct=float(getattr(state, "sphere_double_chance_pct", 0.0) or 0.0),
         additional_spheres=float(getattr(state, "additional_spheres", 0.0) or 0.0),
         shop9_bonus_pct=float(getattr(state, "perk9_sphere_value_pct", 0.0) or 0.0),
+        spend_down=spend_down,
     )
     if ctx is None:
         return status
@@ -385,7 +453,7 @@ def adaptive_status(state: Any, rules: Any = None, *, now: Any = None) -> dict[s
     order = sorted(ctx.ev_by_emoji, key=lambda e: ctx.ev_by_emoji[e])
 
     def allowed_at(spawns: int, clicks: int) -> list[str]:
-        bar = click_threshold(ctx.value_table, spawns, clicks)
+        bar = 0.0 if ctx.spend_down else click_threshold(ctx.value_table, spawns, clicks)
         return [e for e in order if ctx.ev_by_emoji[e] >= bar]
 
     now_allowed = allowed_at(ctx.opportunities_left, clicks_left)
@@ -419,6 +487,7 @@ def build_perk9_threshold_context(
     double_chance_pct: float = 0.0,
     additional_spheres: float = 0.0,
     shop9_bonus_pct: float = 0.0,
+    spend_down: bool = False,
 ) -> Perk9ThresholdContext | None:
     """Build the per-batch context, or ``None`` to fall back to the static filter."""
     try:
@@ -442,4 +511,5 @@ def build_perk9_threshold_context(
         value_table=table,
         opportunities_left=capped,
         clicks_left=clicks,
+        spend_down=bool(spend_down),
     )

@@ -16,6 +16,7 @@ from macro.perk9_threshold import (
     Perk9ThresholdContext,
     build_perk9_threshold_context,
     estimate_opportunities_left,
+    is_spend_down_window,
 )
 from macro.rule_eval import passes_sphere_reaction
 from macro.state import AccountState
@@ -29,6 +30,7 @@ class SphereReactor:
     log: Callable[[str], None]
     debug_log: Callable[[str], None] | None = None
     on_spawn: Callable[[int], None] | None = None
+    on_roll: Callable[[bool], None] | None = None
     on_click_progress: Callable[[], None] | None = None
     on_click_timeout: Callable[[], Awaitable[None]] | None = None
     on_exhausted: Callable[[], Awaitable[None]] | None = None
@@ -59,6 +61,7 @@ class SphereReactor:
             double_chance_pct=state.sphere_double_chance_pct,
             additional_spheres=state.additional_spheres,
             shop9_bonus_pct=state.perk9_sphere_value_pct,
+            spend_down=is_spend_down_window(),
         )
 
     async def react(
@@ -67,9 +70,18 @@ class SphereReactor:
         message_id: int,
         fields: dict[str, Any],
         roll_index: int = 0,
+        us_roll: bool = False,
     ) -> int:
         """React to one parsed roll. Returns number of buttons clicked."""
         rules = self.config.sphere_reaction
+        # Before the spawn is counted, so the stretch boundary falls between the
+        # two rolls rather than inside this one. ``$us`` rolls spawn perk-9
+        # buttons like any other roll, but a burst of them clears the pool far
+        # faster than ordinary rolling, so the learned arrival rate is measured
+        # across ordinary rolls only and this roll's spawn belongs to whichever
+        # side of the boundary the roll itself does.
+        if self.on_roll:
+            self.on_roll(us_roll)
         self._count_spawns(fields)
         decision = passes_sphere_reaction(
             fields,

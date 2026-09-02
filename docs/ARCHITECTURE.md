@@ -86,9 +86,9 @@ changes.
 | `us_stop.py` | `$us` drain policy and stop / pause options (roll cap, reaction power, Mudae's hourly key limit, local schedule) |
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
-| `perk9_daily.py` | Daily perk-9 click counter |
-| `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`) |
-| `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs |
+| `perk9_daily.py` | Daily perk-9 click counter; the per-account spawn rate learned from ordinary rolling (`$us` excluded), kept per day over a trailing 2 weeks |
+| `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`); forecasts spawns still to come from the learned rate, and forces the bar to 0 in the last hour before the reset |
+| `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs; measures the spawn rate across `$us`-free stretches of rolling |
 | `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
 | `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
 | `sphere_game.py` / `oc_game.py` / `oq_game.py` / `ot_game.py` | Individual minigames. `$ot` is **manual only** — a Run-page button, never play-all and never after the daily refill. |
@@ -114,11 +114,12 @@ changes.
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP**. Colour-blind ``spB2`` / ``spT2`` collapse via ``canonical_sphere_emoji``. |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere); decide button-vs-reaction claiming from a roll's components |
-| `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets) |
+| `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets). Mirrors real channel text only — no macro-side summary fallback, and no claim it could not name |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, `chaos`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot. Recognises Mudae's "under maintenance" reply **first**, ahead of the step that pairs a reply with the command that was sent |
 | `parsers/maintenance.py` | Mudae's reboot reply and its stated window |
+| `parsers/minigame.py` | Recognise a sphere-game grid (`$oh` / `$oc` / `$oq` / `$ot`) **before** the claim heuristics — the board prose is all bold names, and Mudae re-edits the grid on every click |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
 | `stats_index.py` | In-memory daily cube + paged `recent` rows for Statistics (never dumps the full log to QML) |
