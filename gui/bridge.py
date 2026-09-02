@@ -3518,11 +3518,11 @@ class AppBridge(QObject):
 
     @Slot()
     def playOtSphere(self) -> None:
-        """Play one ``$ot`` by hand.
+        """Play one ``$ot`` by hand, on demand.
 
-        Deliberately manual-only: ``$ot`` is not in ``PLAYABLE_MINIGAMES``, so
-        play-all skips it and it never runs itself after the daily refill. The
-        solver is new and wants real boards before it is trusted unattended.
+        ``$ot`` also runs through play-all / after-refill auto-play now — see
+        ``PLAYABLE_MINIGAMES`` in :mod:`macro.minigame_daily` — this stays for
+        an immediate single play outside that flow.
         """
         blocked = self._manual_minigame_blocked_status(game="ot")
         if blocked:

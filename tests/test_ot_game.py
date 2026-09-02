@@ -660,27 +660,30 @@ def test_the_macro_activity_flag_is_released_afterwards():
     assert monitor.macro_active is False
 
 
-# --- Manual only ------------------------------------------------------------
+# --- Auto-play ---------------------------------------------------------------
 #
-# $ot is wired to a button and nothing else: it must not run inside play-all,
-# and it must not start itself when the daily uses refill. These pin that.
+# $ot was manual-only (Run-page button) while the solver was tried on real
+# boards. It measured 100.2% of the all-ships ceiling across 27 real boards
+# under Extra Chance, so it now runs inside play-all and after-refill
+# auto-play too, the same as $oh / $oc / $oq. The button still exists for an
+# on-demand single play.
 
 
-def test_ot_is_not_a_self_playing_minigame():
-    """The daily loop plays only what is in PLAYABLE_MINIGAMES."""
+def test_ot_is_a_self_playing_minigame():
+    """The daily loop plays everything in PLAYABLE_MINIGAMES, including $ot."""
     from macro.minigame_daily import PLAYABLE_MINIGAMES
 
-    assert "ot" not in PLAYABLE_MINIGAMES
-    assert set(PLAYABLE_MINIGAMES) == {"oh", "oc", "oq"}
+    assert "ot" in PLAYABLE_MINIGAMES
+    assert set(PLAYABLE_MINIGAMES) == {"oh", "oc", "oq", "ot"}
 
 
-def test_play_all_never_reaches_for_the_ot_game():
-    """Play-all counts $ot uses but has no way to spend them."""
+def test_play_all_reaches_for_the_ot_game():
+    """Play-all spends $ot uses with the same OtSphereGame driver as the button."""
     import macro.minigames as minigames
 
-    assert not hasattr(minigames, "OtSphereGame")
+    assert minigames.OtSphereGame is not None
     source = __import__("inspect").getsource(minigames.PlayAllMinigames.play)
-    assert "OtSphereGame" not in source
+    assert "OtSphereGame" in source
 
 
 def test_the_bridge_treats_a_running_ot_as_minigame_busy():

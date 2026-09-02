@@ -241,7 +241,7 @@ ColumnLayout {
     Label {
         visible: bar.showActions
         Layout.fillWidth: true
-        text: "Single play buttons run one minigame each. Play all uses every minigame you have available — $ot is manual only for now, so it is not included and never runs on its own."
+        text: "Single play buttons run one minigame each. Play all uses every minigame you have available, including $ot."
         color: Theme.fgMuted
         font.pixelSize: 10
         wrapMode: Text.WordWrap

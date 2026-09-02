@@ -19,6 +19,7 @@ from macro.minigame_daily import (
 from macro.minigame_util import minigame_use_batches
 from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
+from macro.ot_game import OtSphereGame
 from macro.perk9_daily import (
     apply_record_to_state as apply_perk9_record_to_state,
     load_perk9_record,
@@ -72,7 +73,7 @@ def _merge_game_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 class PlayAllMinigames:
-    """Query ``$ohu``, then spend all ``$oh`` / ``$oc`` / ``$oq`` uses."""
+    """Query ``$ohu``, then spend all ``$oh`` / ``$oc`` / ``$oq`` / ``$ot`` uses."""
 
     def __init__(
         self,
@@ -138,7 +139,7 @@ class PlayAllMinigames:
             f"($oh {availability['oh_left']}+{availability['oh_stored']} stored) · "
             f"$oc {availability['oc_total']} · "
             f"$oq {availability['oq_total']} · "
-            f"$ot {availability['ot_total']} (saved, not played)"
+            f"$ot {availability['ot_total']}"
         )
 
         played: dict[str, Any] = {}
@@ -167,10 +168,7 @@ class PlayAllMinigames:
             if ot_bonus > 0:
                 ot_uses += ot_bonus
                 self.availability["ot_total"] = ot_uses
-                self._log(
-                    f"play-all: +{ot_bonus} $ot from perk 10 → $ot {ot_uses} "
-                    "(saved, not played)"
-                )
+                self._log(f"play-all: +{ot_bonus} $ot from perk 10 → $ot {ot_uses}")
             if oc_bonus > 0:
                 oc_uses += oc_bonus
                 self.availability["oc_total"] = oc_uses
@@ -202,13 +200,24 @@ class PlayAllMinigames:
             for result in oq_results:
                 self._record_reward("oq", result)
             self._note_game_finished("oq", played["oq"])
+            await asyncio.sleep(self._between_games_sec)
         else:
             self._log("play-all: no $oq uses — skipping")
 
+        if ot_uses > 0:
+            ot_results = await self._play_batches(
+                "ot", OtSphereGame, ot_uses, prefix=prefix
+            )
+            played["ot"] = _merge_game_results(ot_results)
+            for result in ot_results:
+                self._record_reward("ot", result)
+            self._note_game_finished("ot", played["ot"])
+        else:
+            self._log("play-all: no $ot uses — skipping")
+
         self._log(
             "play-all: finished · "
-            f"$oh {oh_uses} · $oc {oc_uses} · $oq {oq_uses} · "
-            f"$ot {ot_uses} unused"
+            f"$oh {oh_uses} · $oc {oc_uses} · $oq {oq_uses} · $ot {ot_uses}"
         )
         return {
             "availability": dict(self.availability),

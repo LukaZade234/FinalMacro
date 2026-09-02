@@ -33,10 +33,11 @@ Four things make the loop different from ``$oc`` / ``$oq``:
   rainbow cell was blue. :func:`macro.minigame_board.classify_oh_click`
   already untangles that for ``$oh``; the same call does it here.
 
-``$ot`` is **manual only** for now — no play-all, and no auto-play after the
-daily refill. That is deliberate while the solver is being tried on real
-boards: see ``PLAYABLE_MINIGAMES`` in :mod:`macro.minigame_daily`, which does
-not list it.
+``$ot`` is in ``PLAYABLE_MINIGAMES`` (:mod:`macro.minigame_daily`) and runs
+through play-all / after-refill auto-play the same as ``$oh`` / ``$oc`` /
+``$oq``, once the solver had been tried on real boards under the Extra Chance
+rules (100.2% of the all-ships ceiling across 27 real boards). The Run-page
+button still exists for an on-demand single play.
 """
 
 from __future__ import annotations

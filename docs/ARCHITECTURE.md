@@ -90,8 +90,8 @@ changes.
 | `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`); forecasts spawns still to come from the learned rate, and forces the bar to 0 in the last hour before the reset |
 | `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs; measures the spawn rate across `$us`-free stretches of rolling |
 | `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
-| `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` |
-| `sphere_game.py` / `oc_game.py` / `oq_game.py` / `ot_game.py` | Individual minigames. `$ot` is **manual only** — a Run-page button, never play-all and never after the daily refill. |
+| `minigames.py` | `$ohu` then `$oh` / `$oc` / `$oq` / `$ot` |
+| `sphere_game.py` / `oc_game.py` / `oq_game.py` / `ot_game.py` | Individual minigames, all in `PLAYABLE_MINIGAMES` (play-all + after-refill auto-play). `$ot`'s Run-page button also still works for an on-demand single play. |
 | `oh_replay.py` | `$oh` simulator + replay of real logged boards (no solver yet; greedy lives in `sphere_game.py`) |
 | `oc_solver.py` / `oc_replay.py` | `$oc` geometric hunt + remaining-need-aware collect lookahead; replay of **real logged boards** (preferred) or calibrated synthetic ones |
 | `oq_solver.py` / `oq_worlds.py` / `oq_replay.py` | `$oq` MIXED hunt, auto-revealed red, 12,650-world replay |
@@ -145,7 +145,7 @@ under test (`test_roll_cycle.py`, `test_parsers.py`, …).
 | `oq_bakeoff.py` | Replay MIXED vs entropy on every `$oq` world |
 | `oc_bakeoff.py` | A/B `$oc` policies. `--from-log` replays real logged boards and reports paired deltas with a t-statistic |
 | `oh_bakeoff.py` | Score `$oh`. `--from-log` replays real boards; `--reveals` sweeps the initial-reveal perk |
-| `perk9_bakeoff.py` | Score the perk-9 adaptive threshold vs static allow-lists |
+| `perk9_bakeoff.py` | Score the perk-9 adaptive threshold vs static allow-lists. `--hazard-sweep` checks the learned-rate estimator across accounts unlike this one; `--from-logs` replays real logged days; `--with-us-burst` is the regression test for excluding `$us` rolls from the learned rate |
 | `merge_event_logs.py` | Union diverged `events.jsonl` copies after a Syncthing outage |
 
 ---

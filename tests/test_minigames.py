@@ -192,6 +192,10 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
         "macro.minigames.OqSphereGame",
         lambda *a, **k: _FakeGame("oq", {"clicks": 7, "reward": 80, "reason": "done"}, sent),
     )
+    monkeypatch.setattr(
+        "macro.minigames.OtSphereGame",
+        lambda *a, **k: _FakeGame("ot", {"clicks": 3, "reward": 30, "reason": "done"}, sent),
+    )
 
     actions = _FakeActions(
         {
@@ -221,7 +225,7 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
     result = asyncio.run(runner.play(prefix="$"))
 
     assert actions.sent == [("ohu", "$")]
-    assert sent == ["oh:7:$", "oc:7:$", "oq:10:$", "oq:1:$"]
+    assert sent == ["oh:7:$", "oc:7:$", "oq:10:$", "oq:1:$", "ot:4:$"]
     assert result["availability"]["oq_total"] == 11
     assert result["availability"]["oc_total"] == 7
     assert result["availability"]["ot_total"] == 4
@@ -229,7 +233,8 @@ def test_play_all_orders_oh_oc_oq_and_adds_invested_oq(monkeypatch):
     assert ("oh", 5344, 0) not in rewards
     assert ("oc", 50, 5) in rewards
     assert ("oq", 80, 7) in rewards
-    assert any("$ot 3 (saved, not played)" in line for line in logs)
+    assert ("ot", 30, 3) in rewards
+    assert any("$ot 3" in line for line in logs)
     assert any("$oc from $oh hidden clicks" in line for line in logs)
     assert any("perk 10 → $ot 4" in line for line in logs)
 
@@ -247,6 +252,10 @@ def test_play_all_skips_zero_uses(monkeypatch):
     monkeypatch.setattr(
         "macro.minigames.OqSphereGame",
         lambda *a, **k: _FakeGame("oq", {"reason": "done", "reward": 0}, sent),
+    )
+    monkeypatch.setattr(
+        "macro.minigames.OtSphereGame",
+        lambda *a, **k: _FakeGame("ot", {"reason": "done", "reward": 0}, sent),
     )
     actions = _FakeActions(
         {
@@ -271,7 +280,7 @@ def test_play_all_skips_zero_uses(monkeypatch):
         between_games_sec=0,
     )
     asyncio.run(runner.play())
-    assert sent == ["oc:2:$"]
+    assert sent == ["oc:2:$", "ot:1:$"]
 
 
 def test_play_all_skips_ohu_when_playable_games_exhausted():
@@ -289,7 +298,7 @@ def test_play_all_skips_ohu_when_playable_games_exhausted():
             "oh": MinigameDailyEntry(exhausted=True, total=0),
             "oc": MinigameDailyEntry(exhausted=True, total=0),
             "oq": MinigameDailyEntry(exhausted=True, total=0),
-            "ot": MinigameDailyEntry(exhausted=False, total=2),
+            "ot": MinigameDailyEntry(exhausted=True, total=0),
         },
     )
     store["value"] = save_minigame_record({}, record)
@@ -386,6 +395,10 @@ def test_play_all_persists_ohu_totals(monkeypatch):
         "macro.minigames.OqSphereGame",
         lambda *a, **k: _FakeGame("oq", {"reason": "done", "reward": 0}, []),
     )
+    monkeypatch.setattr(
+        "macro.minigames.OtSphereGame",
+        lambda *a, **k: _FakeGame("ot", {"reason": "done", "reward": 0}, []),
+    )
     store = {"value": {}}
     actions = _FakeActions(
         {
@@ -421,7 +434,7 @@ def test_play_all_persists_ohu_totals(monkeypatch):
     daily = store["value"]
     minigames = load_minigame_record(daily)
     assert should_skip_playable_minigames(minigames) is True
-    assert minigames.entry("ot").total == 1
+    assert minigames.entry("ot").total == 0
     perk9 = load_perk9_record(daily)
     assert perk9.last_clicked == 15
     assert perk9.last_click_max == 15

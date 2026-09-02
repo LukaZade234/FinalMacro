@@ -2,7 +2,6 @@
 
 Persisted on the channel profile next to perk 8 so a restart can skip
 ``$ohu`` / play-all until the UTC refill instead of re-querying Mudae.
-``$ot`` is stored for skip-until-refill; it is not auto-played.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from macro.perk8_daily import mudae_daily_date, next_daily_reset, parse_iso
 
 MINIGAME_DAILY_KEY = "minigames"
 MINIGAME_IDS = ("oh", "oc", "oq", "ot")
-PLAYABLE_MINIGAMES = ("oh", "oc", "oq")
+PLAYABLE_MINIGAMES = ("oh", "oc", "oq", "ot")
 
 
 def _utc_now() -> dt.datetime:

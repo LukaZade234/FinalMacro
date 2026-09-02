@@ -727,11 +727,12 @@ Score policies with `scripts/ot_bakeoff.py` (`--known`, `--from-log`,
 bonus wins at 6–7 and loses at 8–9, an aggregate mean averages a real effect
 against a real regression — use `--by-colors` for anything you act on.
 
-**`$ot` is manual only.** The Run page has a **Play $ot** button
-(`macro/ot_game.py`), but `$ot` is deliberately *not* in
-`PLAYABLE_MINIGAMES`, so **play-all skips it and it never starts itself
-after the daily refill** — unlike `$oh` / `$oc` / `$oq`. That is on purpose
-while the solver is being tried against real boards.
+**`$ot` runs in `PLAYABLE_MINIGAMES`**, the same as `$oh` / `$oc` / `$oq`:
+play-all spends it and it starts itself after the daily refill. It was
+manual-only (Run page **Play $ot** button, `macro/ot_game.py`) while the
+solver was tried against real boards; that measured 100.2% of the all-ships
+ceiling across 27 real boards under Extra Chance, so it was promoted. The
+button still exists for an on-demand single play.
 
 
 | Command | What it is                 | Engine                 |
@@ -739,7 +740,7 @@ while the solver is being tried against real boards.
 | `$oh`   | 5×5 sphere grid            | `macro/sphere_game.py` |
 | `$oc`   | Color-matching sphere game | `macro/oc_game.py`     |
 | `$oq`   | World / path sphere game   | `macro/oq_game.py`     |
-| `$ot`   | 5×5 battleship             | `macro/ot_game.py` + `macro/ot_solver.py` (**Play $ot** button only — never automatic) |
+| `$ot`   | 5×5 battleship             | `macro/ot_game.py` + `macro/ot_solver.py` |
 
 
 ---

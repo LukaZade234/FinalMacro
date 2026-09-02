@@ -32,6 +32,7 @@ def test_save_roundtrip_under_minigames_key():
 
 
 def test_ohu_zeros_mark_playable_exhausted():
+    """oh/oc/oq/ot are all playable now, so leftover $ot uses hold off the skip."""
     now = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
     record = update_record_from_ohu(
         MinigameDailyRecord(),
@@ -48,9 +49,30 @@ def test_ohu_zeros_mark_playable_exhausted():
         },
         now=now,
     )
-    assert should_skip_playable_minigames(record, now=now) is True
+    assert should_skip_playable_minigames(record, now=now) is False
     assert should_skip_game(record, "ot", now=now) is False
     assert record.entry("ot").total == 2
+
+
+def test_ohu_all_zeros_mark_playable_exhausted_including_ot():
+    now = dt.datetime(2026, 8, 25, 12, 0, tzinfo=dt.timezone.utc)
+    record = update_record_from_ohu(
+        MinigameDailyRecord(),
+        {
+            "oh_total": 0,
+            "oc_total": 0,
+            "oq_total": 0,
+            "ot_total": 0,
+            "oh_left": 0,
+            "oc_left": 0,
+            "oq_left": 0,
+            "ot_left": 0,
+            "perk8_refill_minutes": 180,
+        },
+        now=now,
+    )
+    assert should_skip_playable_minigames(record, now=now) is True
+    assert should_skip_game(record, "ot", now=now) is True
 
 
 def test_skip_clears_after_utc_midnight():
