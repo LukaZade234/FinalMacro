@@ -21,9 +21,11 @@ Item {
         { icon: "accounts", title: "Accounts" },
         { icon: "servers", title: "Servers" },
         { icon: "presets", title: "Presets" },
+        { icon: "mudae", title: "Mudae" },
+        { icon: "spheres", title: "Spheres" },
+        { icon: "advisor", title: "Advisor" },
         { icon: "statistics", title: "Statistics" },
-        { icon: "debug", title: "Debug" },
-        { icon: "utilities", title: "Utilities" }
+        { icon: "debug", title: "Debug" }
     ]
 
     Rectangle {
@@ -38,7 +40,7 @@ Item {
         IconRail {
             currentPage: shell.currentPage
             items: shell.navItems
-            settingsIndex: 7
+            settingsIndex: 9
             onNavigate: function(index) { shell.navigate(index) }
         }
 

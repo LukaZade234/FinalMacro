@@ -568,6 +568,302 @@ class AppBridge(QObject):
             )
         )
 
+    @Slot(str, str, str, result=str)
+    def dailyReportJson(self, date_key: str, account: str, server: str) -> str:
+        """One UTC day rolled up across every kind, plus today's daily budgets."""
+        from mudae.clock import utc_date_key
+        from mudae.stats_index import daily_report
+
+        report = daily_report(
+            self._accounts,
+            date_key=str(date_key or ""),
+            account=str(account or "all"),
+            server=str(server or "all"),
+        )
+        report["budgets"] = self._daily_budget_status(
+            str(report.get("date") or ""),
+            account=str(account or "all"),
+            server=str(server or "all"),
+        )
+        report["today"] = utc_date_key()
+        self._attach_perk9_cap(report, str(account or "all"), str(server or "all"))
+        return json.dumps(report)
+
+    def _attach_perk9_cap(self, report: dict, account: str, server: str) -> None:
+        """Fill the perk-9 tape's cap so unspent slots can be drawn.
+
+        The cap is ``10 + OP9 extra`` from ``$shop``, so it belongs to one
+        (account, channel) pair. Only a report scoped to one account on one
+        server names that pair, and only when the server has a single channel;
+        anywhere else the cap stays ``None`` and the page draws the clicks that
+        happened rather than inventing a budget to measure them against.
+
+        The scope is what resolves the channel here, not the Run target: the
+        point of the picker is to read one account's day while another account
+        is the one connected.
+        """
+        tape = (report.get("tapes") or {}).get("perk9")
+        if not isinstance(tape, dict) or not tape.get("scoped"):
+            return
+        channels = [
+            channel
+            for profile, channel in self._profiles.all_channels()
+            if str(getattr(profile, "name", "")) == server
+        ]
+        if len(channels) != 1:
+            return
+        sheet = self._profiles.account_sheet(channels[0], "shop", account_id=account)
+        if not sheet.fields:
+            return
+        from macro.sheet_caps import perk9_max_from_shop
+
+        tape["cap"] = perk9_max_from_shop(dict(sheet.fields))
+
+    @Slot(str, str, result=str)
+    def sphereEconomyJson(self, channel_profile_id: str, account_id: str) -> str:
+        """Sphere stock, the ouroperk ladder, and what the next level is worth."""
+        from macro.perk9_daily import load_perk9_record
+        from macro.sphere_upgrades import next_upgrades
+
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        wanted = (
+            str(account_id or "").strip()
+            or self._run_account_id
+            or self._profiles.main_account_id
+        )
+        if found is None:
+            return json.dumps({"available": False, "account_id": wanted})
+
+        channel = found[1]
+        sheet = self._profiles.account_sheet(channel, "shop", account_id=wanted)
+        shop = dict(sheet.fields)
+
+        daily = self._get_daily_resets_for(wanted, channel.id) if wanted else {}
+        perk9 = load_perk9_record(daily)
+
+        rules = getattr(self._macro_config, "sphere_reaction", None)
+        payload = {
+            "available": bool(shop),
+            "account_id": wanted,
+            "read_at": sheet.read_at,
+            "inferred": sheet.inferred,
+            "stock": {
+                # Two different readings from two different commands, shown as
+                # such: $ohu prints a sphere stock line, $shop prints its own
+                # balance, and they are read at different moments.
+                "ohu_stock": perk9.stock,
+                "shop_spheres": shop.get("spheres"),
+            },
+            "shop": {
+                "level_cost_step": shop.get("level_cost_step"),
+                "max_level": shop.get("max_level"),
+                "perks": shop.get("perks") or {},
+            },
+            "upgrades": next_upgrades(
+                shop,
+                perk9_sp_per_day=self._perk9_sp_per_day(wanted),
+                spawns_per_day=perk9.rolled_today,
+                double_chance_pct=float(
+                    getattr(self._macro_state, "sphere_double_chance_pct", 0) or 0
+                ),
+                additional_spheres=float(
+                    getattr(self._macro_state, "additional_spheres", 0) or 0
+                ),
+                freq_by_emoji=dict(getattr(rules, "sphere_frequency", None) or {}),
+                base_values=dict(getattr(rules, "sphere_values", None) or {}) or None,
+            ),
+        }
+        return json.dumps(payload)
+
+    @Slot(str, str, result=str)
+    def advisorJson(self, channel_profile_id: str, account_id: str) -> str:
+        """`$bw` trade and key rates/values for one account on one channel."""
+        from macro.advisor import bw_advisory, key_advisory
+
+        wanted = (
+            str(account_id or "").strip()
+            or self._run_account_id
+            or self._profiles.main_account_id
+        )
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        bonus: dict[str, Any] = {}
+        if found:
+            bonus = self._profiles.account_sheet(
+                found[1], "bonus", account_id=wanted
+            ).fields
+
+        kakera_per_click = self._mean_kakera_per_click(wanted)
+        return json.dumps(
+            {
+                "account_id": wanted,
+                # No kakera-per-roll figure is passed: see _kakera_per_roll.
+                "bw": bw_advisory(bonus),
+                "keys": key_advisory(
+                    rates_by_type=self._key_rates_per_day(wanted),
+                    kakera_per_click=kakera_per_click,
+                    kakera_base_cost=getattr(
+                        self._macro_state, "kakera_base_cost", None
+                    ),
+                ),
+            }
+        )
+
+    def _event_days(self, kind: str, account_id: str, days: int = 14):
+        """Rows of ``kind`` from the trailing window, with the days they span."""
+        import datetime as dt
+
+        from mudae import event_log
+        from mudae.clock import utc_now
+
+        event_log.ensure_loaded()
+        cutoff = (utc_now() - dt.timedelta(days=days)).date().isoformat()
+        rows = []
+        seen: set[str] = set()
+        for entry in event_log.events(kind):
+            day = str(entry.get("date_key") or "")[:10]
+            if not day or day < cutoff:
+                continue
+            if account_id and str(entry.get("account_id") or "") != account_id:
+                continue
+            rows.append(entry)
+            seen.add(day)
+        return rows, seen
+
+    def _mean_kakera_per_click(self, account_id: str) -> float | None:
+        rows, _days = self._event_days("kakera", account_id)
+        clicks = [
+            int(r.get("amount") or 0)
+            for r in rows
+            if str(r.get("earn_method") or r.get("source") or "") == "kakera_click"
+        ]
+        if not clicks:
+            return None
+        return sum(clicks) / len(clicks)
+
+    def _key_rates_per_day(self, account_id: str) -> dict[str, float]:
+        rows, days = self._event_days("key", account_id)
+        if not days:
+            return {}
+        counts: dict[str, int] = {}
+        for entry in rows:
+            key_type = str(entry.get("key_type") or "").strip().lower()
+            if key_type:
+                counts[key_type] = counts.get(key_type, 0) + 1
+        return {k: v / len(days) for k, v in counts.items()}
+
+    # Deliberately absent: kakera-per-roll.
+    #
+    # Converting "rolls lost to $bw" into kakera needs the *marginal* kakera a
+    # roll yields, and the log cannot give it. Rolls are not events, so the only
+    # denominator available is the rolls the day theoretically allowed
+    # (rolls/hour x 24), which assumes the macro rolls around the clock; and the
+    # numerator mixes income that is not roll-proportional at all ($daily, $p,
+    # claims) with income that is. On this account that produced 499 kakera per
+    # roll, a figure with no defensible meaning. The page shows rolls lost and
+    # says why it stops there.
+
+    def _perk9_sp_per_day(self, account_id: str, days: int = 14) -> float | None:
+        """Observed SP/day from perk-9 roll-button clicks, over a trailing window.
+
+        Measured, not modelled — this is what the account actually collected, and
+        it is what makes the sphere-value upgrade term honest.
+        """
+        import datetime as dt
+
+        from mudae import event_log
+        from mudae.clock import utc_now
+
+        event_log.ensure_loaded()
+        cutoff = (utc_now() - dt.timedelta(days=days)).date().isoformat()
+        total = 0
+        seen: set[str] = set()
+        for entry in event_log.events("sphere"):
+            if str(entry.get("source") or "") != "sphere_click":
+                continue
+            day = str(entry.get("date_key") or "")[:10]
+            if not day or day < cutoff:
+                continue
+            if account_id and str(entry.get("account_id") or "") != account_id:
+                continue
+            total += int(entry.get("amount") or 0)
+            seen.add(day)
+        if not seen:
+            return None
+        return total / len(seen)
+
+    def _daily_budget_status(
+        self,
+        date_key: str,
+        *,
+        account: str = "all",
+        server: str = "all",
+    ) -> dict[str, Any]:
+        """Perk 8 / perk 9 / minigame completion for one account on one server.
+
+        Only answerable for **today**: these records are the live daily state and
+        are cleared at the UTC reset, so a past day's spend is not recoverable.
+        The report says so rather than drawing an empty bar as if it were a zero.
+
+        And only answerable for a single pairing: every (account, channel) pair
+        holds its own record, so a report covering several has no one budget to
+        report on.
+        """
+        from mudae.clock import utc_date_key
+
+        if not date_key or date_key != utc_date_key():
+            return {"available": False, "reason": "Daily budgets are only kept for today."}
+        if account == "all" or server == "all":
+            from mudae.stats_index import TAPE_SCOPE_NOTE
+
+            return {"available": False, "reason": TAPE_SCOPE_NOTE}
+        channels = [
+            channel
+            for profile, channel in self._profiles.all_channels()
+            if str(getattr(profile, "name", "")) == server
+        ]
+        if len(channels) != 1:
+            return {
+                "available": False,
+                "reason": "This server has no single channel to read a budget from.",
+            }
+
+        from macro.minigame_daily import MINIGAME_IDS, load_minigame_record
+        from macro.perk8_daily import load_perk8_record
+        from macro.perk9_daily import load_perk9_record
+
+        daily = self._get_daily_resets_for(account, channels[0].id)
+        perk8 = load_perk8_record(daily)
+        perk9 = load_perk9_record(daily)
+        minigames = load_minigame_record(daily)
+        left = sum(
+            int(minigames.entry(game).left or 0) + int(minigames.entry(game).stored or 0)
+            for game in MINIGAME_IDS
+        )
+        return {
+            "available": True,
+            "rows": [
+                {
+                    "label": "Perk 8 · kakera clicks",
+                    "used": int(perk8.last_clicked or 0),
+                    "max": int(perk8.last_click_max or 0),
+                    "exhausted": bool(perk8.clicks_exhausted),
+                },
+                {
+                    "label": "Perk 9 · sphere clicks",
+                    "used": int(perk9.last_clicked or 0),
+                    "max": int(perk9.last_click_max or 0),
+                    "exhausted": bool(perk9.clicks_exhausted),
+                },
+                {
+                    "label": "Minigame uses left",
+                    "used": left,
+                    "max": left,
+                    "exhausted": left == 0,
+                    "inverted": True,
+                },
+            ],
+        }
+
     def _sync_initial_target(self) -> None:
         account = self._accounts.active_account()
         channel = self._profiles.active_channel()
@@ -585,6 +881,7 @@ class AppBridge(QObject):
         self._presets.load_from_settings(saved)
         self._mudae_settings_presets.load_from_settings(saved)
         self._targets.load_from_settings(saved)
+        self._sync_sheet_main_account()
         self._sync_initial_target()
         self._macro_config = self._presets.active_preset()
 
@@ -770,6 +1067,9 @@ class AppBridge(QObject):
 
     def _emit_config_changed(self) -> None:
         self._config_emit_pending = False
+        # Adding, removing or re-activating an account can change which one a
+        # pre-split sheet is credited to, so keep the profile store in step.
+        self._sync_sheet_main_account()
         self.configChanged.emit()
         self.serversChanged.emit()
         self.usModeOptionsChanged.emit()
@@ -1957,14 +2257,13 @@ class AppBridge(QObject):
         parsed: ParseResult,
     ) -> None:
         """Mirror Mudae channel text into the Run feed (not macro skip chatter)."""
-        if parsed.kind == MessageKind.ROLL:
-            if snapshot.edited:
-                return
-            # The roll loop logs the card after a button refresh so reacts are
-            # complete; skip the first-parse copy while a session is running.
-            if self._engine is not None and self._engine.is_running:
-                return
-        formatted = format_live_feed(snapshot, parsed)
+        # The account's own names are what tell its activity apart from
+        # everything else Mudae says in a channel the user also types in.
+        formatted = format_live_feed(
+            snapshot,
+            parsed,
+            own_usernames=self._macro_state.own_usernames,
+        )
         if not formatted:
             return
         text, severity = formatted
@@ -2444,11 +2743,16 @@ class AppBridge(QObject):
             )
         )
 
-    async def _play_daily_minigames_from_engine(self) -> None:
+    async def _play_daily_minigames_from_engine(self) -> dict[str, Any] | None:
+        """Play-all for the engine, returning the result so it can gate the day.
+
+        ``None`` means no decision was reached — the engine keeps the day open
+        and retries on its next cycle instead of writing the day off.
+        """
         if not self._actions or not self._monitor:
-            return
+            return None
         if self._minigames_busy():
-            return
+            return None
         daily_get, daily_save = self._daily_resets_callbacks_for(
             self._run_account_id, self._run_channel_profile_id
         )
@@ -2474,8 +2778,10 @@ class AppBridge(QObject):
                 if game_result.get("reason") == "exhausted":
                     self._apply_minigame_play_status(game_result)
                     break
+            return result
         except Exception as exc:  # noqa: BLE001 - surface to the activity log
             self._append_activity_log(f"play-all error: {exc}")
+            return None
         finally:
             self._minigames_running = False
 
@@ -2541,6 +2847,7 @@ class AppBridge(QObject):
             guild_id=data.get("guild_id"),
             guild_name=data.get("guild_name"),
             channel_name=data.get("channel_name"),
+            account_id=self._run_account_id,
         )
         self._notify_config()
         self._persist()
@@ -2937,6 +3244,13 @@ class AppBridge(QObject):
             return
         await self._notification_disconnect()
 
+    def _sync_sheet_main_account(self) -> None:
+        """Tell the profile store who a pre-split sheet belongs to."""
+        from mudae.account_context import defaults_from_store
+
+        main_id, _name, _by_id = defaults_from_store(self._accounts)
+        self._profiles.main_account_id = main_id
+
     def _apply_sheet_caps_to_run_state(self, channel_profile_id: str = "") -> None:
         from macro.sheet_caps import apply_sheet_caps
 
@@ -2944,8 +3258,19 @@ class AppBridge(QObject):
         found = (
             self._profiles.find_channel_by_profile_id(profile_id) if profile_id else None
         )
-        bonus = found[1].bonus if found else {}
-        shop = found[1].shop if found else {}
+        # Caps are per account: a second account on this channel has its own
+        # power max and perk-9 click cap, and must not inherit the first's.
+        account_id = self._run_account_id or self._profiles.main_account_id
+        bonus: dict[str, Any] = {}
+        shop: dict[str, Any] = {}
+        if found:
+            channel = found[1]
+            bonus = self._profiles.account_sheet(
+                channel, "bonus", account_id=account_id
+            ).fields
+            shop = self._profiles.account_sheet(
+                channel, "shop", account_id=account_id
+            ).fields
         apply_sheet_caps(self._macro_state, bonus=bonus, shop=shop)
 
     def _apply_sheet_caps_if_discord_channel(self, discord_channel_id: int) -> None:
@@ -3713,21 +4038,51 @@ class AppBridge(QObject):
         _channel, settings = bundle
         return json.dumps(fields_to_display_dict(settings))
 
-    @Slot(str, result=str)
-    def formatChannelBonusDisplayJson(self, channel_profile_id: str) -> str:
+    def _account_sheet_payload(
+        self,
+        channel_profile_id: str,
+        kind: str,
+        account_id: str,
+        formatter,
+    ) -> str:
+        """Shared body for the per-account sheet display slots.
+
+        ``account_id`` blank means "the account this channel is run as", which is
+        what every caller wants until the Mudae page can point elsewhere.
+        """
         found = self._profiles.find_channel_by_profile_id(channel_profile_id)
         if found is None:
             return json.dumps({"sections": [], "field_count": 0})
         _server, channel = found
-        return json.dumps(fields_to_bonus_display_dict(dict(channel.bonus or {})))
+        wanted = (
+            str(account_id or "").strip()
+            or self._run_account_id
+            or self._profiles.main_account_id
+        )
+        sheet = self._profiles.account_sheet(channel, kind, account_id=wanted)
+        payload = formatter(dict(sheet.fields))
+        payload["account_id"] = wanted
+        payload["read_at"] = sheet.read_at
+        payload["inferred"] = sheet.inferred
+        return json.dumps(payload)
 
     @Slot(str, result=str)
-    def formatChannelShopDisplayJson(self, channel_profile_id: str) -> str:
-        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
-        if found is None:
-            return json.dumps({"sections": [], "field_count": 0})
-        _server, channel = found
-        return json.dumps(fields_to_shop_display_dict(dict(channel.shop or {})))
+    @Slot(str, str, result=str)
+    def formatChannelBonusDisplayJson(
+        self, channel_profile_id: str, account_id: str = ""
+    ) -> str:
+        return self._account_sheet_payload(
+            channel_profile_id, "bonus", account_id, fields_to_bonus_display_dict
+        )
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def formatChannelShopDisplayJson(
+        self, channel_profile_id: str, account_id: str = ""
+    ) -> str:
+        return self._account_sheet_payload(
+            channel_profile_id, "shop", account_id, fields_to_shop_display_dict
+        )
 
     @Slot(str, result=str)
     def getMudaeSettingsPresetEditorJson(self, preset_id: str) -> str:

@@ -273,6 +273,7 @@ class OqSphereGame:
                 clicks_paid=paid_clicks,
                 clicks_budget=clicks_budget,
                 reason="done",
+                uses=uses,
             )
 
             reward = total_reward_from_content(self._reward_content)

@@ -6,7 +6,10 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-from mudae.account_context import resolve_log_account
+# ``username_matches_own`` is re-exported: the logs, the live feed and the
+# key tracker all have to answer "is this line about our account?" the same
+# way, so there is one implementation of it.
+from mudae.account_context import resolve_log_account, username_matches_own
 from mudae.clock import utc_date_key
 from mudae import event_log
 from macro.state import MacroPhase
@@ -90,13 +93,6 @@ def set_recording_account(account_id: str, account_name: str) -> None:
 
 def clear_recording_account() -> None:
     set_recording_account("", "Main")
-
-
-def username_matches_own(claimed_by: str | None, own_usernames: list[str]) -> bool:
-    if not claimed_by or not own_usernames:
-        return False
-    norm = claimed_by.strip().lower()
-    return any(name.strip().lower() == norm for name in own_usernames if name)
 
 
 def _character_name_is_profile_author(

@@ -7,6 +7,7 @@ day. The in-app live feed converts stored UTC ISO timestamps to local time.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 
 def utc_now() -> dt.datetime:
@@ -43,3 +44,24 @@ def local_hhmmss(iso_ts: str) -> str:
     if parsed is None:
         return ""
     return parsed.astimezone().strftime("%H:%M:%S")
+
+
+# Discord ids embed the millisecond they were minted, counted from this epoch.
+# That makes a message id a usable timestamp for any row that stored the id but
+# not the date — see ``mudae.soulmate_log.backfill_dates``.
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def snowflake_datetime(snowflake: Any) -> dt.datetime | None:
+    """UTC time a Discord snowflake was created, or ``None`` if unusable."""
+    try:
+        value = int(snowflake)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    millis = (value >> 22) + DISCORD_EPOCH_MS
+    try:
+        return dt.datetime.fromtimestamp(millis / 1000, dt.UTC)
+    except (OverflowError, OSError, ValueError):
+        return None

@@ -189,6 +189,9 @@ def record_minigame_session(
         "account_id": acc_id,
         "account_name": acc_name,
         "won": bool(session.get("won")),
+        # A board is one command; a use is one of the day's allowance it spent.
+        # `$ot 5` is one board and five uses, so the two are counted apart.
+        "uses": max(1, int(session.get("uses") or 1)),
         "base_value": int(session.get("base_value") or 0),
         "clicks": clicks,
         "board": board,

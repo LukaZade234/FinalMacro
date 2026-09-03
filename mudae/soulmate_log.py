@@ -11,6 +11,7 @@ from mudae.account_context import (
     resolve_log_account,
 )
 from mudae import event_log
+from mudae.clock import snowflake_datetime, utc_date_key
 from mudae.types import MudaeMessageSnapshot
 
 _LOG_PATH = Path(__file__).resolve().parent.parent / "data" / "soulmate_log.json"
@@ -27,7 +28,11 @@ def _bind_events() -> None:
 def _load_disk_log() -> None:
     event_log.ensure_loaded()
     _bind_events()
-    if _backfill_account_name_from_owner():
+    # Both must run: `or` would short-circuit the second whenever the first
+    # found something to fix.
+    dated = _backfill_dates_from_message_id()
+    named = _backfill_account_name_from_owner()
+    if dated or named:
         event_log.mark_dirty(rewrite=True)
         event_log.flush()
         from mudae import stats_index
@@ -53,6 +58,29 @@ def clear_recording_account() -> None:
 
 def _placeholder_account_name(name: str) -> bool:
     return str(name or "").strip().lower() in {"", "default"}
+
+
+def _backfill_dates_from_message_id() -> bool:
+    """Give undated rows a ``date_key`` from the Discord id they already store.
+
+    Soulmates were logged with ``time`` alone — a clock time with no date — so
+    every row landed in the same empty date bucket and no per-day view of them
+    was possible. A Discord snowflake embeds the millisecond it was minted, so
+    the date was recoverable from data already on disk rather than needing new
+    capture. Rows without a usable id keep no date, and callers must treat that
+    as unknown rather than as today.
+    """
+    changed = False
+    for entry in _events:
+        if str(entry.get("date_key") or "").strip():
+            continue
+        stamp = snowflake_datetime(entry.get("message_id"))
+        if stamp is None:
+            continue
+        entry["recorded_at"] = stamp.isoformat()
+        entry["date_key"] = utc_date_key(stamp)
+        changed = True
+    return changed
 
 
 def _backfill_account_name_from_owner() -> bool:
@@ -196,6 +224,10 @@ def record_new_soulmate(
         "time": snapshot.created_at,
         "message_id": snapshot.message_id,
     }
+    stamp = snowflake_datetime(snapshot.message_id)
+    if stamp is not None:
+        entry["recorded_at"] = stamp.isoformat()
+        entry["date_key"] = utc_date_key(stamp)
     event_log.append("soulmate", entry)
     event_log.flush()
     return entry

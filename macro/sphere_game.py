@@ -935,6 +935,7 @@ class OhSphereGame:
                 oq_bonus=bonus["oq_bonus"],
                 ot_bonus=bonus["ot_bonus"],
                 spheres_bonus=bonus["spheres_bonus"],
+                uses=uses,
             )
             oc_bonus = int(session.get("oc_bonus") or 0)
 

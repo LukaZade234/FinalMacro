@@ -17,13 +17,13 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
 6. ~~**`$p` / `$daily`** — send at the right time; parsers exist.~~ Account-global; designated channel on the Accounts tab; priority over rolls.
 7. ~~**Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.~~ Parser in `mudae/parsers/chaos.py`; extra rolls are spent this hour, free kakera / wish follow-ups are acted on, power discount applied on spend, omega keys logged. `$kl` / stored minigames are logged only.
-8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer.
+8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer. **Entirely greenfield** despite the low ease rank: no command aliases, no parser, no stored list contents, and the current lists are never read back from Mudae. Note the scopes differ — `$dl` / `$adl` are server rule lists, `$wl` is the account wishlist.
 9. ~~**Save power for perk 8** / **`$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain / schedule on the preset (`us_keep_draining`, local window, roll cap). Run page is only the Roll `$us` button.
 10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
 11. ~~**`$oc` leftover-click lookahead**~~ — remaining-need-aware collect EV + widened hunt-endgame guess threshold, geometric model kept (`macro/oc_solver.py`). +1.25 SP/board on 100 real logged boards, not significant; further `$oc` tuning is blocked on sample size, not ideas.
 12. **`$oh` histogram → DP** / **auto investor** / **app-only wishlist** — new modules, known shape.
 13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — tables no longer parse the full log; shared filter state across tabs and a Qt list model can wait.
-14. ~~**Perk 9 threshold**~~ / **`$bw` advisory** — perk-9 EV + DP is wired (`macro/perk9_threshold.py`, opt-in `budget_aware`). `$bw` advisory still needs `rolls_per_hour["penalties"]["bw"]`.
+14. ~~**Perk 9 threshold**~~ / **`$bw` advisory** — perk-9 EV + DP is wired (`macro/perk9_threshold.py`, opt-in `budget_aware`). `$bw` advisory is **not** blocked on `rolls_per_hour["penalties"]["bw"]` as this list long claimed: that field is parsed (`mudae/parsers/bonus.py:120`), tested (`tests/test_parsers.py:1105`), catalogued and present in live data (`bw: 19`). What it actually lacks is `$wlsz+z!` wishlist sizes, which nothing captures — so the rolls-per-hour trade is computable today and the *optimum* is not.
 15. ~~**`$ot` Phase 2**~~ (solver, harness, Extra Chance and a manual Play $ot button shipped; auto-play still off pending one live batch under the new rules) / **use parsed `$settings`/`$bonus` in decisions** / **full daily autonomy** / **Phase D** — real projects.
 16. Last: split `bridge.py`, achievements, GUI polish.
 
@@ -42,7 +42,7 @@ Highest first. What makes an overnight run correct and complete.
 7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
 8. ~~**Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).~~ Parser + follow-up in `KakeraReactor` / `chaos_followup.py`; raw windows still go to `data/chaos_log.json`.
 9. **More SP from games we already play** — `$oh` DP. ~~`$oc` lookahead~~ — done and measured on real boards (+1.25 SP/board, not significant); `$oc` is at the ceiling of this approach, leave it. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase).
-10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker.
+10. **App-only wishlist** then **`$bw` advisory** — planning, not a session blocker. The `$bw` blocker is `$wlsz+z!` capture, not the `$bonus` penalty field (see **By ease** 14).
 11. **`$dl` switch**, shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
 
@@ -140,6 +140,77 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 
 ---
 
+## New sections (Mudae / Spheres / Advisor)
+
+A dozen planned features shared one problem: they all read off — or advise on —
+one `(account, server)` pair, and had nowhere to live. The sheets were buried in
+a sub-tab of Servers; `Utilities` was a top-level page holding one paste-in tool.
+Agreed shape: **three hubs**, each a pill bar over a `Loader` in the
+`StatisticsView` idiom, so every sub-page is a real view rather than a card.
+Each carries a `ScopeBar` that starts on the Run target and can then be moved
+without disturbing a live run.
+
+- ~~**Account-scope the sheets**~~ — prerequisite, see **Found in audit**.
+- ~~**One `MudaeSheetPanel`**~~ — replaced three copy-pasted display panels and
+  reads `Theme` sizes instead of hardcoded pixels.
+- ~~**Mudae hub**~~ — `$settings` (with drift + copy, moved out of Servers) /
+  `$ov` (stubbed — no parser) / `$bonus`. Grouped by what a sheet *is*:
+  `$settings` and `$ov` are configurable and copyable between servers, `$bonus`
+  is what they and the account's perks add up to.
+- ~~**Statistics › Report**~~ — a sixth pill (`DailyReportView.qml`,
+  `stats_index.daily_report`). UTC-day picker, KPI row for all four kinds against
+  a **trailing 7-day** baseline (not all history, so a long-running account is
+  judged on its current pace; a day with no history reports *no baseline* rather
+  than 0%), a clickable 14-day trend, kakera-by-method / spheres-by-source /
+  keys-by-type breakdowns, and a **daily budgets** panel. That panel is the
+  point: unspent perk-8 and perk-9 clicks expire at the reset, so an incomplete
+  day is otherwise invisible until the next morning. **Budgets are today-only** —
+  those records are live daily state cleared at the reset, so a past day's spend
+  is not recoverable and the page says so instead of drawing an empty bar, and
+  **scoped-only** — the budget belongs to one (account, server) pairing, so the
+  scope bar has to name one before there is a budget to report.
+  Hourly detail was left out: the cube is per-day, and an hourly axis would mean
+  walking raw events.
+- ~~**Spheres hub**~~ — Stock & shop (`$shop` moved here off Servers; it is the
+  sphere economy, not a setting) / Upgrades / Characters. Notes from building it:
+  - The two stock figures are shown as **two readings, not a liquid/invested
+    split**: `$ohu` prints a stock line and `$shop` prints its own balance, they
+    are read at different moments, and nothing establishes they are different
+    pools. Do not merge them without evidence.
+  - **Cost is `(level + 1) × level_cost_step`**, from the sheet's "cost increased
+    by +4,000 **per level**" — not a flat 4,000 per upgrade. Mudae never prints
+    the figure for a specific level, so the UI labels it derived.
+  - `macro/sphere_upgrades.py` prices **perk 9 only** and abstains with a reason
+    on the other nine. Value % is *measured* (logged perk-9 `sphere_click`
+    income); the extra click is *modelled* through the perk-9 DP and needs a
+    spawn estimate. Everything else needs a kakera balance, roster counts or a
+    per-board SP model that the app does not have.
+  - Characters **needs new capture** — the shop reports perk levels, never how
+    many characters carry them, which is exactly why OP1 cannot be priced.
+  - Invest stays **blocked**: no kakera balance, and the invest command's syntax
+    and reply are undocumented.
+- ~~**Advisor hub**~~ — `$bw` / Key EV / Wishlist / Lists / Formatter
+  (`macro/advisor.py`). `Utilities` is absorbed, so the rail stays at ten.
+  Notes from building it:
+  - **`$bw` is not converted to kakera, and that is deliberate.** The cost side
+    is exact off `$bonus` (−19 rolls/h → 456 rolls/day here). Converting to
+    kakera needs the *marginal* kakera a roll yields, which the log cannot give:
+    rolls are not events, so the only denominator is the rolls a day
+    theoretically allowed (`rolls/hour × 24`, assuming round-the-clock rolling),
+    and the numerator mixes roll-proportional income with `$daily` / `$p` /
+    claims. That produced **499 kakera/roll** on the live account — a number
+    with no defensible meaning. The page shows rolls lost and stops.
+  - **Only chaos keys are priced**, and not for claim reasons: a chaos key
+    halves the reaction-power cost of a kakera click, so its value is the power
+    saved converted to extra clicks at the account's own kakera-per-click
+    (2,706 kakera/use against a measured 5,412/click). The cost cancels out, so
+    the figure is robust to the click cost. Bronze / silver / gold / omega are
+    claim keys whose worth is whatever the character returns — no per-character
+    perk-4 level exists, so they report their rate and abstain.
+  - The `$bw` **optimum** stays blocked on `$wlsz+z!` capture.
+
+---
+
 ## Statistics and GUI
 
 Do the shared model first; the copy-paste and most of the slowness go away with it.
@@ -153,7 +224,45 @@ Do the shared model first; the copy-paste and most of the slowness go away with 
 - ~~**Reaction power max is hardcoded `155`**~~ — run-channel `$bonus.kakera_max_power` via `macro/sheet_caps.py`; 155 remains the fallback when `$bonus` has not been fetched.
 - ~~**Empty states**~~ — disconnected vs nothing recorded vs filters (`gui/emptyStates.js`).
 - **Session row on Statistics** — one line per connect/disconnect with kakera + spheres + keys + claims. Today each log is filtered alone (`gui/run_summary.py` already does a session haul on Run).
-- **Daily report** — end-of-day kakera / sphere breakdown for invest / perk-8 planning.
+- ~~**Daily report**~~ — `Statistics › Report` (`gui/views/DailyReportView.qml`): a mosaic
+  of one day, with tiles sized to what they hold and no two neighbours sharing a chart form
+  — hourly stacked columns, a key pie, a kakera-colour bubble scatter, a sphere treemap,
+  the perk-8/perk-9 click tapes and a minigame dumbbell. Three things it deliberately does
+  not claim:
+  - **Kakera colour is measured over clicks alone.** `$bku` payouts and `$dk` carry no
+    kakera type, so a colour share of the day's whole take would attribute nearly half of
+    it to nothing.
+  - **The perk-8 tape is an approximation and says so.** Nothing records which click
+    consumed a perk-8 slot; purple is excluded because it cannot spawn on a perk-8
+    character, and the day's first 40 non-purple reactions stand in. Logging a
+    `perk8_slot` flag on click events would make it exact.
+  - **Minigame rates are per *use*, over days that recorded their use counts.** Two
+    separate inflations live here. Sphere events reach back to July while
+    `data/minigame_log.json` starts in late August, so dividing one by the other
+    overstated `$oh` by 4.7x. And a board is not a use: `$ot 5` is one command that
+    spends five of the day's allowance and pays roughly five times a single use, so SP
+    *per board* is inflated by whatever multiplier the board was played at — live on
+    2026-09-03 that read `$ot` at 7,505 SP a board against a ~915 baseline. Rating per
+    use fixes both. A day enters the rate only when every board that day recorded its
+    `uses`; rows written before that field existed are excluded rather than counted as
+    one use each, which would be wrong for every batched command.
+    `mudae/minigame_stats.py` returns the window so the page never labels it "all-time".
+  - **Perk 8 and perk 9 refuse to generalise across accounts and servers.** Reported
+    2026-09-03: the page filtered to `all`/`all` by default, which is right for totals
+    and wrong for these two, because every (account, server) pairing has *its own* forty
+    perk-8 clicks and its own perk-9 spawns, each expiring separately at the UTC reset.
+    Laid on one tape, two accounts read as one account spending a budget nobody has —
+    invisible today only because testing runs on a single account and server. The page
+    now carries a **scope bar** (account × server, plus a `General` reset), the report
+    payload carries `scope.scoped`, and `_perk8_tape` / `_perk9_tape` return an empty
+    tape with `stats_index.TAPE_SCOPE_NOTE` unless *both* halves are pinned — half a
+    scope is not a scope, since a server hosts several accounts and an account plays
+    several servers. Everything else on the page still sums across everything, which is
+    what the general view is for. `gui/bridge.py` follows: the perk-9 cap and
+    `_daily_budget_status` now resolve their `$shop` and daily record from the **scope**
+    rather than from the Run target, so the page reads the account you picked instead of
+    the one that happens to be connected, and they abstain when the chosen server has no
+    single channel to read.
 - **GUI polish** — leftover layout / copy / empty-page work after the items above.
 
 ---
@@ -189,10 +298,13 @@ Pass over the running app after the rankings above. Items already listed earlier
 - ~~**The perk-9 daily click budget expired unspent, and the static colour list was why**~~ — `budget_aware` promises to spend all 20 clicks, dropping its bar to 0 once `r ≤ c`. It ended days at 17/20 because **`passes_sphere_reaction` applied `types_allowed` before the budget gate**. The live list omits `spB` and `spT`, **83.7%** of all spawns, so five spheres in six were thrown away before the DP ever saw them and dropping the bar to 0 changed nothing. The logs settle it: on every day that ended with clicks in hand, every sphere arriving after the last click was a `filter` skip, not a `budget` skip — Aug 20 threw away **22 live spawns with five clicks unspent**, not one of which reached the threshold code. Fixed by making the bar the only gate in budget mode (the Presets colour list is greyed out to say so); the static path with the toggle off is untouched.
 - ~~**…and `spawns_left` never decayed, so the bar never reached 0**~~ — the second half of the same failure, which had to be fixed with it or nothing changed. `estimate_opportunities_left` returned `pool − rolled`: a ceiling on *distinct characters*, not a forecast of *spawns that will happen*. The tail of a pool is effectively unrollable, so it plateaued and never fell to `clicks_left` — Aug 29 23:02 read `rolled 127/154` → 27 spawns left → bar 105 with 4 clicks in hand and 58 minutes on the clock. The other arm, `rolls_per_hour × hours_left + rolls_left`, was a **unit error** counting each roll as a spawn (~50× too big), so it never bound. Now an urn forecast, `(pool − rolled) × (1 − e^{−h₀ · rolls_left / pool})`, plus a forced spend-down in the last hour that holds regardless of the estimate. **`h₀` is measured per account, never shipped**: this account fits 0.37, but an account with the same 154-character pool and a fifth of the reach sees ~23 spawns a day, and 0.37 would leave it as over-strict as the bug did (bar 51.6 vs a correct 20.0). Cold start keeps today's behaviour rather than a stranger's number. `$us` rolls are excluded from the learning — a drain can clear a large slice of the pool in half an hour, and charging its characters to ordinary rolls would roughly treble the rate. Replaying the seven complete logged days: **82 clicks expired unspent → 13**, with SP up on every one of them (`scripts/perk9_bakeoff.py --from-logs`).
 - ~~**The daily reset left `rolled_today` at yesterday's count, and `$ohu8` suppressed the `$ohu9` that would have fixed it**~~ — caught live on **2026-09-02 00:01 UTC**: the macro clicked `:spB:` on the first two rolls of the new day, `EV bar 0 (20 left)`. Two causes, both needed. **(1)** `rollover_perk9_if_needed` cleared every perk-9 day counter except `perk9_rolled_today`, so the new day started reading `148/154` — six characters still rollable against 20 clicks, which is exactly the `r ≤ c` condition that puts the bar on the floor. It now clears to `0` (`None` stays `None`: "never measured" is not "none rolled"). **(2)** `$ohu` / `$ohu8` share the perk-9 daily record for the click counter and the refill, and `macro/perk8_runtime.py` merges their reply into it — but they carry no `(Perk 9) Rolled today` line. The `$ohu8` at 00:00:10 therefore stamped `updated_at` to the new day, `should_query_ohu9_on_refill` saw a record that was fresh for the day, and **`$ohu9` was never sent at all**. `rolled_synced_at` now tracks when the roll line itself was last read, separately from `updated_at`, and both that check and `apply_record_to_state` key off it. Before this change the static colour list hid the bug, since blue was never in `types_allowed`. Also fixed alongside: the learned arrival rate was never actually accumulating (`hazard_history: []` on a fully-played day), because a measured stretch only closed at the *next* `$ohu9` — about one a day, and that one spans the reset and is discarded. `Perk9Runtime.checkpoint_hazard` now banks the stretch once an hourly cycle off the local count, which is exact until the budget runs out.
+- ~~**`$bonus` and `$shop` were stored once per channel, so two accounts on one channel overwrote each other**~~ — both sheets describe the **connected account** (`$shop` is its ouroperk sheet; `$bonus` mixes server settings with its perks), but `ChannelProfile` held them as flat dicts and `apply_parsed` took no `account_id` — while `daily_resets`, the very next field, was already account-keyed with a comment saying so. The live config has **three accounts sharing `Key Server 0 / mudae-w`** and two channels holding genuinely different shops (`perk9_level` 10 vs 5), so whichever fetched last won and `macro/sheet_caps.py::apply_sheet_caps` fed the **wrong account's** `power_max_percent` / `perk9_click_max` / `perk9_sphere_value_pct` into `AccountState` — exactly the values the perk-8 reserve and the perk-9 EV bar run on for the rest of the day. `sheet_caps`'s own docstring already promised "a previous account or server cannot leak into the next run", which it could not keep with one slot per channel. Now `channel.bonus_by_account` / `shop_by_account` keyed by account id (`gui/sheet_store.py`, mirroring `macro/daily_store.py`). A sheet saved before the split is read back **for the main account only** and flagged `inferred` — the treatment `mudae/account_context.py::resolve_log_account` already gives pre-account log rows — and the first real fetch replaces it and clears the blob so it cannot be inferred twice. Every other account reads empty, which is honest: we do not know their sheets. `$settings` stays flat, correctly, since it is the server's rule sheet.
 - ~~**A minigame played by hand in the channel printed its whole board into the Run feed, as a claim**~~ — `is_custom_claim` calls a message a claim when it carries two bold names that are not kakera/sphere lines, and an `$oc` / `$oq` / `$ot` grid is a wall of bold prose ("You can click **5** times…", "**1 red sphere** to find…"). Mudae *edits* the same grid message after every click, so one hand-played game was a dozen identical 350-character `claim` lines in the feed: **17 in one minute** on 2026-09-02 00:00 UTC, 191 across the logs, and only ever in `hourly` sessions — a game the macro starts itself resolves as the reply to its own `$oc` and never reaches the classifier. The same misreading let a stray board satisfy `MacroActions.wait_for_claim`, which matches any `CLAIM` / `MARRIAGE`. Grids are now recognised first (`mudae/parsers/minigame.py`, `MessageKind.MINIGAME_BOARD`): Mudae, ten or more sphere buttons, and the board prose — the game drivers already read boards off the snapshot, so nothing needed the cells parsed. Fixed with it: the feed no longer falls back to `parsed.summary` when a message has no channel text of its own, which was printing the macro's placeholder `Claim · ? → ?` for character-info embeds (classification reads embeds, `parse_claim` reads only `content`, so it classified a claim it could then not name).
+- ~~**…and so did every other Mudae message that happened to match a heuristic**~~ — the same hole, one layer up, reported on 2026-09-03: while the user typed commands by hand in the run channel, the feed filled with `$ou`'s upgrade panel ("Upgrade the perks of the selected character…", **28 lines in under two minutes**) and a `Syntax: $kakeracopy …` reply. Recognising boards fixed boards; it could not fix the premise, which is that **a message kind decided by content heuristics is not evidence a message is an event**. Which heuristic admitted these two is not recoverable — raw message text is not kept — but both candidates are trivially satisfied by their shape: `is_sphere_click_message` asks only for a sphere emoji beside an `(n/m)` fraction, and an upgrade panel is full of both, while `is_custom_claim` still calls any two bold runs a claim, which a `**Syntax**: … **[Premium command]**` reply satisfies. The kind allowlist in `mudae/live_feed.py` then mirrored them, and the guard meant to stop this ("a claim we could not name") was toothless, since `parse_claim` names *whatever* two bold runs it finds. The gate is now **attribution**: a follow-up is mirrored only when it names the connected account, via the `username_matches_own` the statistics logs already require before recording a row (moved to `mudae/account_context.py`, since four modules had their own copy). `_OWNER_FIELDS` names the field per kind — `claimed_by` for kakera / sphere / react-denied, `winner` for claims — so a kind cannot be added to the feed without saying how it is attributed. Mudae prose names nobody, which is exactly why it is now dropped. Two consequences worth knowing: **edits are never mirrored at all** (a real follow-up is a new message; an edit is a panel or a board re-rendering, which is why one panel printed itself once per click), and with **no account names known nothing but rolls is mirrored** — an unattributable line is left out rather than printed on the chance it is ours. Roll cards cannot be attributed this way at all — nobody is named on an unclaimed roll — so they are no longer mirrored either: `macro/roll_cycle.py` already logs each card it rolls (after a button refresh, so the reacts are complete), which made the mirror's copy either a duplicate of that or a roll the user made by hand while the macro sat idle. A card in the feed now means the macro rolled it. Minigames are unaffected by the edit rule: a board was never mirrored (it is `MINIGAME_BOARD`, not a feed kind), and the play-by-play comes from the game drivers writing to the activity log directly, not from the message mirror.
 
 - ~~**`is_connected` was permanently True after the first connect**~~ — `_connected` was set by `on_ready` and cleared only by an explicit `disconnect()`, with **no `on_disconnect` handler**, so the flag never went false on its own. Every `if not self.is_connected: reconnect` guard in the tree was dead code. Caught by an `$ot` board on 2026-08-30 that took **five minutes for 22 clicks**: the grid arrived, then the gateway delivered *nothing* — no edits and no reward message — while HTTP kept working, so every click waited the full `edit_timeout` (~14s) and recovered by fetch. Not rate limiting: the four boards immediately before it ran 23–26 clicks in 45s each. Fixes: `is_connected` now consults `on_disconnect` / `on_resumed` and `client.is_closed()`; `ensure_connected()` waits for discord.py's own resume before escalating to a full reconnect; the monitor tracks `seconds_since_last_event()`; and `$ot` reconnects once a board when two acks have been fetch-recovered **and** the gateway has been silent for 25s+ (a busy channel keeps delivering, so a slow edit does not trigger it). **Still open:** only `$ot` consumes the stall hook — `$oh`/`$oc`/`$oq` would sit through the same stall, and there is no global watchdog for idle periods, when a zombie socket is indistinguishable from a quiet channel.
 - ~~**Button clicks swallowed every error**~~ — `ChannelMonitor.click_button` was `except Exception: return False`: no retry, no reconnect, no message. Caught the first Extra Chance `$ot` board, which stopped with six certain ships (220 free SP) on the grid and only `click failed — stopping` in the log. The reward total gives the mechanism away — `+1188` logged against 1042 of visible clicks, a difference of exactly one `spY (+146)`, on a cell the solver had just called a certain yellow — so **the interaction landed and paid out and only the reply was lost**. Clicks now retry (`_CLICK_ATTEMPTS`), refetch the message between attempts, reconnect on a dropped gateway, and record the reason on `monitor.last_transport_error` so the **session log** names it — `_emit_status` alone only reaches the GUI status bar, which nothing keeps; `is_transient_discord_error` gained 429 / rate limit / timeout / 500, none of which it previously considered retryable.
+- ~~**Minigames auto-played whenever a use happened to be visible, not at the two moments they should**~~ — caught live on **2026-09-02 23:59:57 UTC**, where a lone `$oc` fired three seconds before the reset and the rest of the batch ran at `00:00:18`–`00:03:39`. The stray game was the symptom; the cause is that `RollCycleEngine._maybe_play_daily_minigames` is reached from the top of **every** hourly cycle *and* from **every** scheduled wake, and its docstring's "once per daily cycle" was never actually enforced — so play-all ran whenever anything was spendable. Uses accrue all day (a chaos capture grants `$oc`; `kakera_reactor.py`'s "stored minigame uses — not played" line only logs the grant), and that particular `$oc`, earned at 20:01, became visible again when the hourly rolls-refill wake — which lands on the same clock tick as the UTC reset once a day — ran `$ohu8`, whose reply refreshes the cached `oh`/`oc`/`oq`/`ot` totals (`perk8_runtime.py::_query_ohu8`). **Automatic play is now limited to the only two moments it is wanted: macro start and the UTC daily reset.** The engine tracks `_minigames_played_for_day` (a Mudae day, `None` at construction so start is the first firing point) and gates on it; the play-all result decides whether the day is written off, so an `ohu failed` or a "no decision" return (not connected, a game already running, an exception) leaves the day open to retry rather than losing every use to one blip. There is deliberately **no** hold-off before the reset: the daily allowance is use-it-or-lose-it (bonus uses from chaos/perk 10 carry over, the refreshing set does not), so a macro started late should spend as much as it can before midnight rather than wait. The Run page's on-demand buttons (`ignore_daily_skip=True`) are untouched — every other play is the user's to trigger.
 
 ### Robustness (not wrong today, fail overnight)
 

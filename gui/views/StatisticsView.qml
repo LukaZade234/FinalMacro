@@ -11,6 +11,7 @@ Item {
     property int sectionIndex: 0
 
     readonly property var sections: [
+        { label: "Report", title: "Daily" },
         { label: "Soulmates", title: "Soulmates" },
         { label: "Kakera", title: "Kakera" },
         { label: "Spheres", title: "Spheres" },
@@ -19,6 +20,7 @@ Item {
     ]
 
     readonly property var sectionSources: [
+        "DailyReportView.qml",
         "SoulmatesView.qml",
         "KakeraView.qml",
         "SpheresView.qml",
@@ -72,7 +74,8 @@ Item {
             Item { Layout.fillWidth: true }
 
             Label {
-                text: sections[sectionIndex].title + " statistics"
+                text: sectionIndex === 0 ? "Daily report"
+                          : sections[sectionIndex].title + " statistics"
                 color: Theme.fgMuted
                 font.pixelSize: 11
             }

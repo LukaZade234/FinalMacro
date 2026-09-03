@@ -129,6 +129,30 @@ def sphere_base_sp(emoji: str | None) -> int:
     return int(SPHERE_BASE_SP.get(key, 0))
 
 
+# Display names for sphere colours. ``gui/SphereAssets.qml`` holds the QML twin
+# of this map along with the icons and chip colours; keep the two in step.
+SPHERE_LABELS: dict[str, str] = {
+    "spM": "Megasphere",
+    "spP": "Purple",
+    "spB": "Blue",
+    "spT": "Teal",
+    "spG": "Green",
+    "spY": "Yellow",
+    "spD": "Dark",
+    "spL": "Light",
+    "spO": "Orange",
+    "spR": "Red",
+    "sp": "Red",
+    "spW": "Rainbow",
+    "spU": "Hidden",
+}
+
+
+def sphere_label(emoji: str | None) -> str:
+    key = canonical_sphere_emoji(emoji)
+    return SPHERE_LABELS.get(key, key or "Unknown")
+
+
 KAKERA_EMOJIS = frozenset({
     "kakera",   # blue (default)
     "kakeraP",  # purple — free

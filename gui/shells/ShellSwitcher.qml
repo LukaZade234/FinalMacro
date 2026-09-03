@@ -11,13 +11,13 @@ import "../components"
     window and by scripts/ui_preview.py.
 
     A compact update notice sits above every layout; the full update UI lives
-    on Settings (page index 7).
+    on Settings (page index 9).
 */
 Item {
     id: switcher
 
     property int currentPage: 0
-    readonly property int settingsPageIndex: 7
+    readonly property int settingsPageIndex: 9
 
     onCurrentPageChanged: {
         if (currentPage === settingsPageIndex && App.updateAvailable)

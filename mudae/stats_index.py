@@ -155,6 +155,290 @@ def payload(
     return out
 
 
+REPORT_TREND_DAYS = 14
+REPORT_BASELINE_DAYS = 7
+
+
+def daily_report(
+    accounts_store: Any,
+    *,
+    date_key: str = "",
+    account: str = "all",
+    server: str = "all",
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """One UTC day rolled up across every kind, against its recent baseline.
+
+    The Statistics sub-views slice the cube by kind; this slices the same cells
+    by *day* instead, which is the shape you want when asking "how did
+    yesterday go" rather than "how is kakera trending".
+
+    ``delta_pct`` compares the day against the mean of the ``REPORT_BASELINE_DAYS``
+    days before it — not against all history, so a long-running account is judged
+    on its current pace. Days with no baseline report ``None`` rather than 0%,
+    because "no comparison" is not "no change".
+    """
+    from mudae import event_log
+
+    event_log.ensure_loaded()
+    main_id, main_name, account_by_id = defaults_from_store(accounts_store)
+    account = _norm_filter(account)
+    server = _norm_filter(server)
+    now = now or dt.datetime.now(dt.timezone.utc)
+
+    with _lock:
+        days = _report_days_unlocked(
+            account=account,
+            server=server,
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        )
+        target = str(date_key or "").strip()[:10]
+        if not target:
+            target = days[-1] if days else utc_date_key(now)
+
+        target_day = _parse_day(target)
+        baseline_days: list[str] = []
+        trend_days: list[str] = []
+        if target_day is not None:
+            for offset in range(1, REPORT_BASELINE_DAYS + 1):
+                baseline_days.append((target_day - dt.timedelta(days=offset)).isoformat())
+            for offset in range(REPORT_TREND_DAYS - 1, -1, -1):
+                trend_days.append((target_day - dt.timedelta(days=offset)).isoformat())
+
+        kinds: dict[str, Any] = {}
+        for kind in KINDS:
+            kinds[kind] = _report_kind_unlocked(
+                kind,
+                target=target,
+                baseline_days=baseline_days,
+                account=account,
+                server=server,
+                main_id=main_id,
+                main_name=main_name,
+                account_by_id=account_by_id,
+            )
+
+        trend = []
+        for day in trend_days:
+            row: dict[str, Any] = {"date": day}
+            for kind in KINDS:
+                row[kind] = _report_day_total_unlocked(
+                    kind,
+                    day=day,
+                    account=account,
+                    server=server,
+                    main_id=main_id,
+                    main_name=main_name,
+                    account_by_id=account_by_id,
+                )
+            trend.append(row)
+
+        for kind in KINDS:
+            kinds[kind]["all_time"] = _report_all_time(
+                kind,
+                target=target,
+                account=account,
+                server=server,
+                main_id=main_id,
+                main_name=main_name,
+                account_by_id=account_by_id,
+            )
+
+        matrix_args = dict(
+            day=target,
+            account=account,
+            server=server,
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        )
+        # Kakera types only exist on clicks, so the colour split is taken over
+        # clicks alone — $bku payouts and $dk carry no colour at all.
+        breakdowns = {
+            "kakera": _report_matrix("kakera", only_method="kakera_click", **matrix_args),
+            "sphere": _report_matrix("sphere", **matrix_args),
+            "key": _report_matrix("key", **matrix_args),
+        }
+
+        options = _filter_options_unlocked(
+            "kakera",
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        )
+
+    # Outside the lock: these read the raw event lists rather than the cube,
+    # because the cube keeps neither the hour an event landed nor its order.
+    row_args = dict(
+        account=account,
+        server=server,
+        main_id=main_id,
+        main_name=main_name,
+        account_by_id=account_by_id,
+    )
+    rows = {kind: _day_rows(kind, target, **row_args) for kind in KINDS}
+
+    # Perk 8 and perk 9 are *per account, per server* allowances: every pairing
+    # gets its own forty kakera clicks and its own sphere spawns, and each
+    # expires on its own at the UTC reset. Laying two of them on one tape reads
+    # as a single account spending a budget nobody has, so the tapes are drawn
+    # only for a report narrowed to one account on one server.
+    scoped = account != "all" and server != "all"
+
+    from mudae import minigame_stats
+
+    return {
+        "date": target,
+        "available_days": days,
+        "kinds": kinds,
+        "trend": trend,
+        "breakdowns": breakdowns,
+        "hourly": {
+            "kakera_by_method": _hourly(rows["kakera"], "kakera", split_method=True),
+            "sphere": _hourly(rows["sphere"], "sphere", split_method=False),
+            "key": _hourly(rows["key"], "key", split_method=False),
+        },
+        "tapes": {
+            "perk8": _perk8_tape(rows["kakera"], scoped=scoped),
+            "perk9": _perk9_tape(rows["sphere"], scoped=scoped),
+        },
+        "scope": {"account": account, "server": server, "scoped": scoped},
+        "soulmates": _soulmate_rows(rows["soulmate"]),
+        "minigames": minigame_stats.daily_yield(target, account=account, server=server),
+        "filter_options": {
+            "accounts": options.get("accounts", []),
+            "servers": options.get("servers", []),
+        },
+    }
+
+
+def _report_days_unlocked(
+    *,
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+) -> list[str]:
+    seen: set[str] = set()
+    for kind in KINDS:
+        for key in _cells[kind]:
+            if not key[0]:
+                continue
+            if not _cell_matches(
+                kind,
+                key,
+                account=account,
+                server=server,
+                method="all",
+                type_id="all",
+                main_id=main_id,
+                main_name=main_name,
+                account_by_id=account_by_id,
+            ):
+                continue
+            seen.add(key[0])
+    return sorted(seen)
+
+
+def _report_day_total_unlocked(
+    kind: str,
+    *,
+    day: str,
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+) -> int:
+    total = 0
+    for key, cell in _cells[kind].items():
+        if key[0] != day:
+            continue
+        if not _cell_matches(
+            kind,
+            key,
+            account=account,
+            server=server,
+            method="all",
+            type_id="all",
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        ):
+            continue
+        total += cell[0] if kind != "soulmate" else cell[1]
+    return total
+
+
+def _report_kind_unlocked(
+    kind: str,
+    *,
+    target: str,
+    baseline_days: list[str],
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+) -> dict[str, Any]:
+    by_method: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    total = 0
+    count = 0
+    baseline_lookup = set(baseline_days)
+    baseline_total = 0
+    baseline_seen: set[str] = set()
+
+    for key, cell in _cells[kind].items():
+        day = key[0]
+        on_target = day == target
+        on_baseline = day in baseline_lookup
+        if not on_target and not on_baseline:
+            continue
+        if not _cell_matches(
+            kind,
+            key,
+            account=account,
+            server=server,
+            method="all",
+            type_id="all",
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        ):
+            continue
+        # Soulmates have no amount — the row itself is the event.
+        amount = cell[0] if kind != "soulmate" else cell[1]
+        if on_target:
+            total += amount
+            count += cell[1]
+            if key[3]:
+                by_method[key[3]] = by_method.get(key[3], 0) + amount
+            if key[4]:
+                by_type[key[4]] = by_type.get(key[4], 0) + amount
+        else:
+            baseline_total += amount
+            baseline_seen.add(day)
+
+    average = baseline_total / len(baseline_seen) if baseline_seen else None
+    delta_pct: float | None = None
+    if average:
+        delta_pct = round((total - average) / average * 100.0, 1)
+
+    return {
+        "total": total,
+        "count": count,
+        "average": round(average, 1) if average is not None else None,
+        "delta_pct": delta_pct,
+        "baseline_days": len(baseline_seen),
+        "by_method": _labeled_series(kind, "method", by_method),
+        "by_type": _labeled_series(kind, "type", by_type),
+    }
+
+
 def _clear_unlocked() -> None:
     for kind in KINDS:
         _cells[kind] = {}
@@ -498,6 +782,17 @@ def _label_for(kind: str, field: str, item_id: str) -> str:
         from mudae.key_log import key_type_label
 
         return key_type_label(item_id)
+    if kind == "kakera" and field == "type":
+        from mudae.constants import KAKERA_INFO
+
+        info = KAKERA_INFO.get(item_id)
+        if info:
+            return str(info.get("label") or item_id)
+    if kind == "sphere" and field == "type":
+        from mudae.constants import sphere_label
+
+        if item_id:
+            return sphere_label(item_id)
     if not item_id:
         return "Unknown"
     return item_id.replace("_", " ").title()
@@ -731,3 +1026,316 @@ def _enricher(kind: str):
     from mudae.soulmate_log import enrich_entry
 
     return enrich_entry
+
+
+# --- daily report detail ------------------------------------------------------
+#
+# The cube is aggregated per (day, account, guild, method, type), which covers
+# every total and share the report needs. Two things it deliberately does not
+# keep are the time an event happened and the order events arrived in, so the
+# hourly panels and the click tapes read the day's raw events instead. One day
+# is a cheap scan over an already-loaded list.
+
+# Mudae grants 40 kakera clicks a day on perk-8 characters
+# (docs/MUDAE_LOGIC.md, "Perk 8"). Purple is free power on every roll and cannot
+# spawn on a perk-8 character, so a purple click never consumes a slot.
+PERK8_DAILY_CLICKS = 40
+PERK8_FREE_COLOURS = frozenset({"kakeraP"})
+
+
+def _entry_hour(entry: dict[str, Any]) -> int | None:
+    raw = str(entry.get("time") or "")
+    if len(raw) >= 2 and raw[:2].isdigit():
+        hour = int(raw[:2])
+        return hour if 0 <= hour < 24 else None
+    stamp = parse_iso_datetime(str(entry.get("recorded_at") or ""))
+    return stamp.astimezone(dt.timezone.utc).hour if stamp is not None else None
+
+
+def _entry_sort_key(entry: dict[str, Any]) -> str:
+    """Order within a day: the clock time, falling back to the full stamp."""
+    return str(entry.get("time") or entry.get("recorded_at") or "")
+
+
+def _raw_matches(
+    entry: dict[str, Any],
+    *,
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+) -> bool:
+    """Account/server filtering for a raw event, matching ``_cell_matches``."""
+    if account != "all":
+        resolved, _name, _inferred = _resolve_account(
+            str(entry.get("account_id") or ""),
+            str(entry.get("account_name") or ""),
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        )
+        if resolved != account:
+            return False
+    if server != "all" and _guild_key(entry) != server:
+        return False
+    return True
+
+
+def _day_rows(
+    kind: str,
+    day: str,
+    *,
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+) -> list[dict[str, Any]]:
+    from mudae import event_log
+
+    rows = [
+        entry
+        for entry in event_log.events(kind)
+        if _date_key(entry) == day
+        and _raw_matches(
+            entry,
+            account=account,
+            server=server,
+            main_id=main_id,
+            main_name=main_name,
+            account_by_id=account_by_id,
+        )
+    ]
+    rows.sort(key=_entry_sort_key)
+    return rows
+
+
+def _report_all_time(
+    kind: str,
+    *,
+    target: str,
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+) -> dict[str, Any]:
+    """The day against the mean of every day that saw activity.
+
+    The mean is over *active* days, not calendar days: a gap where the macro was
+    not running is not a zero-earning day, and averaging it in would quietly
+    flatter every day that follows.
+    """
+    per_day: dict[str, int] = {}
+    for key, cell in _cells[kind].items():
+        day = key[0]
+        if not day:
+            continue
+        if not _cell_matches(
+            kind, key, account=account, server=server, method="all", type_id="all",
+            main_id=main_id, main_name=main_name, account_by_id=account_by_id,
+        ):
+            continue
+        amount = cell[0] if kind != "soulmate" else cell[1]
+        per_day[day] = per_day.get(day, 0) + amount
+
+    total = per_day.get(target, 0)
+    others = {day: value for day, value in per_day.items() if day != target}
+    average = (sum(others.values()) / len(others)) if others else None
+    delta = None
+    if average:
+        delta = round((total - average) / average * 100.0, 1)
+    return {
+        "average": round(average, 1) if average is not None else None,
+        "delta_pct": delta,
+        "active_days": len(per_day),
+    }
+
+
+def _report_matrix(
+    kind: str,
+    *,
+    day: str,
+    account: str,
+    server: str,
+    main_id: str,
+    main_name: str,
+    account_by_id: dict[str, Any],
+    only_method: str = "",
+) -> dict[str, list[dict[str, Any]]]:
+    """Amount **and** event count per method and per type for one day.
+
+    ``only_method`` narrows the type breakdown, which is what makes the kakera
+    colour split honest: ``$bku`` payouts and ``$dk`` carry no kakera type at
+    all, so a colour share has to be taken over clicks alone rather than over
+    the day's whole take.
+    """
+    methods: dict[str, list[int]] = {}
+    types: dict[str, list[int]] = {}
+    for key, cell in _cells[kind].items():
+        if key[0] != day:
+            continue
+        if not _cell_matches(
+            kind, key, account=account, server=server, method="all", type_id="all",
+            main_id=main_id, main_name=main_name, account_by_id=account_by_id,
+        ):
+            continue
+        amount = cell[0] if kind != "soulmate" else cell[1]
+        if key[3]:
+            row = methods.setdefault(key[3], [0, 0])
+            row[0] += amount
+            row[1] += cell[1]
+        if key[4] and (not only_method or key[3] == only_method):
+            row = types.setdefault(key[4], [0, 0])
+            row[0] += amount
+            row[1] += cell[1]
+
+    def _rows(field: str, source: dict[str, list[int]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": item_id,
+                "label": _label_for(kind, field, item_id),
+                "amount": pair[0],
+                "count": pair[1],
+            }
+            for item_id, pair in sorted(
+                source.items(), key=lambda pair: pair[1][0], reverse=True
+            )
+        ]
+
+    return {"by_method": _rows("method", methods), "by_type": _rows("type", types)}
+
+
+def _hourly(rows: list[dict[str, Any]], kind: str, *, split_method: bool) -> Any:
+    if not split_method:
+        out = [0] * 24
+        for entry in rows:
+            hour = _entry_hour(entry)
+            if hour is None:
+                continue
+            out[hour] += _amount(kind, entry)
+        return out
+
+    buckets: dict[str, list[int]] = {}
+    for entry in rows:
+        hour = _entry_hour(entry)
+        if hour is None:
+            continue
+        method, _type_id = _method_and_type(kind, entry)
+        buckets.setdefault(method, [0] * 24)[hour] += _amount(kind, entry)
+    return [
+        {"id": method, "label": _label_for(kind, "method", method), "values": values}
+        for method, values in sorted(
+            buckets.items(), key=lambda pair: sum(pair[1]), reverse=True
+        )
+    ]
+
+
+# Said in the payload rather than in the view, so every shell that draws a tape
+# gives the same reason for an empty one.
+TAPE_SCOPE_NOTE = (
+    "Perk 8 and perk 9 have their own daily allowance on every account and "
+    "server, so they cannot be added up. Pick one account and one server above "
+    "to see the day's clicks."
+)
+
+
+def _unscoped_tape() -> dict[str, Any]:
+    """An empty tape that says why it is empty, not a tape of zero clicks."""
+    return {
+        "slots": [],
+        "cap": None,
+        "scoped": False,
+        "exact": False,
+        "note": TAPE_SCOPE_NOTE,
+    }
+
+
+def _perk8_tape(rows: list[dict[str, Any]], *, scoped: bool = True) -> dict[str, Any]:
+    """The colours that plausibly spent the day's 40 perk-8 clicks.
+
+    The log does not mark *which* click consumed a perk-8 slot, so this is an
+    approximation and the payload says so. Purple is excluded because it cannot
+    spawn on a perk-8 character and so never takes one; what is left is taken in
+    time order up to the daily budget.
+
+    ``scoped`` is false when the report covers more than one account or server,
+    where there is no single budget to lay these clicks against.
+    """
+    if not scoped:
+        return _unscoped_tape()
+    clicks = [
+        entry for entry in rows
+        if _method_and_type("kakera", entry)[0] == "kakera_click"
+        and str(entry.get("kakera_type") or "") not in PERK8_FREE_COLOURS
+        and str(entry.get("kakera_type") or "")
+    ]
+    slots = [
+        {
+            "id": str(entry.get("kakera_type") or ""),
+            "label": _label_for("kakera", "type", str(entry.get("kakera_type") or "")),
+            "amount": _amount("kakera", entry),
+            "time": str(entry.get("time") or ""),
+        }
+        for entry in clicks[:PERK8_DAILY_CLICKS]
+    ]
+    return {
+        "slots": slots,
+        "cap": PERK8_DAILY_CLICKS,
+        "candidates": len(clicks),
+        "exact": False,
+        "scoped": True,
+        "note": (
+            "Purple is excluded because it cannot spawn on a perk-8 character. "
+            "The log does not record which click consumed a slot, so these are "
+            "the day's first non-purple reactions."
+        ),
+    }
+
+
+def _perk9_tape(rows: list[dict[str, Any]], *, scoped: bool = True) -> dict[str, Any]:
+    """Every sphere button clicked that day, in the order they were clicked.
+
+    Empty when the report is not narrowed to one account on one server: the
+    spawns of two accounts interleaved would not be either account's day.
+    """
+    if not scoped:
+        return _unscoped_tape()
+    from mudae.constants import SPHERE_TRANSFORM_EMOJIS
+
+    slots = []
+    for entry in rows:
+        if str(entry.get("source") or "") != "sphere_click":
+            continue
+        sphere = canonical_sphere_emoji(str(entry.get("sphere_type") or ""))
+        resolved = [
+            canonical_sphere_emoji(str(item))
+            for item in (entry.get("sphere_resolved") or [])
+            if item
+        ]
+        slots.append({
+            "id": sphere,
+            "label": _label_for("sphere", "type", sphere),
+            "amount": _amount("sphere", entry),
+            "time": str(entry.get("time") or ""),
+            # A transform is spent as one colour and pays out as others. The tape
+            # shows the sphere that was clicked; what it became is named on hover,
+            # so the tile stays a record of what was pressed.
+            "transform": sphere in SPHERE_TRANSFORM_EMOJIS,
+            "resolved": resolved,
+        })
+    return {"slots": slots, "cap": None, "exact": True, "scoped": True}
+
+
+def _soulmate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "character": str(entry.get("character_name") or "").strip(),
+            "series": str(entry.get("series") or "").strip(),
+            "time": str(entry.get("time") or "")[:5],
+            "server": _guild_key(entry),
+            "starwish": bool(entry.get("starwish")),
+        }
+        for entry in rows
+    ]

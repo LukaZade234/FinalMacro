@@ -20,7 +20,8 @@ Item {
     RunModel { id: run }
 
     readonly property var tabs: [
-        "run", "accounts", "servers", "presets", "stats", "debug", "utilities", "settings"
+        "run", "accounts", "servers", "presets", "mudae", "spheres", "advisor",
+        "stats", "debug", "settings"
     ]
 
     Rectangle {

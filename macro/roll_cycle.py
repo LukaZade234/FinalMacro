@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -47,7 +48,7 @@ from macro.us_stop import (
 )
 from mudae.discord_errors import is_fatal_runtime_error
 from mudae.macro_activity import enter_macro_activity, exit_macro_activity
-from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode
+from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode, mudae_daily_date
 from macro.kakera_reactor import KakeraReactor
 from macro.chaos_followup import chaos_extra_rolls, merge_tu_hourly_rolls
 from macro.perk8_runtime import Perk8Runtime
@@ -123,7 +124,7 @@ class RollCycleEngine:
         account_id: str = "",
         on_priority_pause: Callable[[], Any] | None = None,
         priority_wake_hint: Callable[[], float | None] | None = None,
-        play_daily_minigames: Callable[[], Awaitable[None]] | None = None,
+        play_daily_minigames: Callable[[], Awaitable[dict[str, Any] | None]] | None = None,
         notification_connection_held: Callable[[], bool] | None = None,
         minigames_busy: Callable[[], bool] | None = None,
     ) -> None:
@@ -137,6 +138,9 @@ class RollCycleEngine:
         self._on_priority_pause = on_priority_pause
         self._priority_wake_hint = priority_wake_hint
         self._play_daily_minigames = play_daily_minigames
+        # The Mudae day auto-play has already covered. ``None`` until the first
+        # attempt, which is what makes macro start one of the two firing points.
+        self._minigames_played_for_day: dt.date | None = None
         self._notification_connection_held = notification_connection_held
         self._minigames_busy = minigames_busy
         self._daily_get = daily_resets_get
@@ -513,13 +517,37 @@ class RollCycleEngine:
         await self._perk9.maybe_refresh()
 
     async def _maybe_play_daily_minigames(self) -> None:
-        """Spend remaining ``$oh`` / ``$oc`` / ``$oq`` once per daily cycle."""
+        """Spend the day's minigames at macro start and at the UTC reset only.
+
+        Those are the only two moments minigames may start on their own; every
+        other play is the user's to trigger from the Run page. This method is
+        reached from the top of every hourly cycle *and* from every scheduled
+        wake, so without the day gate below it fires whenever a use happens to
+        be visible — which is how a ``$oc`` earned from a chaos capture at
+        20:01 got played three seconds before midnight instead of waiting for
+        the reset batch.
+
+        Uses accrue through the day (chaos grants ``$oc``, perk 10 grants
+        ``$oq`` / ``$ot``), so there is nearly always something spendable; that
+        is a reason to leave them alone, not an invitation to spend them.
+        """
         cb = self._play_daily_minigames
         if cb is None or self._stop.is_set():
             return
         if self._discord_commands_blocked():
             return
-        await cb()
+        today = mudae_daily_date(dt.datetime.now(dt.timezone.utc))
+        if self._minigames_played_for_day == today:
+            return
+        result = await cb()
+        if result is None:
+            # Never got as far as a decision (not connected, a game already
+            # running, or it raised). Leave the day open so the next cycle
+            # retries rather than losing the whole day's uses to one blip.
+            return
+        if result.get("reason") == "ohu failed":
+            return
+        self._minigames_played_for_day = today
 
     async def _roll_hourly_normal_segment(
         self,

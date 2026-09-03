@@ -236,15 +236,15 @@ Item {
 
                     PresetRulePill {
                         label: "Claim"
-                        enabled: runRoot.blockEnabled("character_claim")
+                        ruleActive: runRoot.blockEnabled("character_claim")
                     }
                     PresetRulePill {
                         label: "Kakera"
-                        enabled: runRoot.blockEnabled("kakera_reaction")
+                        ruleActive: runRoot.blockEnabled("kakera_reaction")
                     }
                     PresetRulePill {
                         label: "Spheres"
-                        enabled: runRoot.blockEnabled("sphere_reaction")
+                        ruleActive: runRoot.blockEnabled("sphere_reaction")
                     }
                 }
             }

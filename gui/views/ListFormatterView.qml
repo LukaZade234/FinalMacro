@@ -4,8 +4,13 @@ import QtQuick.Layouts
 import gui 1.0
 import "../components"
 
+/*
+    Advisor › Formatter — the list formatter, moved verbatim from the Utilities
+    page when that page was absorbed into this hub. Same `mudae/list_formatter.py`
+    behind it, same bridge slot, same tests.
+*/
 Item {
-    id: utilitiesRoot
+    id: formatterRoot
     clip: true
 
     Rectangle {
@@ -28,7 +33,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: "Helper tools for Mudae workflows."
+            text: "Paste Mudae list output — wishlists, $top, kakera rankings — and get the names back joined with $ for commands like $tt."
             color: Theme.fgMuted
             font.pixelSize: 11
             wrapMode: Text.WordWrap
@@ -36,7 +41,7 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.max(420, utilitiesRoot.height - 80)
+            Layout.preferredHeight: Math.max(420, formatterRoot.height - 80)
             title: "List formatter"
             titleSize: 14
             fillContentVertically: true
@@ -61,7 +66,7 @@ Item {
                     ThemedButton {
                         text: "Format"
                         accent: true
-                        onClicked: utilitiesRoot.refreshListOutput()
+                        onClicked: formatterRoot.refreshListOutput()
                     }
 
                     ThemedButton {

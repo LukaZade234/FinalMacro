@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 # Display name when a log row has no account and no owner to copy.
@@ -9,6 +10,25 @@ UNKNOWN_ACCOUNT_NAME = "Unknown"
 # Old app profile was named "Default" while the Discord account was already
 # lukazade234; remap that placeholder to the current store name.
 _LEGACY_PLACEHOLDER_NAMES = frozenset({"default"})
+
+
+def username_matches_own(
+    claimed_by: str | None,
+    own_usernames: Sequence[str],
+) -> bool:
+    """True when a Mudae line names the connected account.
+
+    Mudae writes the account's own display name into every line that is
+    actually about it — a kakera or sphere payout, a claim, a react denial —
+    so this is how the statistics logs and the Run live feed tell the
+    account's activity apart from everyone else's, and from Mudae prose that
+    names nobody at all. An empty ``own_usernames`` is "we cannot tell", which
+    is a reason to leave a row out rather than to let everything through.
+    """
+    if not claimed_by or not own_usernames:
+        return False
+    norm = claimed_by.strip().lower()
+    return any(name.strip().lower() == norm for name in own_usernames if name)
 
 
 def account_map(accounts: list[Any]) -> dict[str, Any]:

@@ -21,8 +21,8 @@ from mudae.types import MessageKind, MudaeMessageSnapshot
 
 def test_minigame_source_ids():
     assert minigame_source("oh") == "minigame_oh"
-    assert source_label("minigame_oc") == "$oc minigame"
-    assert source_label("perk10") == "Perk 10 (invested spheres)"
+    assert source_label("minigame_oc") == "$oc"
+    assert source_label("perk10") == "Perk 10"
     assert "oc" in MINIGAME_IDS
 
 

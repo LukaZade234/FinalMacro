@@ -6,7 +6,10 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-from mudae.account_context import resolve_log_account
+# ``username_matches_own`` is re-exported: the logs, the live feed and the
+# key tracker all have to answer "is this line about our account?" the same
+# way, so there is one implementation of it.
+from mudae.account_context import resolve_log_account, username_matches_own
 from mudae.clock import utc_date_key
 from mudae.constants import canonical_sphere_emoji
 from mudae import event_log
@@ -19,12 +22,13 @@ _recording_account_name: str = ""
 
 # ``minigame_<id>`` uses ids from ``MINIGAME_IDS`` (oh, oc, oq, …).
 SOURCE_LABELS: dict[str, str] = {
-    "sphere_click": "Sphere button click",
-    "kakera_bonus": "Bonus from kakera click",
-    "perk10": "Perk 10 (invested spheres)",
-    "minigame_oh": "$oh minigame",
-    "minigame_oc": "$oc minigame",
-    "minigame_oq": "$oq minigame",
+    "sphere_click": "Sphere button",
+    "kakera_bonus": "Kakera click",
+    "perk10": "Perk 10",
+    "minigame_oh": "$oh",
+    "minigame_oc": "$oc",
+    "minigame_oq": "$oq",
+    "minigame_ot": "$ot",
 }
 
 MINIGAME_IDS = frozenset({"oh", "oc", "oq"})
@@ -37,8 +41,9 @@ def source_label(source: str | None) -> str:
     if key in SOURCE_LABELS:
         return SOURCE_LABELS[key]
     if key.startswith("minigame_"):
-        game = key.removeprefix("minigame_").upper()
-        return f"${game} minigame"
+        # Kept short on purpose: these sit in chart tiles and legends where a
+        # trailing " minigame" is the first thing to be clipped.
+        return "$" + key.removeprefix("minigame_").lower()
     return key.replace("_", " ").title()
 
 
@@ -79,13 +84,6 @@ def clear_recording_account() -> None:
 def recording_account_id() -> str:
     """Account new events are being logged under, for reading its own rows back."""
     return _recording_account_id
-
-
-def username_matches_own(claimed_by: str | None, own_usernames: list[str]) -> bool:
-    if not claimed_by or not own_usernames:
-        return False
-    norm = claimed_by.strip().lower()
-    return any(name.strip().lower() == norm for name in own_usernames if name)
 
 
 def normalize_source(entry: dict[str, Any]) -> str:

@@ -421,10 +421,10 @@ on hourly rolls.
 ## Minigames
 
 `$ohu` reports daily uses left / stored for `$oh`, `$oc`, `$oq`, `$ot`.
-**Play all minigames** queries `$ohu`, then spends `$oh` / `$oc` / `$oq`.
-`$ot` has its own **Play $ot** button but is left out of play-all and of
-the after-refill auto-play on purpose (see the `$ot` section below). Extra `$oq` / `$ot` from perk 10 on
-the first `$oh` of the day are counted (play-all spends the extra `$oq`).
+**Play all minigames** queries `$ohu`, then spends `$oh` / `$oc` / `$oq` / `$ot`.
+`$ot` also keeps its own **Play $ot** button for an on-demand single play.
+Extra `$oq` / `$ot` from perk 10 on the first `$oh` of the day are counted and
+play-all spends both.
 Playing a game with no uses left gets
 `You don't have enough $oh for today. Time to wait before the refill: 3h 08 min.`
 (`$oc` / `$oq` / `$ot` in place of `$oh`); the activity log reports
@@ -791,6 +791,23 @@ skip `$ohu` / play-all until refill. Perk 9 click counts (`daily_resets.perk9`)
 are restored for the Run tab; sphere reacts do not skip at the cap — Mudae
 stops spawning those buttons.
 
+**Minigames start themselves at exactly two moments: when the hourly macro is
+started, and at the UTC daily reset.** Every other play is the user's to
+trigger from the Run page. This is a deliberate limit, not a consequence of
+when uses happen to be available: uses accrue all day — a chaos capture grants
+a `$oc`, perk 10 grants `$oq` / `$ot` on an `$oh` board — so there is almost
+always something spendable, and `RollCycleEngine._maybe_play_daily_minigames`
+is reached from every hourly cycle and every scheduled wake. It gates on
+`_minigames_played_for_day` so those extra opportunities pass without playing.
+Anything left unspent waits for the next reset batch rather than being spent at
+the first opportunity that notices it.
+
+There is deliberately **no** hold-off in the closing minutes before the reset.
+The daily allowance is use-it-or-lose-it — the refreshing set is forfeited at
+midnight, while bonus uses (chaos grants, perk 10) carry over — so a macro
+started late in the day should spend as much as it can before the reset rather
+than wait for it.
+
 ---
 
 
@@ -988,8 +1005,8 @@ not as `$oh` minigame earnings.
 - Extra `$oq` **/** `$ot` **uses** are stored on that `$oh` session
 (`oq_bonus` / `ot_bonus`). Statistics → Minigames → `$oh` shows the
 totals. Play-all spends the extra `$oq` (like bonus `$oc` from hidden
-clicks). Extra `$ot` is counted in `$ohu` availability but play-all never
-spends it — `$ot` is the **Play $ot** button only.
+clicks). Extra `$ot` is counted in `$ohu` availability and play-all spends it
+like any other minigame use.
 
 ---
 
@@ -1046,7 +1063,12 @@ payload and flattens every `content` field before parsing.
 
 Ten perks, levels 0–10 (`[MAX]` = 10). Continuation lines without a level
 tag belong to the previous perk (OP6 omega-key chance, OP9 sphere-value %).
-Stored on the channel profile like `$bonus` (`App.fetchShop`). Read-only —
+Stored on the channel profile like `$bonus`, but **keyed by account id**
+(`channel.shop_by_account`, `gui/sheet_store.py`) because both sheets describe
+the connected account, not the server — storing one per channel let a second
+account on the same channel overwrite the first's power max and perk-9 cap.
+A sheet saved before that split is read back for the main account only and
+flagged `inferred` (`App.fetchShop`). Read-only —
 do not send `$shoprefund`.
 
 
@@ -1163,8 +1185,6 @@ failed `$tu` and a failed roll, in both the hourly and the `$us` cycle.
 - Slash-command rolls.
 - Multi-account concurrent connections (config supports it; runtime is
 one Discord session — see Phase D in `ARCHITECTURE.md`).
-- Playing `$ot` **automatically**. There is a **Play $ot** button, but it is
-never part of play-all and never fires after the daily refill.
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`
 (parsers are trusted for storage; power max and perk 9 cap are the
 exceptions already wired).

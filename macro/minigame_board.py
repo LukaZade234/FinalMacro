@@ -259,6 +259,7 @@ def build_session(
     oq_bonus: int = 0,
     ot_bonus: int = 0,
     spheres_bonus: int = 0,
+    uses: int = 1,
 ) -> dict[str, Any]:
     normalized_board = [normalize_sphere_emoji(cell) for cell in board]
     while len(normalized_board) < GRID_CELLS:
@@ -284,6 +285,9 @@ def build_session(
         )
     return {
         "game": game_key,
+        # One command can consume several daily uses ($ot 5 is one board and
+        # five uses), so the two have to be counted separately.
+        "uses": max(1, int(uses)),
         "clicks": list(clicks),
         "board": normalized_board[:GRID_CELLS],
         "won": any(click_is_win(click) for click in clicks),

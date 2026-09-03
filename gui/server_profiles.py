@@ -6,6 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from gui.sheet_store import SheetRead, clean_by_account, read_sheet, write_sheet
 from mudae.parsers.bonus import merge_bonus_fields
 
 
@@ -21,8 +22,15 @@ class ChannelProfile:
     guild_id: str | None = None
     guild_name: str | None = None
     settings: dict[str, Any] = field(default_factory=dict)
+    # ``$settings`` is the server's rule sheet, so it stays flat on the channel.
+    # ``$bonus`` / ``$shop`` belong to the *connected account* and are keyed by
+    # account id below. The bare ``bonus`` / ``shop`` dicts are the pre-split
+    # layout, kept only so an old profile can still be read once — see
+    # ``gui.sheet_store``.
     bonus: dict[str, Any] = field(default_factory=dict)
     shop: dict[str, Any] = field(default_factory=dict)
+    bonus_by_account: dict[str, Any] = field(default_factory=dict)
+    shop_by_account: dict[str, Any] = field(default_factory=dict)
     settings_summary: str = ""
     bonus_summary: str = ""
     shop_summary: str = ""
@@ -41,6 +49,8 @@ class ChannelProfile:
             settings=dict(data.get("settings") or {}),
             bonus=dict(data.get("bonus") or {}),
             shop=dict(data.get("shop") or {}),
+            bonus_by_account=clean_by_account(data.get("bonus_by_account")),
+            shop_by_account=clean_by_account(data.get("shop_by_account")),
             settings_summary=str(data.get("settings_summary") or ""),
             bonus_summary=str(data.get("bonus_summary") or ""),
             shop_summary=str(data.get("shop_summary") or ""),
@@ -86,6 +96,36 @@ class ServerProfileStore:
         self.servers: list[ServerProfile] = []
         self.active_server_id: str = ""
         self.active_channel_id: str = ""
+        # Who a pre-split ``$bonus`` / ``$shop`` blob is credited to. Set by the
+        # GUI from the accounts store; blank means no sheet is ever inferred.
+        self.main_account_id: str = ""
+
+    def account_sheet(
+        self,
+        channel: ChannelProfile,
+        kind: str,
+        *,
+        account_id: str,
+    ) -> SheetRead:
+        """One account's ``$bonus`` / ``$shop`` for a channel.
+
+        Falls back to the pre-split blob for the main account only, flagged
+        ``inferred``; see :mod:`gui.sheet_store`.
+        """
+        legacy = channel.bonus if kind == "bonus" else channel.shop
+        legacy_summary = (
+            channel.bonus_summary if kind == "bonus" else channel.shop_summary
+        )
+        by_account = (
+            channel.bonus_by_account if kind == "bonus" else channel.shop_by_account
+        )
+        return read_sheet(
+            by_account,
+            account_id=account_id,
+            legacy_fields=legacy,
+            legacy_summary=legacy_summary,
+            main_account_id=self.main_account_id,
+        )
 
     def load_from_settings(self, data: dict[str, Any]) -> None:
         raw_servers = data.get("servers") or []
@@ -270,6 +310,7 @@ class ServerProfileStore:
         guild_id: int | None = None,
         guild_name: str | None = None,
         channel_name: str | None = None,
+        account_id: str = "",
     ) -> None:
         found = self.find_channel_by_discord_id(discord_channel_id)
         if found:
@@ -299,11 +340,42 @@ class ServerProfileStore:
             channel.settings = dict(fields)
             if summary:
                 channel.settings_summary = summary
-        elif kind == "bonus":
-            channel.bonus = merge_bonus_fields(channel.bonus, fields)
-            if summary:
-                channel.bonus_summary = summary
-        elif kind == "shop":
-            channel.shop = dict(fields)
-            if summary:
-                channel.shop_summary = summary
+        elif kind in ("bonus", "shop"):
+            # No account to credit (no accounts configured yet, or a fetch off a
+            # target that never resolved) means the sheet is genuinely
+            # unattributed, so it goes to the unattributed slot rather than
+            # being dropped — it reads back as ``inferred``.
+            owner = str(account_id or "").strip() or self.main_account_id
+            if kind == "bonus":
+                # ``$bonus`` arrives in two parts (1/2 then 2/2), so merge onto
+                # what *this account* already has, never onto another's.
+                previous = self.account_sheet(channel, "bonus", account_id=owner)
+                merged = merge_bonus_fields(dict(previous.fields), fields)
+                if not owner:
+                    channel.bonus = merge_bonus_fields(channel.bonus, fields)
+                    if summary:
+                        channel.bonus_summary = summary
+                else:
+                    channel.bonus_by_account = write_sheet(
+                        channel.bonus_by_account,
+                        account_id=owner,
+                        fields=merged,
+                        summary=summary or previous.summary,
+                    )
+                    # The pre-split blob is superseded for this account; leaving
+                    # it would let the same sheet be inferred a second time.
+                    channel.bonus = {}
+                    channel.bonus_summary = ""
+            elif not owner:
+                channel.shop = dict(fields)
+                if summary:
+                    channel.shop_summary = summary
+            else:
+                channel.shop_by_account = write_sheet(
+                    channel.shop_by_account,
+                    account_id=owner,
+                    fields=dict(fields),
+                    summary=summary,
+                )
+                channel.shop = {}
+                channel.shop_summary = ""

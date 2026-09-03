@@ -13,7 +13,6 @@ Item {
         color: Theme.bgDark
     }
 
-    property int activeSection: 0
     property var serverData: ({ servers: [] })
     property int selectedServerIndex: 0
     property int selectedChannelIndex: -1
@@ -233,333 +232,280 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 10
+        spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            Layout.preferredHeight: 250
+            Layout.maximumHeight: 280
+            Layout.minimumHeight: 200
+            spacing: 12
 
-            PresetSectionTab {
-                text: "Channels"
-                tabActive: serversRoot.activeSection === 0
-                onClicked: serversRoot.activeSection = 0
-            }
-            PresetSectionTab {
-                text: "Settings presets"
-                tabActive: serversRoot.activeSection === 1
-                onClicked: serversRoot.activeSection = 1
-            }
-        }
-
-        StackLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            currentIndex: serversRoot.activeSection
-            clip: true
-
-            Item {
-                Layout.fillWidth: true
+            PanelCard {
+                Layout.preferredWidth: 200
+                Layout.maximumWidth: 240
+                Layout.minimumWidth: 160
                 Layout.fillHeight: true
+                title: "Servers"
+                titleSize: 14
+                fillContentVertically: true
 
                 ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 12
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 8
 
-                    RowLayout {
+                    ThemedTextField {
+                        id: newServerField
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 250
-                        Layout.maximumHeight: 280
-                        Layout.minimumHeight: 200
-                        spacing: 12
+                        Layout.preferredHeight: 32
+                        placeholderText: "Server name"
+                    }
 
-                        PanelCard {
-                            Layout.preferredWidth: 200
-                            Layout.maximumWidth: 240
-                            Layout.minimumWidth: 160
-                            Layout.fillHeight: true
-                            title: "Servers"
-                            titleSize: 14
-                            fillContentVertically: true
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                spacing: 8
-
-                                ThemedTextField {
-                                    id: newServerField
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 32
-                                    placeholderText: "Server name"
-                                }
-
-                                ThemedButton {
-                                    Layout.fillWidth: true
-                                    text: "Add server"
-                                    accent: true
-                                    enabled: newServerField.text.trim().length > 0
-                                    onClicked: {
-                                        serversRoot.pendingSelectLastServer = true
-                                        App.addServer(newServerField.text.trim())
-                                        newServerField.text = ""
-                                    }
-                                }
-
-                                ListView {
-                                    id: serverList
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Layout.minimumHeight: 60
-                                    clip: true
-                                    model: serversRoot.serverListCount
-                                    onCurrentIndexChanged: serversRoot.onServerSelectionChanged()
-                                    delegate: ThemedListDelegate {
-                                        width: serverList.width
-                                        text: {
-                                            var list = servers()
-                                            return index >= 0 && index < list.length ? list[index].name : ""
-                                        }
-                                        highlighted: ListView.isCurrentItem
-                                        onClicked: serverList.currentIndex = index
-                                    }
-                                }
-
-                                ThemedButton {
-                                    Layout.fillWidth: true
-                                    text: "Remove server"
-                                    danger: true
-                                    enabled: servers().length > 0
-                                    onClicked: {
-                                        var s = currentServer()
-                                        if (!s)
-                                            return
-                                        App.removeServer(s.id)
-                                    }
-                                }
-                            }
-                        }
-
-                        PanelCard {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.minimumWidth: 240
-                            title: {
-                                var s = currentServer()
-                                return s ? s.name : "Channels"
-                            }
-                            titleSize: 14
-                            fillContentVertically: true
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                spacing: 8
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    ThemedTextField {
-                                        id: chNameField
-                                        Layout.preferredWidth: 100
-                                        Layout.minimumWidth: 72
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 32
-                                        placeholderText: "Label"
-                                    }
-                                    ThemedTextField {
-                                        id: chIdField
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 32
-                                        placeholderText: "Discord channel ID"
-                                    }
-                                }
-
-                                ThemedButton {
-                                    Layout.fillWidth: true
-                                    text: "Add channel"
-                                    accent: true
-                                    enabled: currentServer() && chNameField.text.trim() && chIdField.text.trim()
-                                    onClicked: {
-                                        var server = currentServer()
-                                        if (!server)
-                                            return
-                                        var newChannelId = App.addChannel(
-                                            server.id,
-                                            chNameField.text.trim(),
-                                            chIdField.text.trim()
-                                        )
-                                        chNameField.text = ""
-                                        chIdField.text = ""
-                                        if (newChannelId)
-                                            serversRoot.pendingChannelSelectId = newChannelId
-                                    }
-                                }
-
-                                ListView {
-                                    id: channelList
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Layout.minimumHeight: 60
-                                    clip: true
-                                    model: serversRoot.channelListCount
-                                    onCurrentIndexChanged: serversRoot.onChannelSelectionChanged()
-                                    delegate: ItemDelegate {
-                                        width: channelList.width
-                                        height: 32
-                                        property var channelItem: {
-                                            var chs = channelsForServer()
-                                            return index >= 0 && index < chs.length ? chs[index] : null
-                                        }
-                                        highlighted: ListView.isCurrentItem
-                                        onClicked: channelList.currentIndex = index
-
-                                        contentItem: RowLayout {
-                                            spacing: 6
-                                            Rectangle {
-                                                width: 8
-                                                height: 8
-                                                radius: 4
-                                                visible: channelItem && serversRoot.defaultMudaePresetId().length > 0
-                                                color: channelItem
-                                                    ? serversRoot.complianceColorForChannel(channelItem.id)
-                                                    : Theme.fgMuted
-                                                ToolTip.visible: chipMa.containsMouse
-                                                ToolTip.text: channelItem
-                                                    ? serversRoot.complianceTooltipForChannel(channelItem.id)
-                                                    : ""
-                                                MouseArea {
-                                                    id: chipMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    acceptedButtons: Qt.NoButton
-                                                }
-                                            }
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: channelItem ? ("#" + channelItem.name + "  (" + channelItem.channel_id + ")") : ""
-                                                color: parent.parent.highlighted ? Theme.fgPrimary : Theme.fgSecondary
-                                                font.pixelSize: 12
-                                                font.weight: parent.parent.highlighted ? Font.DemiBold : Font.Normal
-                                                verticalAlignment: Text.AlignVCenter
-                                                elide: Text.ElideRight
-                                            }
-                                        }
-
-                                        background: Rectangle {
-                                            radius: 6
-                                            color: parent.highlighted ? Theme.bgLight
-                                                 : parent.hovered ? Theme.bgMedium
-                                                 : "transparent"
-                                        }
-                                    }
-                                }
-
-                                Flow {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-                                    ThemedButton {
-                                        text: "Fetch $settings"
-                                        enabled: App.connected && serversRoot.isActiveRunChannel()
-                                        onClicked: App.fetchSettings()
-                                    }
-                                    ThemedButton {
-                                        text: "Fetch $bonus"
-                                        enabled: App.connected && serversRoot.isActiveRunChannel()
-                                        onClicked: App.fetchBonus()
-                                    }
-                                    ThemedButton {
-                                        text: "Fetch $shop"
-                                        enabled: App.connected && serversRoot.isActiveRunChannel()
-                                        onClicked: App.fetchShop()
-                                    }
-                                    ThemedButton {
-                                        text: "Remove channel"
-                                        danger: true
-                                        enabled: currentChannel() !== null
-                                        onClicked: {
-                                            var s = currentServer()
-                                            var c = currentChannel()
-                                            if (!s || !c)
-                                                return
-                                            App.removeChannel(s.id, c.id)
-                                        }
-                                    }
-                                }
-
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: serversRoot.isActiveRunChannel()
-                                        ? "Active Run target — fetch works while connected."
-                                        : "Fetch only works for the Run target channel."
-                                    color: Theme.fgMuted
-                                    font.pixelSize: 10
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
+                    ThemedButton {
+                        Layout.fillWidth: true
+                        text: "Add server"
+                        accent: true
+                        enabled: newServerField.text.trim().length > 0
+                        onClicked: {
+                            serversRoot.pendingSelectLastServer = true
+                            App.addServer(newServerField.text.trim())
+                            newServerField.text = ""
                         }
                     }
 
-                    RowLayout {
+                    ListView {
+                        id: serverList
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Layout.minimumHeight: 280
-                        spacing: 12
-
-                        PanelCard {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 1
-                            Layout.minimumWidth: 220
-                            title: "$settings (parsed)"
-                            titleSize: 13
-                            fillContentVertically: true
-
-                            MudaeSettingsDisplayPanel {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                channelProfileId: serversRoot.currentChannelProfileId()
+                        Layout.minimumHeight: 60
+                        clip: true
+                        model: serversRoot.serverListCount
+                        onCurrentIndexChanged: serversRoot.onServerSelectionChanged()
+                        delegate: ThemedListDelegate {
+                            width: serverList.width
+                            text: {
+                                var list = servers()
+                                return index >= 0 && index < list.length ? list[index].name : ""
                             }
+                            highlighted: ListView.isCurrentItem
+                            onClicked: serverList.currentIndex = index
                         }
+                    }
 
-                        PanelCard {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 1
-                            Layout.minimumWidth: 220
-                            title: "$bonus (parsed)"
-                            titleSize: 13
-                            fillContentVertically: true
-
-                            MudaeBonusDisplayPanel {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                channelProfileId: serversRoot.currentChannelProfileId()
-                            }
-                        }
-
-                        PanelCard {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 1
-                            Layout.minimumWidth: 220
-                            title: "$shop (parsed)"
-                            titleSize: 13
-                            fillContentVertically: true
-
-                            MudaeShopDisplayPanel {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                channelProfileId: serversRoot.currentChannelProfileId()
-                            }
+                    ThemedButton {
+                        Layout.fillWidth: true
+                        text: "Remove server"
+                        danger: true
+                        enabled: servers().length > 0
+                        onClicked: {
+                            var s = currentServer()
+                            if (!s)
+                                return
+                            App.removeServer(s.id)
                         }
                     }
                 }
             }
 
-            MudaeSettingsView {
+            PanelCard {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumWidth: 240
+                title: {
+                    var s = currentServer()
+                    return s ? s.name : "Channels"
+                }
+                titleSize: 14
+                fillContentVertically: true
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        ThemedTextField {
+                            id: chNameField
+                            Layout.preferredWidth: 100
+                            Layout.minimumWidth: 72
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 32
+                            placeholderText: "Label"
+                        }
+                        ThemedTextField {
+                            id: chIdField
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 32
+                            placeholderText: "Discord channel ID"
+                        }
+                    }
+
+                    ThemedButton {
+                        Layout.fillWidth: true
+                        text: "Add channel"
+                        accent: true
+                        enabled: currentServer() && chNameField.text.trim() && chIdField.text.trim()
+                        onClicked: {
+                            var server = currentServer()
+                            if (!server)
+                                return
+                            var newChannelId = App.addChannel(
+                                server.id,
+                                chNameField.text.trim(),
+                                chIdField.text.trim()
+                            )
+                            chNameField.text = ""
+                            chIdField.text = ""
+                            if (newChannelId)
+                                serversRoot.pendingChannelSelectId = newChannelId
+                        }
+                    }
+
+                    ListView {
+                        id: channelList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 60
+                        clip: true
+                        model: serversRoot.channelListCount
+                        onCurrentIndexChanged: serversRoot.onChannelSelectionChanged()
+                        delegate: ItemDelegate {
+                            width: channelList.width
+                            height: 32
+                            property var channelItem: {
+                                var chs = channelsForServer()
+                                return index >= 0 && index < chs.length ? chs[index] : null
+                            }
+                            highlighted: ListView.isCurrentItem
+                            onClicked: channelList.currentIndex = index
+
+                            contentItem: RowLayout {
+                                spacing: 6
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    visible: channelItem && serversRoot.defaultMudaePresetId().length > 0
+                                    color: channelItem
+                                        ? serversRoot.complianceColorForChannel(channelItem.id)
+                                        : Theme.fgMuted
+                                    ToolTip.visible: chipMa.containsMouse
+                                    ToolTip.text: channelItem
+                                        ? serversRoot.complianceTooltipForChannel(channelItem.id)
+                                        : ""
+                                    MouseArea {
+                                        id: chipMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.NoButton
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: channelItem ? ("#" + channelItem.name + "  (" + channelItem.channel_id + ")") : ""
+                                    color: parent.parent.highlighted ? Theme.fgPrimary : Theme.fgSecondary
+                                    font.pixelSize: 12
+                                    font.weight: parent.parent.highlighted ? Font.DemiBold : Font.Normal
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            background: Rectangle {
+                                radius: 6
+                                color: parent.highlighted ? Theme.bgLight
+                                     : parent.hovered ? Theme.bgMedium
+                                     : "transparent"
+                            }
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        ThemedButton {
+                            text: "Fetch $settings"
+                            enabled: App.connected && serversRoot.isActiveRunChannel()
+                            onClicked: App.fetchSettings()
+                        }
+                        ThemedButton {
+                            text: "Fetch $bonus"
+                            enabled: App.connected && serversRoot.isActiveRunChannel()
+                            onClicked: App.fetchBonus()
+                        }
+                        ThemedButton {
+                            text: "Fetch $shop"
+                            enabled: App.connected && serversRoot.isActiveRunChannel()
+                            onClicked: App.fetchShop()
+                        }
+                        ThemedButton {
+                            text: "Remove channel"
+                            danger: true
+                            enabled: currentChannel() !== null
+                            onClicked: {
+                                var s = currentServer()
+                                var c = currentChannel()
+                                if (!s || !c)
+                                    return
+                                App.removeChannel(s.id, c.id)
+                            }
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: serversRoot.isActiveRunChannel()
+                            ? "Active Run target — fetch works while connected."
+                            : "Fetch only works for the Run target channel."
+                        color: Theme.fgMuted
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                    }
+                }
             }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: 280
+            spacing: 12
+
+            PanelCard {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumWidth: 220
+                title: "$settings (parsed)"
+                titleSize: 13
+                fillContentVertically: true
+
+                MudaeSheetPanel {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    sheetKind: "settings"
+                    channelProfileId: serversRoot.currentChannelProfileId()
+                }
+            }
+
+            PanelCard {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumWidth: 220
+                title: "$bonus (parsed)"
+                titleSize: 13
+                fillContentVertically: true
+
+                MudaeSheetPanel {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    sheetKind: "bonus"
+                    channelProfileId: serversRoot.currentChannelProfileId()
+                }
+            }
+
         }
     }
 

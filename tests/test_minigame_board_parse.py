@@ -120,6 +120,8 @@ def test_the_feed_keeps_a_claim_it_could_name():
         buttons=[],
     )
     parsed = parse_message(snapshot)
-    text, severity = format_live_feed(snapshot, parsed)
+    text, severity = format_live_feed(
+        snapshot, parsed, own_usernames=["lukazade234"]
+    )
     assert "are now married" in text
     assert severity == "claim"

@@ -234,6 +234,7 @@ class OcSphereGame:
                 clicks_paid=clicks_spent,
                 clicks_budget=clicks_budget,
                 reason="done",
+                uses=uses,
             )
 
             reward = total_reward_from_content(self._reward_content)

@@ -55,18 +55,32 @@ FinalMacro/
 | `palettes.js` / `skins.js` / `clock.js` | Colour themes, layout shells, UTC stats buckets (QML `.pragma library`) |
 | `qmldir` | Registers `Theme` and `SphereAssets` singletons |
 | `accounts.py` / `presets.py` / `server_profiles.py` / `targets.py` | JSON stores inside `data/settings.json` |
+| `sheet_store.py` | Per-account `$bonus` / `$shop` on a channel profile (`$settings` stays flat — it is the server's). Reads a pre-split sheet back for the main account only, flagged `inferred` |
 | `run_target.py` | Resolve active account + channel + preset |
 | `settings.py` | Load/save `data/settings.json` |
 | `import_legacy.py` | Import old MudaeBot `Account_info.json` / `presets.json` |
 | `fonts.py` | Register Space Grotesk + IBM Plex Mono before QML loads |
 | `shells/` | Classic / Haul / Console / Boxed chrome + per-design Run pages |
-| `views/` | Shared pages (Settings, Accounts, Servers, Presets, stats, …) |
+| `views/` | Shared pages (Settings, Accounts, Servers, Presets, Mudae, stats, …) |
+| `views/AdvisorView.qml` | **Advisor hub** — `$bw` / Key EV / Wishlist / Lists / Formatter. Every sub-page states its evidence, and abstains rather than asserting where the data does not support an answer. Only `ListFormatterView` is built: the four other sub-views were cleared back to empty `Item`s on 2026-09-03 to be redesigned, keeping their `ScopeBar` properties. The `$bw` and Key EV computations survive in `macro/advisor.py` with their tests |
+| `views/SpheresHubView.qml` | **Spheres hub** — Stock & shop / Upgrades / Characters. Current state and decisions; sphere *history* stays on Statistics › Spheres |
+| `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (stubbed, no parser), `MudaeBonusView` |
+| `components/ScopeBar.qml` | Account + channel picker that starts on the Run target then detaches, so a page can read account B while account A rolls. Unlike `ServerChannelSelectors` it never moves the Run target |
 | `components/` | Themed controls used by Classic and the shared views |
+| `components/MudaeSheetPanel.qml` | One parsed sheet (`$settings` / `$bonus` / `$shop`) as sectioned label/value rows; `sheetKind` picks the slot. Replaced three copy-pasted panels and reads `Theme` sizes rather than hardcoded pixels, so it takes each shell's shape |
 | `assets/kakera/` | Kakera + sphere button artwork |
 
 `ShellSwitcher` picks `gui/shells/<Design>Shell.qml` from `Theme.layoutId`.
 Every shell hosts the same `PageHost` pages; only the Run page component
 changes.
+
+**Page order is an index contract.** `PageHost`'s `switch`, each shell's nav
+array (`ClassicShell.pages`, `HaulShell.navItems`, `ConsoleShell.tabs`,
+`BoxedShell.menuItems`), `ShellSwitcher.settingsPageIndex`,
+`IconRail.settingsIndex` and `scripts/ui_preview.py`'s `PAGE_NAMES` all encode
+the same integers. Inserting a page means updating all seven. Current order:
+Run, Accounts, Servers, Presets, **Mudae**, **Spheres**, **Advisor**,
+Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `accel` is the underlined letter and must stay unique.
 
 ### `macro/`
 
@@ -87,6 +101,8 @@ changes.
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `perk9_daily.py` | Daily perk-9 click counter; the per-account spawn rate learned from ordinary rolling (`$us` excluded), kept per day over a trailing 2 weeks |
+| `advisor.py` | The `$bw` roll trade (cost exact, optimum blocked on `$wlsz+z!`) and key values (chaos only — it discounts reaction power; claim keys abstain) |
+| `sphere_upgrades.py` | What the next ouroperk level is worth. Prices perk 9 only — value % from logged perk-9 income, the extra click from the perk-9 DP — and **abstains with a reason** on every perk the app cannot price |
 | `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`); forecasts spawns still to come from the learned rate, and forces the bar to 0 in the last hour before the reset |
 | `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs; measures the spawn rate across `$us`-free stretches of rolling |
 | `minigame_daily.py` | Daily `$oh` / `$oc` / `$oq` / `$ot` skip |
@@ -114,7 +130,7 @@ changes.
 | `commands.py` | Command aliases and “is this a `$settings` reply?” detectors |
 | `constants.py` | Bot ids, kakera / sphere emoji names, ranks, **base SP**. Colour-blind ``spB2`` / ``spT2`` collapse via ``canonical_sphere_emoji``. |
 | `buttons.py` | Classify embed buttons (claim / kakera / sphere); decide button-vs-reaction claiming from a roll's components |
-| `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets). Mirrors real channel text only — no macro-side summary fallback, and no claim it could not name |
+| `live_feed.py` | Text-only Discord/Mudae mirror for the Run live feed (`:kakeraO:` / `:spY:` / `:chaoskey:` tokens; QML `MudaeEmoji` draws the assets). Mirrors real channel text only — no macro-side summary fallback — and only lines that **name the connected account** (`account_context.username_matches_own`, the same test the statistics logs record on), because classification runs on loose heuristics that read Mudae's own prose as claims and sphere payouts. Message **edits** are never mirrored: a real follow-up is a new message, an edit is a panel or board being re-rendered. **Roll cards are not mirrored at all** — nobody is named on a roll, so it cannot be attributed; `format_roll_line` is called by `macro/roll_cycle.py` for each card it rolls itself, which is why a card in the feed always means the macro rolled it |
 | `message_text.py` | Flatten Components V2 `content` (``$shop`` and similar) |
 | `parsers/` | One module per message kind (`tu`, `roll`, `settings`, `shop`, `ohu8`, `chaos`, …) |
 | `parsers/pipeline.py` | Classify + parse a snapshot. Recognises Mudae's "under maintenance" reply **first**, ahead of the step that pairs a reply with the command that was sent |
@@ -122,8 +138,10 @@ changes.
 | `parsers/minigame.py` | Recognise a sphere-game grid (`$oh` / `$oc` / `$oq` / `$ot`) **before** the claim heuristics — the board prose is all bold names, and Mudae re-edits the grid on every click |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
-| `stats_index.py` | In-memory daily cube + paged `recent` rows for Statistics (never dumps the full log to QML) |
-| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` | Record helpers on top of `event_log` |
+| `stats_index.py` | In-memory daily cube + paged `recent` rows for Statistics (never dumps the full log to QML). `daily_report()` slices the same cells by **day** instead of by kind for Statistics › Report — totals, colour/method breakdowns with event counts, an **all-time** comparison over *active* days, plus hourly panels, the perk-8/perk-9 click tapes and the day's soulmates, which come from the raw events because the cube keeps neither the hour nor the order. The tapes are the one part that **cannot be generalised**: a perk-8/perk-9 daily allowance belongs to one (account, server) pairing, so they are drawn only when the report is scoped to both and otherwise return `TAPE_SCOPE_NOTE` — the payload's `scope` block says which it is |
+| `account_context.py` | Which account a row belongs to. `username_matches_own` — is this Mudae line about the connected account? — lives here so the logs, the key tracker and the live feed all answer it the same way |
+| `key_log.py` / `kakera_log.py` / `sphere_log.py` / `soulmate_log.py` | Record helpers on top of `event_log`. `soulmate_log` backfills `date_key` from the row's Discord `message_id` on load — snowflakes embed the moment they were minted, so historical soulmates that stored only a clock time are dateable without new capture |
+| `minigame_stats.py` | Per-day minigame boards and spheres, benchmarked **only over days that have board counts**. Sphere events predate `data/minigame_log.json`, so dividing all sphere history by the shorter board history inflates every rate; the payload carries the window it actually covers |
 | `minigame_log.py` / `chaos_capture.py` | Separate files: `data/minigame_log.json`, `data/chaos_log.json` |
 | `settings_catalog.py` / `settings_commands.py` / `settings_preset.py` | GUI settings templates |
 | `command_ack.py` / `command_context.py` / `claim_context.py` | Match replies to the command we just sent |
@@ -176,7 +194,7 @@ All of this is one file: `data/settings.json` (never commit it).
 | Layer | Store | Role |
 |-------|--------|------|
 | Who | `accounts[]` | Token, name, enabled channels, `$p`/`$daily` channel + cooldowns |
-| Where | `servers[]` / `channels[]` | Channel snowflakes, fetched `$settings` / `$bonus`, `daily_resets` |
+| Where | `servers[]` / `channels[]` | Channel snowflakes, fetched `$settings` (flat) and `$bonus` / `$shop` (per account), `daily_resets` (per account) |
 | How | `presets{}` | `MacroConfig` per preset id |
 | Binding | `targets[]` | `{ account_id, channel_profile_id, preset_id }` |
 

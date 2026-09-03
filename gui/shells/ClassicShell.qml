@@ -19,9 +19,11 @@ Item {
         { label: "Accounts", title: "Accounts" },
         { label: "Servers", title: "Servers" },
         { label: "Presets", title: "Presets" },
+        { label: "Mudae", title: "Mudae" },
+        { label: "Spheres", title: "Spheres" },
+        { label: "Advisor", title: "Advisor" },
         { label: "Statistics", title: "Statistics" },
         { label: "Debug", title: "Debug" },
-        { label: "Utilities", title: "Utilities" },
         { label: "Settings", title: "Settings" }
     ]
 

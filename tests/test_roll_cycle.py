@@ -676,3 +676,100 @@ def test_normal_macro_skips_initial_tu_when_persisted_state_valid():
     assert not any(cmd == "tu" for cmd, _ in actions.sent[:1])
     assert len(actions.roll_commands()) == 6
     assert any("Using saved $tu state" in entry.text for entry in state.activity_log)
+
+
+def _minigame_engine(play, *, plays: list) -> RollCycleEngine:
+    """Engine wired to `play`, with everything the day gate needs and no more."""
+    actions = _FakeActions(tu_script=[_tu(1, 30)], roll_script=[_roll(1, 0)])
+    config = MacroConfig(
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+    )
+    engine = RollCycleEngine(
+        actions,
+        config,
+        AccountState(),
+        SimpleNamespace(is_connected=True, macro_active=False),
+        play_daily_minigames=play,
+    )
+    engine._stop.clear()
+    return engine
+
+
+def test_minigames_auto_play_once_per_day_not_every_cycle():
+    """Start fires one play-all; later cycles the same day must not fire again.
+
+    Uses accrue all day (a chaos capture grants a `$oc`), so every hourly tick
+    used to be another chance to spend them — automatic play is limited to
+    macro start and the UTC reset.
+    """
+    plays: list[str] = []
+
+    async def play() -> dict[str, object]:
+        plays.append("play-all")
+        return {"reason": "done"}
+
+    engine = _minigame_engine(play, plays=plays)
+
+    async def run() -> None:
+        for _ in range(5):
+            await engine._maybe_play_daily_minigames()
+
+    asyncio.run(run())
+    assert plays == ["play-all"]
+
+
+def test_minigames_auto_play_fires_again_after_the_daily_reset():
+    plays: list[str] = []
+
+    async def play() -> dict[str, object]:
+        plays.append("play-all")
+        return {"reason": "done"}
+
+    engine = _minigame_engine(play, plays=plays)
+
+    async def run() -> None:
+        await engine._maybe_play_daily_minigames()
+        await engine._maybe_play_daily_minigames()
+        # The UTC day rolls over; the reset is the second firing point.
+        engine._minigames_played_for_day = dt.date(2020, 1, 1)
+        await engine._maybe_play_daily_minigames()
+        await engine._maybe_play_daily_minigames()
+
+    asyncio.run(run())
+    assert plays == ["play-all", "play-all"]
+
+
+def test_minigames_auto_play_retries_when_ohu_failed():
+    """A failed `$ohu` must not write off the whole day's uses."""
+    plays: list[str] = []
+
+    async def play() -> dict[str, object]:
+        plays.append("play-all")
+        return {"reason": "ohu failed"}
+
+    engine = _minigame_engine(play, plays=plays)
+
+    async def run() -> None:
+        await engine._maybe_play_daily_minigames()
+        await engine._maybe_play_daily_minigames()
+
+    asyncio.run(run())
+    assert plays == ["play-all", "play-all"]
+
+
+def test_minigames_auto_play_retries_when_no_decision_was_reached():
+    """`None` is "not attempted" (not connected / already busy), so retry."""
+    plays: list[str] = []
+
+    async def play() -> None:
+        plays.append("play-all")
+        return None
+
+    engine = _minigame_engine(play, plays=plays)
+
+    async def run() -> None:
+        await engine._maybe_play_daily_minigames()
+        await engine._maybe_play_daily_minigames()
+
+    asyncio.run(run())
+    assert plays == ["play-all", "play-all"]

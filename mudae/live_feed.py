@@ -1,17 +1,39 @@
 """Text-only Discord/Mudae mirror for the Run live feed.
 
-The Run tab should read like the channel: character cards with the reacts
-that are actually on the embed, then Mudae's follow-up lines (``+$k``,
-sphere clicks, claims). Macro skip / filter / budget chatter stays out, and
-so does everything else in the channel — a minigame someone plays by hand
-while the macro is connected is not part of the run.
+The Run tab should read like the channel: Mudae's follow-up lines (``+$k``,
+sphere clicks, claims) beneath the character cards the roll cycle logs as it
+rolls them. Macro skip / filter / budget chatter stays out, and so does
+everything else in the channel — a minigame someone plays by hand while the
+macro is connected is not part of the run.
+
+The message *kind* is not enough to decide that, because classification runs
+on loose content heuristics: two bold names anywhere make a "claim", and a
+sphere emoji beside an ``(n/m)`` fraction makes a "sphere click". Mudae prose
+trips both — a ``$ou`` upgrade panel and a ``Syntax: $kakeracopy …`` reply
+were mirrored into the feed dozens of times while the user was typing
+commands by hand. So a follow-up is mirrored only when it **names the
+connected account** (:func:`mudae.account_context.username_matches_own`),
+which is the same test the statistics logs already apply before recording a
+row, and edits are never mirrored at all: Mudae posts real follow-ups as new
+messages, while an edit is a panel or a board being re-rendered, which is how
+one manual upgrade session printed the same line twenty times.
+
+Roll cards are the one line nobody is named on, so they cannot be attributed
+this way at all, and they are not mirrored here. :func:`format_roll_line` is
+called by the roll cycle for each card it rolls itself, after a button refresh
+so the reacts are complete. A card the mirror would have added is therefore
+either a duplicate of that one or a roll made by hand while the macro sat idle
+— which is the same "the macro is not why Mudae said this" the account check
+exists to catch.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
+from mudae.account_context import username_matches_own
 from mudae.buttons import is_kakera_button, is_sphere_button
 from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
@@ -21,15 +43,19 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 # Follow-up kinds are always channel text. Rolls are formatted from embed
 # fields (Discord's character card), not from ``parsed.summary``.
-_CONTENT_KINDS = frozenset(
-    {
-        MessageKind.KAKERA_CLAIM,
-        MessageKind.SPHERE_CLICK,
-        MessageKind.CLAIM,
-        MessageKind.MARRIAGE,
-        MessageKind.KAKERA_REACT_DENIED,
-    }
-)
+#
+# The value is the parsed field carrying the account name for that kind, and
+# every one of these kinds has one: Mudae names the account in each line that
+# is genuinely about it. Prose that names nobody has no such field, which is
+# exactly what keeps it out of the feed.
+_OWNER_FIELDS: dict[MessageKind, str] = {
+    MessageKind.KAKERA_CLAIM: "claimed_by",
+    MessageKind.SPHERE_CLICK: "claimed_by",
+    MessageKind.KAKERA_REACT_DENIED: "claimed_by",
+    MessageKind.CLAIM: "winner",
+    MessageKind.MARRIAGE: "winner",
+}
+_CONTENT_KINDS = frozenset(_OWNER_FIELDS)
 
 
 def flatten_discord_text(text: str) -> str:
@@ -170,28 +196,45 @@ def _severity_for(kind: MessageKind) -> str:
     return "info"
 
 
+def names_own_account(
+    parsed: ParseResult,
+    own_usernames: Sequence[str],
+) -> bool:
+    """Whether a mirrored follow-up is about the connected account."""
+    field = _OWNER_FIELDS.get(parsed.kind)
+    if field is None:
+        return False
+    return username_matches_own(str(parsed.fields.get(field) or ""), own_usernames)
+
+
 def format_live_feed(
     snapshot: MudaeMessageSnapshot,
     parsed: ParseResult,
+    *,
+    own_usernames: Sequence[str] = (),
 ) -> tuple[str, str] | None:
     """Return ``(text, severity)`` for the Run feed, or ``None`` to skip.
 
-    Edited roll embeds (ownership footer updates) are skipped so a claim does
-    not reprint the character card.
+    ``own_usernames`` are the connected account's Discord names. Without them
+    nothing is mirrored at all: an unattributable line is left out rather than
+    printed on the chance that it belongs to us.
     """
-    if parsed.kind == MessageKind.ROLL:
-        if snapshot.edited:
-            return None
-        text = format_roll_line(parsed.fields)
-        if not text:
-            return None
-        return text, _severity_for(parsed.kind)
+    if snapshot.edited:
+        # An edit is a re-render — a roll's ownership footer, a minigame board,
+        # an upgrade panel being clicked through — never a new event. Mirroring
+        # them reprinted one message once per click.
+        return None
     if parsed.kind not in _CONTENT_KINDS:
         return None
-    if parsed.kind in {MessageKind.CLAIM, MessageKind.MARRIAGE} and not (
-        parsed.fields.get("winner") and parsed.fields.get("character")
+    if not names_own_account(parsed, own_usernames):
+        # Mudae did not name us, so either someone else did this or the message
+        # is not the event it was classified as. Both are noise in a feed that
+        # is meant to mirror our own run.
+        return None
+    if parsed.kind in {MessageKind.CLAIM, MessageKind.MARRIAGE} and not parsed.fields.get(
+        "character"
     ):
-        # A claim nobody can be named in is not a claim we recognised — the
+        # A claim with no character in it is not a claim we recognised — the
         # bold-name heuristic also fires on Mudae's character-info embeds.
         return None
     # Only real channel text is mirrored. ``parsed.summary`` is macro-side

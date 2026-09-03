@@ -26,9 +26,11 @@ Item {
         { label: "Accounts", accel: 0 },
         { label: "Servers", accel: 0 },
         { label: "Presets", accel: 0 },
+        { label: "Mudae", accel: 0 },
+        { label: "Spheres", accel: 1 },
+        { label: "Advisor", accel: 1 },
         { label: "Stats", accel: 1 },
         { label: "Debug", accel: 0 },
-        { label: "Utilities", accel: 0 },
         { label: "Settings", accel: 6 }
     ]
 

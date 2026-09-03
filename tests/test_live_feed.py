@@ -137,38 +137,148 @@ def test_flatten_discord_text_starwish_and_bku():
     assert flatten_discord_text("<:bku:2> $bku completed") == ":bku: $bku completed"
 
 
+OWN = ["lukazade234", "LukaZade"]
+
+
 def test_format_live_feed_kakera_and_sphere():
     kakera = format_live_feed(
-        _snapshot(content="<:kakeraT:123> **TestUser +546** ($k)"),
-        ParseResult(kind=MessageKind.KAKERA_CLAIM, summary="Kakera claim", fields={}),
+        _snapshot(content="<:kakeraT:123> **lukazade234 +546** ($k)"),
+        ParseResult(
+            kind=MessageKind.KAKERA_CLAIM,
+            summary="Kakera claim",
+            fields={"claimed_by": "lukazade234"},
+        ),
+        own_usernames=OWN,
     )
-    assert kakera == (":kakeraT: TestUser +546 ($k)", "click")
+    assert kakera == (":kakeraT: lukazade234 +546 ($k)", "click")
 
     sphere = format_live_feed(
         _snapshot(content="<:spB:1> **lukazade234 +72**  (1/15)"),
-        ParseResult(kind=MessageKind.SPHERE_CLICK, summary="Sphere click", fields={}),
+        ParseResult(
+            kind=MessageKind.SPHERE_CLICK,
+            summary="Sphere click",
+            fields={"claimed_by": "lukazade234"},
+        ),
+        own_usernames=OWN,
     )
     assert sphere == (":spB: lukazade234 +72 (1/15)", "click")
 
 
-def test_format_live_feed_skips_edited_rolls():
+def test_format_live_feed_skips_someone_elses_click():
+    """Another player's payout in the same channel is not part of our run."""
+    assert (
+        format_live_feed(
+            _snapshot(content="<:spB:1> **Someone +72**  (1/15)"),
+            ParseResult(
+                kind=MessageKind.SPHERE_CLICK,
+                summary="Sphere click",
+                fields={"claimed_by": "Someone"},
+            ),
+            own_usernames=OWN,
+        )
+        is None
+    )
+
+
+def test_format_live_feed_skips_mudae_prose_that_names_nobody():
+    """The bug this gate exists for: help and panel text classified as events.
+
+    ``$ou``'s upgrade panel carries sphere emoji beside ``(n/m)`` fractions, so
+    ``is_sphere_click_message`` calls it a payout; a ``Syntax:`` reply has two
+    bold runs, so ``is_custom_claim`` calls it a claim. Neither names an
+    account, and both flooded the feed while the user typed commands by hand.
+    """
+    panel = _snapshot(
+        content="<:spB:1> Upgrade the perks of the selected character. (3/5)",
+    )
+    assert (
+        format_live_feed(
+            panel,
+            ParseResult(kind=MessageKind.SPHERE_CLICK, summary="Sphere click", fields={}),
+            own_usernames=OWN,
+        )
+        is None
+    )
+
+    syntax = _snapshot(content="**Syntax**: $kakeracopy <other server ID>\n**Premium**")
+    assert (
+        format_live_feed(
+            syntax,
+            ParseResult(
+                kind=MessageKind.CLAIM,
+                summary="Claim · Syntax → Premium",
+                fields={"winner": "Syntax", "character": "Premium"},
+            ),
+            own_usernames=OWN,
+        )
+        is None
+    )
+
+
+def test_format_live_feed_needs_account_names_to_mirror_a_follow_up():
+    """With no names to match against, abstain rather than print everything."""
+    assert (
+        format_live_feed(
+            _snapshot(content="<:spB:1> **lukazade234 +72**  (1/15)"),
+            ParseResult(
+                kind=MessageKind.SPHERE_CLICK,
+                summary="Sphere click",
+                fields={"claimed_by": "lukazade234"},
+            ),
+        )
+        is None
+    )
+
+
+def test_format_live_feed_never_mirrors_a_roll():
+    """Roll cards come from the roll cycle, which only logs what it rolls.
+
+    Nobody is named on a roll, so it cannot be attributed to the account the
+    way every other feed line is; a mirrored card is therefore either a copy of
+    one the roll cycle already logged or a roll the user made by hand.
+    """
     parsed = ParseResult(
         kind=MessageKind.ROLL,
         summary="$roll · Rem",
         fields={"character_name": "Rem", "total_kakera": 1321},
     )
-    assert format_live_feed(_snapshot(edited=True), parsed) is None
-    text, severity = format_live_feed(_snapshot(edited=False), parsed)
-    assert text == "Rem · 1,321 ka"
-    assert severity == "info"
+    assert format_live_feed(_snapshot(edited=False), parsed, own_usernames=OWN) is None
+    # The formatter itself is still what the roll cycle logs through.
+    assert format_roll_line(parsed.fields) == "Rem · 1,321 ka"
+
+
+def test_format_live_feed_skips_edits():
+    # A re-rendered panel repeats itself once per click, so an edit is never a
+    # new feed line.
+    assert (
+        format_live_feed(
+            _snapshot(content="<:spB:1> **lukazade234 +72**  (1/15)", edited=True),
+            ParseResult(
+                kind=MessageKind.SPHERE_CLICK,
+                summary="Sphere click",
+                fields={"claimed_by": "lukazade234"},
+            ),
+            own_usernames=OWN,
+        )
+        is None
+    )
 
 
 def test_format_live_feed_ignores_tu_and_settings():
     snap = _snapshot(content="you can claim")
-    assert format_live_feed(snap, ParseResult(kind=MessageKind.TU, summary="$tu", fields={})) is None
     assert (
         format_live_feed(
-            snap, ParseResult(kind=MessageKind.SETTINGS, summary="$settings", fields={})
+            snap,
+            ParseResult(kind=MessageKind.TU, summary="$tu", fields={}),
+            own_usernames=OWN,
+        )
+        is None
+    )
+    assert (
+        format_live_feed(
+            snap,
+            ParseResult(kind=MessageKind.SETTINGS, summary="$settings", fields={}),
+            own_usernames=OWN,
         )
         is None
     )
