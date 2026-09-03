@@ -832,6 +832,17 @@ the Run counter ignores it.
 (`MessageKind.SPHERE_CLICK`, excluding `spM`). `SphereReactionRules.types_allowed`
 still governs which colours to click. After the daily budget is used, Mudae
 stops spawning the buttons — the reactor does not add its own skip.
+- **The budget belongs to one (account, channel) pair**, like every other daily
+allowance, so nothing about it may be counted across scopes. `daily_resets.perk9`
+is already stored that way, and the two reads that rebuild the Run panel from
+`sphere_log` — `sync_perk9_clicks_from_log` for the counter and
+`recent_perk9_click_colours` for the clicked row — filter on
+`AccountState.run_channel_id` as well as the recording account. Counting the whole
+log made a switch to a fresh server open part-way through a budget it had not
+touched. Everything else the panel tracks per channel (spawns seen, spawns at the
+last `$ohu9` sync, regular rolls, the pool line, the colour history) is dropped by
+`AccountState.clear_perk9_channel_tracking()` on a switch; `perk9_hazard` is not,
+because the learned rate describes the account's rolling, not the channel.
 - **Dark and light pay out as another colour.** Dark prints
 `<:spD:…> turns into <:spW:…>` and then pays on the next line under `spW`;
 light prints `:spL: breaks down into :spB: + … => +312`. The sphere that was

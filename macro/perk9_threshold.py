@@ -386,7 +386,10 @@ def adaptive_status(state: Any, rules: Any = None, *, now: Any = None) -> dict[s
 
     session_history = list(reversed(list(getattr(state, "perk9_click_emojis", []) or [])))
     try:
-        logged_history = recent_perk9_click_colours(used)
+        logged_history = recent_perk9_click_colours(
+            used,
+            channel_id=str(getattr(state, "run_channel_id", "") or ""),
+        )
     except Exception:
         logged_history = []
     history = (

@@ -114,8 +114,37 @@ def is_perk9_sphere_click(sphere_type: str | None) -> bool:
     }
 
 
-def count_perk9_clicks(events: list[dict[str, Any]], *, date_key: str) -> int:
+def _in_scope(entry: dict[str, Any], *, account_id: str, channel_id: str) -> bool:
+    """True when a logged row belongs to the (account, channel) being asked about.
+
+    The perk-9 click budget is Mudae's, spent per channel by one account, so a
+    row from anywhere else is not evidence about this one. A blank on either
+    side means "not known" rather than "does not match": older rows predate the
+    account column, and the caps read before a Run target is bound have no
+    channel to compare against, so those fall back to counting everything —
+    which is what this did before it could tell them apart.
+    """
+    if account_id:
+        row_account = str(entry.get("account_id") or "").strip()
+        if row_account and row_account != account_id:
+            return False
+    if channel_id:
+        row_channel = str(entry.get("channel_id") or "").strip()
+        if row_channel and row_channel != channel_id:
+            return False
+    return True
+
+
+def count_perk9_clicks(
+    events: list[dict[str, Any]],
+    *,
+    date_key: str,
+    account_id: str | None = None,
+    channel_id: str | None = None,
+) -> int:
     """Count today's perk-9 sphere-button clicks from the earning log."""
+    account = str(account_id or "").strip()
+    channel = str(channel_id or "").strip()
     total = 0
     for entry in events:
         if entry.get("date_key") != date_key:
@@ -123,6 +152,8 @@ def count_perk9_clicks(events: list[dict[str, Any]], *, date_key: str) -> int:
         if normalize_source(entry) != "sphere_click":
             continue
         if not is_perk9_sphere_click(entry.get("sphere_type")):
+            continue
+        if not _in_scope(entry, account_id=account, channel_id=channel):
             continue
         total += 1
     return total
@@ -134,11 +165,14 @@ def recent_perk9_click_colours(
     events: list[dict[str, Any]] | None = None,
     date_key: str | None = None,
     account_id: str | None = None,
+    channel_id: str | None = None,
 ) -> list[str]:
     """Today's perk-9 click colours, newest first, from the sphere earning log.
 
     Lets the Run panel show what was actually clicked before this session
-    started, instead of a row of face-down placeholders.
+    started, instead of a row of face-down placeholders. Scoped to one channel
+    as well as one account: the budget these colours were spent from belongs to
+    the channel, so another server's clicks are somebody else's row.
     """
     from mudae.clock import utc_date_key
     from mudae.sphere_log import recording_account_id
@@ -149,6 +183,7 @@ def recent_perk9_click_colours(
     today = date_key if date_key is not None else utc_date_key()
     account = account_id if account_id is not None else recording_account_id()
     account = str(account or "").strip()
+    channel = str(channel_id or "").strip()
 
     colours: list[str] = []
     for entry in rows:
@@ -159,8 +194,7 @@ def recent_perk9_click_colours(
         sphere_type = entry.get("sphere_type")
         if not is_perk9_sphere_click(sphere_type) or not sphere_type:
             continue
-        # Only filter by account when both sides know one; older rows may not.
-        if account and str(entry.get("account_id") or "").strip() not in ("", account):
+        if not _in_scope(entry, account_id=account, channel_id=channel):
             continue
         colours.append(str(sphere_type))
     colours.reverse()
@@ -168,14 +202,26 @@ def recent_perk9_click_colours(
 
 
 def sync_perk9_clicks_from_log(state: Any) -> None:
-    """Raise ``state.perk9_clicks_today`` to match logged clicks for today."""
+    """Raise ``state.perk9_clicks_today`` to match logged clicks for today.
+
+    Counted within the run target's own (account, channel) scope. Counting the
+    whole log let a click spent on one server be charged to the next one the
+    macro was pointed at, so the Run panel opened a fresh channel already
+    part-way through a budget it had not touched.
+    """
     from mudae.clock import utc_date_key
+    from mudae.sphere_log import recording_account_id
 
     rollover = getattr(state, "rollover_perk9_if_needed", None)
     if callable(rollover):
         rollover()
     today = utc_date_key()
-    counted = count_perk9_clicks(get_sphere_events(), date_key=today)
+    counted = count_perk9_clicks(
+        get_sphere_events(),
+        date_key=today,
+        account_id=recording_account_id(),
+        channel_id=str(getattr(state, "run_channel_id", "") or ""),
+    )
     current = int(getattr(state, "perk9_clicks_today", 0) or 0)
     if counted > current:
         state.perk9_clicks_today = counted

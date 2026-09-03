@@ -359,3 +359,115 @@ def test_a_fresh_ohu9_is_not_re_queried_for_the_rest_of_the_day():
     assert not should_query_ohu9_on_refill(
         record, now=morning + dt.timedelta(hours=4)
     )
+
+
+def test_log_reads_stay_inside_the_run_channel(monkeypatch):
+    """Another server's clicks are not this channel's spent budget.
+
+    Switching the Run target to a fresh server used to open on the previous
+    one's counter — the click budget is metered per channel, but the earning
+    log was counted whole.
+    """
+    from macro.perk9_daily import recent_perk9_click_colours
+
+    events = [
+        {
+            "date_key": "2026-08-24",
+            "source": "sphere_click",
+            "sphere_type": "spB",
+            "account_id": "acct",
+            "channel_id": 111,
+        },
+        {
+            "date_key": "2026-08-24",
+            "source": "sphere_click",
+            "sphere_type": "spG",
+            "account_id": "acct",
+            "channel_id": 111,
+        },
+        {
+            "date_key": "2026-08-24",
+            "source": "sphere_click",
+            "sphere_type": "spR",
+            "account_id": "acct",
+            "channel_id": 222,
+        },
+    ]
+
+    assert count_perk9_clicks(events, date_key="2026-08-24") == 3
+    assert (
+        count_perk9_clicks(
+            events, date_key="2026-08-24", account_id="acct", channel_id="222"
+        )
+        == 1
+    )
+    assert recent_perk9_click_colours(
+        9,
+        events=events,
+        date_key="2026-08-24",
+        account_id="acct",
+        channel_id="222",
+    ) == ["spR"]
+
+
+def test_sync_perk9_clicks_counts_only_the_bound_channel(monkeypatch):
+    monkeypatch.setattr("mudae.clock.utc_date_key", lambda: "2026-08-24")
+    monkeypatch.setattr("macro.state.utc_date_key", lambda: "2026-08-24")
+    monkeypatch.setattr("mudae.sphere_log.recording_account_id", lambda: "acct")
+    monkeypatch.setattr(
+        "macro.perk9_daily.get_sphere_events",
+        lambda: [
+            {
+                "date_key": "2026-08-24",
+                "source": "sphere_click",
+                "sphere_type": "spG",
+                "account_id": "acct",
+                "channel_id": 111,
+            },
+            {
+                "date_key": "2026-08-24",
+                "source": "sphere_click",
+                "sphere_type": "spY",
+                "account_id": "acct",
+                "channel_id": 111,
+            },
+        ],
+    )
+
+    other = AccountState()
+    other.run_channel_id = "222"
+    sync_perk9_clicks_from_log(other)
+    assert other.perk9_clicks_today == 0
+
+    same = AccountState()
+    same.run_channel_id = "111"
+    sync_perk9_clicks_from_log(same)
+    assert same.perk9_clicks_today == 2
+
+
+def test_clear_perk9_channel_tracking_keeps_the_learned_rate():
+    """A switch drops the channel's counters but not the account's roll pace."""
+    state = AccountState()
+    state.perk9_clicks_today = 5
+    state.perk9_clicks_day = "2026-08-24"
+    state.perk9_spawns_today = 3
+    state.perk9_spawns_at_sync = 2
+    state.perk9_regular_rolls_today = 40
+    state.perk9_rolled_today = 44
+    state.perk9_roll_pool = 154
+    state.perk9_click_emojis = ["spB", "spG"]
+    state.perk9_unknown_clicks = 3
+    state.perk9_hazard = 0.31
+
+    state.clear_perk9_channel_tracking()
+
+    assert state.perk9_clicks_today == 0
+    assert state.perk9_clicks_day == ""
+    assert state.perk9_spawns_today == 0
+    assert state.perk9_spawns_at_sync == 0
+    assert state.perk9_regular_rolls_today == 0
+    assert state.perk9_rolled_today is None
+    assert state.perk9_roll_pool is None
+    assert state.perk9_click_emojis == []
+    assert state.perk9_unknown_clicks == 0
+    assert state.perk9_hazard == 0.31

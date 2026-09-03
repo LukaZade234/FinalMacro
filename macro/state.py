@@ -88,6 +88,10 @@ class AccountState:
     additional_spheres: float = 0.0
     perk9_sphere_value_pct: float = 0.0
     rolls_per_hour_net: int | None = None
+    # Discord channel id of the current Run target, as a string. The perk-9
+    # click budget is spent per channel, so the reads that rebuild the Run
+    # panel from the sphere earning log have to know which one to count.
+    run_channel_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,6 +185,25 @@ class AccountState:
                 self.perk9_rolled_today = 0
             self.perk9_click_emojis = []
             self.perk9_unknown_clicks = 0
+
+    def clear_perk9_channel_tracking(self) -> None:
+        """Forget every perk-9 counter that belongs to one channel.
+
+        Mudae meters the sphere-button budget per channel, so on a switch these
+        all go back to zero and are refilled from the new channel's own record.
+        ``perk9_hazard`` is deliberately left alone: it is the account's roll
+        pace, learned across days, and describes the account rather than where
+        it happened to be rolling.
+        """
+        self.perk9_clicks_today = 0
+        self.perk9_clicks_day = ""
+        self.perk9_spawns_today = 0
+        self.perk9_spawns_at_sync = 0
+        self.perk9_regular_rolls_today = 0
+        self.perk9_rolled_today = None
+        self.perk9_roll_pool = None
+        self.perk9_click_emojis = []
+        self.perk9_unknown_clicks = 0
 
     def record_perk9_click(self, count: int = 1) -> None:
         if count <= 0:

@@ -2177,8 +2177,8 @@ class AppBridge(QObject):
         state.kakera_clicks_day = ""
         state.perk8_priority_mode = "inactive"
         state.perk8_click_max = None
-        state.perk9_clicks_today = 0
-        state.perk9_clicks_day = ""
+        state.run_channel_id = ""
+        state.clear_perk9_channel_tracking()
 
     def _restore_known_run_state(
         self,
@@ -2206,8 +2206,17 @@ class AppBridge(QObject):
         )
 
         if not account_id or not channel_profile_id:
+            self._macro_state.run_channel_id = ""
             self._apply_sheet_caps_to_run_state(channel_profile_id)
             return
+
+        # Set before anything reads the sphere log below: the perk-9 click
+        # counter and its colour row are scoped to this channel, and without an
+        # id they fall back to counting every channel's clicks as this one's.
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        self._macro_state.run_channel_id = (
+            str(found[1].channel_id or "").strip() if found else ""
+        )
 
         daily = self._get_daily_resets_for(account_id, channel_profile_id)
         apply_record_to_state(self._macro_state, load_perk8_record(daily))
