@@ -225,6 +225,28 @@ def test_choose_skips_blue_and_teal_clicks_hidden():
     assert choice["emoji"] == "spU"
 
 
+def test_choose_takes_revealed_blue_rather_than_forfeit_the_click():
+    """No hidden cell left, budget remains, only a blue/teal is sitting there.
+
+    Skipping blue/teal is only correct while a face-down click is on offer —
+    it carries the same shot at resolving to blue/teal plus a chance at
+    everything else, which is what makes it strictly better (see
+    ``macro/oh_solver.py``). Once no ``spU`` remains, that alternative is
+    gone and 10 SP beats the 0 SP of returning ``None``.
+    """
+    buttons = [_btn(0, "spB")]
+    choice = choose_oh_click(buttons, clicks_spent=0, clicks_budget=5, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spB"
+
+
+def test_choose_prefers_hidden_over_revealed_blue_when_both_available():
+    buttons = [_btn(0, "spB"), _btn(1, "spU")]
+    choice = choose_oh_click(buttons, clicks_spent=0, clicks_budget=5, rng=random.Random(0))
+    assert choice is not None
+    assert choice["emoji"] == "spU"
+
+
 def test_choose_picks_highest_value_rank():
     buttons = [_btn(i, "spU") for i in range(25)]
     buttons[1]["emoji"] = "spG"  # green, rank 3

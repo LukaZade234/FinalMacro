@@ -199,7 +199,14 @@ def simulate_oh_board(
     is ``"current"`` (the shipped chooser) or ``"legacy"`` (the frozen
     pre-fix baseline above), for the bakeoff.
     """
-    chooser = _legacy_choose_oh_click if policy == "legacy" else choose_oh_click
+    if policy == "legacy":
+        chooser = _legacy_choose_oh_click
+    elif policy == "dp":
+        from macro.oh_solver import choose_oh_click_dp
+
+        chooser = choose_oh_click_dp
+    else:
+        chooser = choose_oh_click
     if revealed_cells is None:
         seen = set(rng.sample(range(GRID_CELLS), min(initial_revealed, GRID_CELLS)))
     else:

@@ -706,7 +706,18 @@ def choose_oh_click(
     Preference order:
         1. any revealed free purple (``spP``);
         2. highest-value revealed paid sphere (never blue/teal — prefer ``spU``);
-        3. a random face-down (``spU``) button — only while budget remains.
+        3. a random face-down (``spU``) button — only while budget remains;
+        4. a revealed blue/teal, only once nothing above is available.
+
+    Skipping blue/teal in favour of a face-down click is not a shortcut —
+    ``macro/oh_solver.py`` backward-induces the exact expected value of both
+    choices and a face-down click wins at every clicks-left level checked
+    (1–8): it carries the same chance of resolving to blue or teal (and
+    triggering the same unveil) plus a shot at every higher-value colour, so
+    it strictly out-earns taking a known blue/teal outright. Step 4 only
+    fires once that gamble is not on offer — a face-down click sitting
+    unavailable because none remain, not because a better one exists — and a
+    known blue/teal (10 / 20 SP) still beats spending the click on nothing.
     """
     chooser = rng or random
     budget_left = clicks_spent < clicks_budget
@@ -714,6 +725,7 @@ def choose_oh_click(
     free_purples: list[dict[str, Any]] = []
     value_spheres: list[dict[str, Any]] = []
     hidden: list[dict[str, Any]] = []
+    reveal_spheres: list[dict[str, Any]] = []
 
     for button in buttons:
         if not _is_clickable(button):
@@ -727,7 +739,8 @@ def choose_oh_click(
             if budget_left:
                 hidden.append(button)
         elif emoji in SPHERE_REVEAL_EMOJIS:
-            continue  # blue / teal: too low value — prefer face-down spU
+            if budget_left:
+                reveal_spheres.append(button)
         elif budget_left:
             value_spheres.append(button)
 
@@ -737,6 +750,8 @@ def choose_oh_click(
         return max(value_spheres, key=lambda b: _button_sort_key(buttons, b))
     if hidden:
         return chooser.choice(hidden)
+    if reveal_spheres:
+        return max(reveal_spheres, key=lambda b: _button_sort_key(buttons, b))
     return None
 
 

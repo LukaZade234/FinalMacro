@@ -44,6 +44,7 @@ def _seeds(count: int) -> tuple[int, ...]:
 def run_from_log(path: str, seeds: int) -> None:
     legacy = replay_logged_boards(path, policy="legacy", seeds=_seeds(seeds))
     current = replay_logged_boards(path, policy="current", seeds=_seeds(seeds))
+    dp = replay_logged_boards(path, policy="dp", seeds=_seeds(seeds))
     if not legacy["boards"]:
         print(f"no recoverable $oh boards found in {path}")
         return
@@ -53,6 +54,7 @@ def run_from_log(path: str, seeds: int) -> None:
     print(f"  {'live logged play':28} avg_sp={legacy['logged_avg_sp']:7.2f}")
     print(f"  {'legacy (rank order)':28} avg_sp={legacy['avg_sp']:7.2f}")
     print(f"  {'current (SP order)':28} avg_sp={current['avg_sp']:7.2f}")
+    print(f"  {'dp (macro.oh_solver)':28} avg_sp={dp['avg_sp']:7.2f}")
     print(
         f"  $oc grants/game={current['oc_grants_per_game']:.3f}"
         f"  free purples/game={current['free_clicks_per_game']:.2f}"
@@ -60,19 +62,36 @@ def run_from_log(path: str, seeds: int) -> None:
 
     stat = paired_delta(current["per_board"], legacy["per_board"])
     print()
-    print(f"  paired delta : {stat['mean']:+.2f} SP per board")
-    print(f"  95% CI       : [{stat['ci_low']:+.2f}, {stat['ci_high']:+.2f}]")
-    print(f"  t            : {stat['t']:+.2f}")
-    print(f"  boards changed: {stat['changed']} / {stat['n']}")
-    print()
+    print("  current vs legacy:")
+    print(f"    paired delta : {stat['mean']:+.2f} SP per board")
+    print(f"    95% CI       : [{stat['ci_low']:+.2f}, {stat['ci_high']:+.2f}]")
+    print(f"    t            : {stat['t']:+.2f}")
+    print(f"    boards changed: {stat['changed']} / {stat['n']}")
     if stat["significant"]:
-        print("  VERDICT: significant at 95%.")
+        print("    VERDICT: significant at 95%.")
     else:
-        print("  VERDICT: NOT significant — this sample cannot tell these apart.")
+        print("    VERDICT: NOT significant — this sample cannot tell these apart.")
         if stat["boards_needed"]:
             print(
-                f"           ~{stat['boards_needed']:,} boards would be needed"
+                f"             ~{stat['boards_needed']:,} boards would be needed"
                 f" (have {stat['n']}). Do not ship on this evidence."
+            )
+
+    stat_dp = paired_delta(dp["per_board"], current["per_board"])
+    print()
+    print("  dp vs current:")
+    print(f"    paired delta : {stat_dp['mean']:+.2f} SP per board")
+    print(f"    95% CI       : [{stat_dp['ci_low']:+.2f}, {stat_dp['ci_high']:+.2f}]")
+    print(f"    t            : {stat_dp['t']:+.2f}")
+    print(f"    boards changed: {stat_dp['changed']} / {stat_dp['n']}")
+    if stat_dp["significant"]:
+        print("    VERDICT: significant at 95%.")
+    else:
+        print("    VERDICT: NOT significant — this sample cannot tell these apart.")
+        if stat_dp["boards_needed"]:
+            print(
+                f"             ~{stat_dp['boards_needed']:,} boards would be needed"
+                f" (have {stat_dp['n']}). Do not ship on this evidence."
             )
 
 

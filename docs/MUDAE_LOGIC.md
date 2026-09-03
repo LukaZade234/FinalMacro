@@ -471,17 +471,40 @@ what licenses a counts-based DP rather than a positional one. The greedy
 never clicks an already-revealed blue or teal, so it only ever triggers this
 via a face-down that turns out to be one.
 
-**`$oh` play is still greedy** (`macro/sphere_game.py:choose_oh_click`):
-take any revealed purple free, else the highest-**paying** revealed sphere,
-never blue/teal, else a random face-down. Ordering is by real SP
-(`_OH_CLICK_VALUE`), not the ordinal `SPHERE_VALUE_RANK` — that rank puts
-dark below orange, but dark pays ~104 against orange's 90.
-`SPHERE_VALUE_RANK` is shared with `$oc`/`$oq` and is left alone.
+**`$oh` play is greedy, and it is now checked, not just assumed**
+(`macro/sphere_game.py:choose_oh_click`): take any revealed purple free,
+else the highest-**paying** revealed sphere, never blue/teal, else a random
+face-down — and, only once no face-down remains and clicks are still left,
+a revealed blue/teal rather than forfeiting the click. Ordering among
+revealed spheres is by real SP (`_OH_CLICK_VALUE`), not the ordinal
+`SPHERE_VALUE_RANK` — that rank puts dark below orange, but dark pays ~104
+against orange's 90. `SPHERE_VALUE_RANK` is shared with `$oc`/`$oq` and is
+left alone.
 
-There is no `$oh` *solver* yet, but there is now a simulator and replay
-harness (`macro/oh_replay.py`, `scripts/oh_bakeoff.py --from-log`) so any
-future policy can be scored. Replaying the 94 recoverable logged boards
-gives 156.5 SP against 153.4 in live play. Two cautions baked into it:
+`macro/oh_solver.py` backward-induces the exact expected value of "click a
+face-down" against "click a known revealed blue/teal" over
+`(clicks_left, blue_visible, teal_visible)` — the one decision on this board
+without a self-evidently dominant answer (a revealed purple is always free
+money; anything green or above already outpays a face-down click before its
+unveil bonus is even counted, so it is always taken on sight; see the
+solver's docstring for the full argument). **Result: a face-down click wins
+at every clicks-left level checked, 1 through 10** — it carries the same
+chance of resolving to blue or teal, and the same resulting unveil, plus a
+shot at every higher-value colour, so it strictly out-earns cashing in a
+known one. The shipped "never click a revealed blue/teal" rule was already
+optimal; the DP confirms it rather than replacing it, and 0 of the 94
+recoverable logged boards change under it (`scripts/oh_bakeoff.py
+--from-log docs/minigames_to_use.jsonl`). The one real gap the DP did
+surface was an endgame bug: the old heuristic returned `None` (forfeiting
+the click) whenever no face-down remained even if a revealed blue/teal and
+budget both still did — fixed by falling back to the best revealed sphere,
+blue/teal included, only in that last-resort case.
+
+There is now a simulator and replay harness (`macro/oh_replay.py`,
+`scripts/oh_bakeoff.py --from-log`) so any future policy can be scored, and
+a `policy="dp"` leg exercises the solver's chooser the same way. Replaying
+the 94 recoverable logged boards gives 156.5 SP against 153.4 in live play.
+Two cautions baked into it:
 
 * **The replay is stochastic** — unveil targets are random, so every board
   is averaged over several seeds.
