@@ -125,6 +125,16 @@ Implemented in `macro/claim_window.py`.
   **immediately** (interrupt the roll loop).
   If the slot is on cooldown and `$rt` is available and `auto_use_rt` is on,
    spend `$rt` and claim.
+  **The app's own wishlist counts as a wish ping.** A roll whose character or
+   series is on the app-side wishlist (`macro/wishlist.py`, Advisor → Wishlist)
+   raises the *same* `code="wish_ping"` interrupt, so it takes this identical
+   path — `$rt` included — rather than a parallel one. It is gated on
+   `claim_on_wish_ping` like a real ping, and unlike the Mudae-side check it
+   also verifies `claimed` / `can_claim` first, since a name match carries no
+   guarantee the roll is still claimable. Names match exactly, case- and
+   whitespace-insensitively (never substring). A **Global** toggle picks what
+   is matched: one list everywhere, or a separate list per (account, channel),
+   resolved against the *run target* — not the page's scope bar.
 2. Kakera value ≥ `min_kakera`, or claim rank ≤ `max_claim_rank` → claim
   immediately.
 3. Otherwise, if `only_final_hour` is on and this is not the final hour →

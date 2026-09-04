@@ -89,7 +89,13 @@ Item {
             accountId: scope.accountId
         }
     }
-    Component { id: wishlistSection; AppWishlistView {} }
+    Component {
+        id: wishlistSection
+        AppWishlistView {
+            channelProfileId: scope.channelProfileId
+            accountId: scope.accountId
+        }
+    }
     Component { id: listsSection; MudaeListsView {} }
     Component { id: formatterSection; ListFormatterView {} }
 }

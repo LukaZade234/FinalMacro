@@ -34,11 +34,13 @@ from gui.server_profiles import ServerProfileStore
 from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
 from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
+from gui.wishlist_store import Wishlist, scope_key
 from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, ActivitySeverity, activity_log_text
 from macro.config import MacroConfig
 from macro.roll_cycle import RollCycleEngine
 from macro.settings_apply import SettingsApplyRunner
+from macro.wishlist import parse_wishlist_input
 from macro.us_stop import (
     UsModeStopOptions,
     overlay_legacy_us_options,
@@ -186,6 +188,7 @@ class AppBridge(QObject):
     keysChanged = Signal()
     mudaeSettingsPresetsChanged = Signal()
     settingsApplyChanged = Signal()
+    wishlistChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -198,6 +201,7 @@ class AppBridge(QObject):
         self._presets = PresetStore()
         self._mudae_settings_presets = MudaeSettingsPresetStore()
         self._targets = TargetStore()
+        self._wishlist = Wishlist()
         self._apply_saved_settings(saved, initial=True)
         self._macro_state = AccountState()
         self._status = "Disconnected"
@@ -874,6 +878,16 @@ class AppBridge(QObject):
                 self._presets.active_preset_id,
             )
 
+    def _wishlist_snapshot(self) -> tuple[list[str], list[str]]:
+        """Live read for the roll engine — reflects edits without a restart.
+
+        Resolved against the **run target**, not the Wishlist page's scope bar:
+        the page can be pointed at another pair while this one rolls.
+        """
+        return self._wishlist.match_lists_for(
+            self._run_account_id, self._run_channel_profile_id
+        )
+
     def _apply_saved_settings(self, saved: dict[str, Any], *, initial: bool = False) -> None:
         """Load persisted stores and UI prefs from a settings dict."""
         self._profiles.load_from_settings(saved)
@@ -881,6 +895,9 @@ class AppBridge(QObject):
         self._presets.load_from_settings(saved)
         self._mudae_settings_presets.load_from_settings(saved)
         self._targets.load_from_settings(saved)
+        self._wishlist = Wishlist.from_dict(saved.get("wishlist"))
+        if not initial:
+            self.wishlistChanged.emit()
         self._sync_sheet_main_account()
         self._sync_initial_target()
         self._macro_config = self._presets.active_preset()
@@ -1315,6 +1332,92 @@ class AppBridge(QObject):
         self._notify_config()
         self._persist()
 
+    @Slot(str, str, result=str)
+    def wishlistFor(self, account_id: str, channel_profile_id: str) -> str:
+        """The list this scope edits, plus whether the toggle is global."""
+        entries = self._wishlist.entries_for(account_id, channel_profile_id)
+        payload = entries.to_dict()
+        payload["global"] = self._wishlist.is_global
+        payload["scoped_ready"] = bool(
+            self._wishlist.is_global or scope_key(account_id, channel_profile_id)
+        )
+        return json.dumps(payload)
+
+    @Slot(bool)
+    def setWishlistGlobal(self, is_global: bool) -> None:
+        if bool(is_global) == self._wishlist.is_global:
+            return
+        self._wishlist.is_global = bool(is_global)
+        self.wishlistChanged.emit()
+        self._persist()
+
+    @Slot(str, str, str, result=int)
+    def addWishlistCharacters(
+        self,
+        text: str,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> int:
+        """Add every name in one input box; returns how many were new."""
+        names = parse_wishlist_input(text)
+        if not names:
+            return 0
+        added = self._wishlist.entries_for(
+            account_id, channel_profile_id
+        ).add_characters(names)
+        if added:
+            self.wishlistChanged.emit()
+            self._persist()
+        return added
+
+    @Slot(str, str, str, result=int)
+    def addWishlistSeries(
+        self,
+        text: str,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> int:
+        names = parse_wishlist_input(text)
+        if not names:
+            return 0
+        added = self._wishlist.entries_for(account_id, channel_profile_id).add_series(
+            names
+        )
+        if added:
+            self.wishlistChanged.emit()
+            self._persist()
+        return added
+
+    @Slot(str, str, str, result=bool)
+    def removeWishlistCharacter(
+        self,
+        name: str,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> bool:
+        removed = self._wishlist.entries_for(
+            account_id, channel_profile_id
+        ).remove_character(name)
+        if removed:
+            self.wishlistChanged.emit()
+            self._persist()
+        return removed
+
+    @Slot(str, str, str, result=bool)
+    def removeWishlistSeries(
+        self,
+        name: str,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> bool:
+        removed = self._wishlist.entries_for(
+            account_id, channel_profile_id
+        ).remove_series(name)
+        if removed:
+            self.wishlistChanged.emit()
+            self._persist()
+        return removed
+
     @Slot(str, str)
     def setAccountDailyChannel(self, account_id: str, channel_profile_id: str) -> None:
         self._accounts.update_account(account_id, daily_channel_id=channel_profile_id)
@@ -1704,6 +1807,7 @@ class AppBridge(QObject):
             mudae_settings=self._mudae_settings_presets.to_settings_fragment(),
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
+            wishlist=self._wishlist.to_settings_fragment(),
             run_ui={
                 "minimize_to_tray": self._minimize_to_tray,
             },
@@ -2964,6 +3068,7 @@ class AppBridge(QObject):
             play_daily_minigames=self._play_daily_minigames_from_engine,
             notification_connection_held=self._minigames_busy,
             minigames_busy=self._minigames_busy,
+            wishlist_get=self._wishlist_snapshot,
         )
         if channel_settings is not None:
             self._engine.update_run_target(

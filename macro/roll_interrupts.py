@@ -7,12 +7,13 @@ Wish ping is preserved as a discrete check; preset rule blocks now drive the
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from macro.config import CharacterClaimRules
 from macro.rule_eval import passes_character_claim
 from macro.state import AccountState
+from macro.wishlist import match_wishlist
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ class RollInterrupt:
 class RollInterruptContext:
     fields: dict[str, Any]
     own_user_ids: list[int]
+    wishlist_characters: list[str] = field(default_factory=list)
+    wishlist_series: list[str] = field(default_factory=list)
 
 
 RollInterruptCheck = Callable[[RollInterruptContext], RollInterrupt | None]
@@ -59,6 +62,25 @@ def check_wish_pinged_user(ctx: RollInterruptContext) -> RollInterrupt | None:
     return None
 
 
+def check_app_wishlist_match(ctx: RollInterruptContext) -> RollInterrupt | None:
+    """A roll matches the app-only character/series wishlist.
+
+    Same ``code="wish_ping"`` as a real Mudae ping, so the roll loop's `$rt`
+    spend and "stop after wish claim" logic (both keyed on that code) apply
+    unchanged. Unlike :func:`check_wish_pinged_user` this guards
+    ``claimed``/``can_claim`` itself — Mudae only ever pings a wish on a roll
+    that is genuinely claimable, but an app-side name/series match has no
+    such guarantee (an edited message reprocessed, say), so it must not
+    fire a claim attempt at a roll that is already gone.
+    """
+    if ctx.fields.get("claimed") or not ctx.fields.get("can_claim"):
+        return None
+    reason = match_wishlist(ctx.fields, ctx.wishlist_characters, ctx.wishlist_series)
+    if reason is None:
+        return None
+    return RollInterrupt(code="wish_ping", reason=f"Wishlist match — {reason}")
+
+
 # Register new checks here (order = priority).
 ROLL_INTERRUPT_CHECKS: tuple[RollInterruptCheck, ...] = (
     check_wish_pinged_user,
@@ -89,6 +111,15 @@ def evaluate_claim_trigger(
     legacy = evaluate_roll_interrupts(ctx)
     if legacy is not None:
         return legacy
+
+    # Gated on the same toggle a real wish ping uses, unlike the Mudae-side
+    # check above: that one bypasses ``rules`` entirely (Mudae's own ping is
+    # unconditional today), but there is no reason a fresh app feature should
+    # inherit that rather than just respecting "claim on wish ping".
+    if rules.claim_on_wish_ping:
+        wishlist_hit = check_app_wishlist_match(ctx)
+        if wishlist_hit is not None:
+            return wishlist_hit
 
     wished = _wished_pinged(ctx.fields, ctx.own_user_ids)
     decision = passes_character_claim(

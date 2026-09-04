@@ -127,6 +127,7 @@ class RollCycleEngine:
         play_daily_minigames: Callable[[], Awaitable[dict[str, Any] | None]] | None = None,
         notification_connection_held: Callable[[], bool] | None = None,
         minigames_busy: Callable[[], bool] | None = None,
+        wishlist_get: Callable[[], tuple[list[str], list[str]]] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -143,6 +144,9 @@ class RollCycleEngine:
         self._minigames_played_for_day: dt.date | None = None
         self._notification_connection_held = notification_connection_held
         self._minigames_busy = minigames_busy
+        # Live lookup rather than a snapshot, so edits to the wishlist page
+        # take effect on the next roll of an already-running session.
+        self._wishlist_get = wishlist_get
         self._daily_get = daily_resets_get
         self._daily_save = daily_resets_save
         self._channel_settings: dict[str, Any] = {}
@@ -1053,10 +1057,15 @@ class RollCycleEngine:
             if record_roll_key_events(snapshot, fields, from_macro=True):
                 self._notify_keys()
 
+        wishlist_characters, wishlist_series = (
+            self._wishlist_get() if self._wishlist_get else ([], [])
+        )
         interrupt = evaluate_claim_trigger(
             RollInterruptContext(
                 fields=fields,
                 own_user_ids=self._state.own_user_ids,
+                wishlist_characters=wishlist_characters,
+                wishlist_series=wishlist_series,
             ),
             self._config.character_claim,
             self._state,

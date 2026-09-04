@@ -36,6 +36,80 @@ def test_wish_ping_no_interrupt_without_wished_by():
     assert evaluate_roll_interrupts(ctx) is None
 
 
+def test_app_wishlist_character_match_produces_wish_ping_interrupt():
+    from macro.roll_interrupts import RollInterruptContext, check_app_wishlist_match
+
+    ctx = RollInterruptContext(
+        fields={"character_name": "Rem", "claimed": False, "can_claim": True},
+        own_user_ids=[1],
+        wishlist_characters=["rem"],
+    )
+    hit = check_app_wishlist_match(ctx)
+    assert hit is not None
+    assert hit.code == "wish_ping"
+    assert "Rem" in hit.reason
+
+
+def test_app_wishlist_series_match_produces_wish_ping_interrupt():
+    from macro.roll_interrupts import RollInterruptContext, check_app_wishlist_match
+
+    ctx = RollInterruptContext(
+        fields={
+            "character_name": "Someone Else",
+            "series": "Re:Zero",
+            "claimed": False,
+            "can_claim": True,
+        },
+        own_user_ids=[1],
+        wishlist_series=["re:zero"],
+    )
+    hit = check_app_wishlist_match(ctx)
+    assert hit is not None
+    assert hit.code == "wish_ping"
+
+
+def test_app_wishlist_does_not_fire_on_claimed_or_unclaimable_roll():
+    from macro.roll_interrupts import RollInterruptContext, check_app_wishlist_match
+
+    claimed = RollInterruptContext(
+        fields={"character_name": "Rem", "claimed": True, "can_claim": True},
+        own_user_ids=[1],
+        wishlist_characters=["Rem"],
+    )
+    assert check_app_wishlist_match(claimed) is None
+
+    unclaimable = RollInterruptContext(
+        fields={"character_name": "Rem", "claimed": False, "can_claim": False},
+        own_user_ids=[1],
+        wishlist_characters=["Rem"],
+    )
+    assert check_app_wishlist_match(unclaimable) is None
+
+
+def test_evaluate_claim_trigger_respects_claim_on_wish_ping_toggle_for_wishlist():
+    from macro.config import CharacterClaimRules
+    from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
+    from macro.state import AccountState
+
+    ctx = RollInterruptContext(
+        fields={"character_name": "Rem", "claimed": False, "can_claim": True},
+        own_user_ids=[1],
+        wishlist_characters=["Rem"],
+    )
+    state = AccountState()
+
+    on = evaluate_claim_trigger(
+        ctx, CharacterClaimRules(claim_on_wish_ping=True), state, final_hour=False
+    )
+    assert on is not None
+    assert on.code == "wish_ping"
+
+    off = evaluate_claim_trigger(
+        ctx, CharacterClaimRules(claim_on_wish_ping=False), state, final_hour=False
+    )
+    assert off is None
+
+
 def test_activity_log_writes_once_per_line():
     from macro.activity_log import ActivityLog
 

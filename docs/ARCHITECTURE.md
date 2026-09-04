@@ -62,7 +62,8 @@ FinalMacro/
 | `fonts.py` | Register Space Grotesk + IBM Plex Mono before QML loads |
 | `shells/` | Classic / Haul / Console / Boxed chrome + per-design Run pages |
 | `views/` | Shared pages (Settings, Accounts, Servers, Presets, Mudae, stats, …) |
-| `views/AdvisorView.qml` | **Advisor hub** — `$bw` / Key EV / Wishlist / Lists / Formatter. Every sub-page states its evidence, and abstains rather than asserting where the data does not support an answer. Only `ListFormatterView` is built: the four other sub-views were cleared back to empty `Item`s on 2026-09-03 to be redesigned, keeping their `ScopeBar` properties. The `$bw` and Key EV computations survive in `macro/advisor.py` with their tests |
+| `views/AdvisorView.qml` | **Advisor hub** — `$bw` / Key EV / Wishlist / Lists / Formatter. Every sub-page states its evidence, and abstains rather than asserting where the data does not support an answer. `ListFormatterView` and `AppWishlistView` are built; `BwAdvisoryView` / `KeyEvView` / `MudaeListsView` were cleared back to empty `Item`s on 2026-09-03 to be redesigned, keeping their `ScopeBar` properties. The `$bw` and Key EV computations survive in `macro/advisor.py` with their tests |
+| `views/AppWishlistView.qml` | **Advisor › Wishlist** — the app-only character/series list the macro claims from, with the Global-vs-per-pair toggle. Two `components/WishlistSection.qml` columns; a match claims via the wish-ping path (`macro/wishlist.py`, `gui/wishlist_store.py`) |
 | `views/SpheresHubView.qml` | **Spheres hub** — Stock & shop / Upgrades / Characters. Current state and decisions; sphere *history* stays on Statistics › Spheres |
 | `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (stubbed, no parser), `MudaeBonusView` |
 | `components/ScopeBar.qml` | Account + channel picker that starts on the Run target then detaches, so a page can read account B while account A rolls. Unlike `ServerChannelSelectors` it never moves the Run target |
@@ -197,6 +198,7 @@ All of this is one file: `data/settings.json` (never commit it).
 | Where | `servers[]` / `channels[]` | Channel snowflakes, fetched `$settings` (flat) and `$bonus` / `$shop` (per account), `daily_resets` (per account) |
 | How | `presets{}` | `MacroConfig` per preset id |
 | Binding | `targets[]` | `{ account_id, channel_profile_id, preset_id }` |
+| Wishlist | `wishlist` | App-only character/series names the macro claims on sight: `global` flag, the global lists, and `scopes{}` keyed `account_id|channel_profile_id` |
 
 Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
 
