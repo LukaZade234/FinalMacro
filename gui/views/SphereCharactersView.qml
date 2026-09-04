@@ -27,7 +27,6 @@ Item {
     property var listing: ({ entries: [], captured: false, fetching: false })
 
     readonly property bool captured: !!listing.captured
-    readonly property bool fetching: !!listing.fetching
     readonly property bool scopedReady: !!listing.scoped_ready
 
     function refresh() {
@@ -65,6 +64,9 @@ Item {
                     Layout.fillWidth: true
                     spacing: 10
 
+                    // The Fetch $wl button lives in the scope bar above: a
+                    // capture belongs to one (account, server) pair, and the
+                    // bar is where that pair is chosen.
                     Label {
                         Layout.fillWidth: true
                         text: root.captured
@@ -81,17 +83,6 @@ Item {
                         wrapMode: Text.WordWrap
                     }
 
-                    ActionButton {
-                        text: root.fetching ? "Fetching…" : "Fetch $wl"
-                        buttonHeight: 32
-                        Layout.preferredWidth: 116
-                        enabled: !root.fetching
-                        loading: root.fetching
-                        fillColor: Theme.accentPrimary
-                        textColor: Theme.bgDark
-                        labelWeight: Font.DemiBold
-                        onClicked: App.fetchMudaeWishlist()
-                    }
                 }
 
                 RowLayout {

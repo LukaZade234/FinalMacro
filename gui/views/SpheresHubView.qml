@@ -20,11 +20,16 @@ Item {
 
     property int sectionIndex: 0
 
+    // `fetch` is the command the scope bar offers while that pill is open.
+    // Upgrades offers none: it is computed from the sheets the other two
+    // fetch, so there is nothing of its own to ask Mudae for.
     readonly property var sections: [
-        { label: "Stock & shop", component: stockSection },
-        { label: "Upgrades", component: upgradesSection },
-        { label: "Characters", component: charactersSection }
+        { label: "Stock & shop", component: stockSection, fetch: "shop", fetchLabel: "$shop" },
+        { label: "Upgrades", component: upgradesSection, fetch: "", fetchLabel: "" },
+        { label: "Characters", component: charactersSection, fetch: "wishlist", fetchLabel: "$wl" }
     ]
+
+    readonly property var currentSection: sections[sectionIndex]
 
     Rectangle {
         anchors.fill: parent
@@ -38,6 +43,8 @@ Item {
         ScopeBar {
             id: scope
             Layout.fillWidth: true
+            fetchCommand: spheresRoot.currentSection.fetch
+            fetchLabel: spheresRoot.currentSection.fetchLabel
         }
 
         RowLayout {

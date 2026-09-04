@@ -151,6 +151,19 @@ Each carries a `ScopeBar` that starts on the Run target and can then be moved
 without disturbing a live run.
 
 - ~~**Account-scope the sheets**~~ — prerequisite, see **Found in audit**.
+- ~~**Fetch buttons on the scope bar, with temporary connections**~~ — the
+  three `Fetch $…` buttons on Servers (and `Fetch $wl` inside Spheres ›
+  Characters) moved to the right-hand side of each page's `ScopeBar`, because
+  the pickers beside them are what a sheet is fetched *as*. They used to be
+  disabled unless the channel was the Run target **and** the macro was
+  connected — which made a detached scope bar's fetch button a lie. Now
+  `AppBridge.fetchForScope` goes where the scope points: it sends in place,
+  hops the live monitor over and back (sharing `$p`/`$daily`'s lock), or stands
+  up a temporary connection with no engine and no logging, and refuses only
+  while the macro is busy — naming which. `gui/scope_fetch.py` holds the route
+  policy as plain data; the sheet's owning account is stamped at arrival rather
+  than read back on the GUI thread, so a borrowed connection cannot file
+  another account's sheet under the Run target's.
 - ~~**One `MudaeSheetPanel`**~~ — replaced three copy-pasted display panels and
   reads `Theme` sizes instead of hardcoded pixels.
 - ~~**Mudae hub**~~ — `$settings` (with drift + copy, moved out of Servers) /
@@ -327,7 +340,16 @@ Classic Run (`RunView` + `MacroControlBar`) and Haul/Console/Boxed (`RunModel` +
 - Notification-standby banner only on Classic.
 - No confirm on delete account/server/preset, live `$settings` Apply, or legacy import.
 - Changing Run target while connected silently stops the macro.
-- Mudae “Apply to server” channel pickers do not follow the Run target.
+- Mudae “Apply to server” channel pickers do not follow the Run target, and
+  `applyMudaeSettingsPreset` still hard-requires the target channel to *be* the
+  connected Run target — so copying settings from channel A to B means
+  retargeting and reconnecting by hand. This is the one place left that demands
+  it: fetching stopped needing a connection when the scope bars got
+  `fetchForScope` and its temporary-connection routes (`gui/scope_fetch.py`),
+  and Apply is the same manoeuvre with a write on the end. It is deliberately
+  not done yet, because Apply also has no confirm/preview (below) and sending a
+  batch of live `$settings` edits to a server you are not watching is a worse
+  failure than a stale sheet.
 - Compact Run preset combo shows preset **ids**, not names.
 - Dead: `PhaseStepper.qml`, `ServerChannelSelectors.qml`, `App.mudaeSettingsCatalogJson`, `App.macroActivityLog` (plain-text duplicate).
 

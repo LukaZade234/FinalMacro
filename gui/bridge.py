@@ -29,7 +29,14 @@ from gui.accounts import AccountStore
 from gui.mudae_settings_presets import MudaeSettingsPresetStore
 from gui.presets import PresetStore
 from gui.run_summary import build_run_summary
-from gui.run_target import resolve_run_target
+from gui.run_target import resolve_run_target, resolve_scope_target
+from gui.scope_fetch import (
+    ROUTE_HOP,
+    ROUTE_TEMPORARY,
+    SCOPE_FETCH_TIMEOUT,
+    ScopeFetchPlan,
+    plan_scope_fetch,
+)
 from gui.server_profiles import ServerProfileStore
 from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
@@ -192,6 +199,7 @@ class AppBridge(QObject):
     settingsApplyChanged = Signal()
     wishlistChanged = Signal()
     mudaeWishlistChanged = Signal()
+    scopeFetchChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -206,7 +214,11 @@ class AppBridge(QObject):
         self._targets = TargetStore()
         self._wishlist = Wishlist()
         self._mudae_wishlists = MudaeWishlistStore()
-        self._mudae_wishlist_fetching = False
+        # A scope fetch borrows the connection; while it holds it, sheets that
+        # arrive belong to *its* account rather than the Run target's.
+        self._scope_fetch_command: str = ""
+        self._scope_fetch_account_id: str = ""
+        self._scope_fetch_thread: threading.Thread | None = None
         self._apply_saved_settings(saved, initial=True)
         self._macro_state = AccountState()
         self._status = "Disconnected"
@@ -2627,6 +2639,12 @@ class AppBridge(QObject):
                     "guild_id": snapshot.guild_id,
                     "guild_name": snapshot.guild_name,
                     "channel_name": snapshot.channel_name,
+                    # Stamped here rather than read back on the GUI thread: a
+                    # scope fetch may have the monitor parked on another
+                    # account, and by the time the queued call runs it could
+                    # already be home again. Who the sheet belongs to is only
+                    # unambiguous at the moment it arrives.
+                    "account_id": self._sheet_account_id(),
                 }
             )
             QMetaObject.invokeMethod(
@@ -2992,7 +3010,7 @@ class AppBridge(QObject):
             guild_id=data.get("guild_id"),
             guild_name=data.get("guild_name"),
             channel_name=data.get("channel_name"),
-            account_id=self._run_account_id,
+            account_id=str(data.get("account_id") or "") or self._run_account_id,
         )
         self._notify_config()
         self._persist()
@@ -4449,119 +4467,414 @@ class AppBridge(QObject):
         payload = self._mudae_wishlists.get(
             account_id, channel_profile_id
         ).to_client_dict()
-        payload["fetching"] = self._mudae_wishlist_fetching
+        payload["fetching"] = self._scope_fetch_command == "wishlist"
         payload["allow_dms"] = self._allow_mudae_dms
         payload["scoped_ready"] = bool(scope_key(account_id, channel_profile_id))
         return json.dumps(payload)
 
+    # --- Scope fetch ------------------------------------------------------
+    #
+    # One command, run on the (account, server) pair a page's scope bar is
+    # pointed at, whether or not that is where the macro is connected. See
+    # `gui/scope_fetch.py` for the routes and why they exist.
+
+    def _sheet_account_id(self) -> str:
+        """Who a sheet arriving *right now* belongs to.
+
+        Normally the Run target's account. While a scope fetch holds the
+        connection it is that fetch's account instead, because the sheet
+        Mudae is answering with describes the account that asked.
+        """
+        return self._scope_fetch_account_id or self._run_account_id
+
+    def _has_live_session(self) -> bool:
+        return bool(
+            self._loop
+            and self._thread
+            and self._thread.is_alive()
+            and self._monitor
+            and self._actions
+        )
+
+    def _scope_fetch_busy_reason(self) -> str:
+        """Why a fetch must not go through, or "" if it may.
+
+        A sheet is never urgent enough to interrupt live work for: the whole
+        point of the temporary connection is that it borrows an idle session
+        and gives it back, and it can only promise that when nothing else is
+        holding the gateway.
+        """
+        if self._scope_fetch_command:
+            return f"Already fetching ${self._scope_fetch_command}"
+        if self._connecting:
+            return "Connecting — try again in a moment"
+        if self._disconnecting:
+            return "Disconnecting — try again in a moment"
+        if self._engine and self._engine.is_running:
+            return "Stop the macro first"
+        if self._minigames_busy():
+            return "Stop the minigame first"
+        if self._settings_apply_running:
+            return "Applying settings"
+        if self._run_action_pending:
+            return "A run action is in progress"
+        lock = self._account_daily_lock
+        if lock is not None and lock.locked():
+            return "$p/$daily is running"
+        return ""
+
+    @Property(str, constant=False, notify=scopeFetchChanged)
+    def scopeFetchJson(self) -> str:
+        """What the fetch buttons need: what is running, and what blocks them."""
+        return json.dumps(
+            {
+                "command": self._scope_fetch_command,
+                "busy": bool(self._scope_fetch_command),
+                "blocked_by": self._scope_fetch_busy_reason(),
+            }
+        )
+
+    @Slot(str, str, str)
+    def fetchForScope(
+        self,
+        command: str,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> None:
+        """Run one Mudae command on the given pair, wherever the macro is.
+
+        Connects if it has to and puts the session back the way it found it.
+        """
+        plan = plan_scope_fetch(
+            command=command,
+            account_id=account_id,
+            channel_profile_id=channel_profile_id,
+            has_session=self._has_live_session(),
+            live_account_id=self._run_account_id,
+            live_channel_profile_id=self._run_channel_profile_id,
+            busy_reason=self._scope_fetch_busy_reason(),
+        )
+        if not plan.allowed:
+            self._set_status(plan.reason)
+            return
+        resolved = resolve_scope_target(
+            self._accounts,
+            self._profiles,
+            self._presets,
+            self._targets,
+            account_id,
+            channel_profile_id,
+        )
+        if resolved is None:
+            self._set_status("That account needs a token and that channel an ID")
+            return
+
+        self._scope_fetch_command = command
+        self.scopeFetchChanged.emit()
+        if plan.route == ROUTE_TEMPORARY:
+            self._start_temporary_scope_fetch(command, resolved, channel_profile_id)
+            return
+        assert self._loop is not None
+        asyncio.run_coroutine_threadsafe(
+            self._scope_fetch_on_live_session(plan, command, resolved, channel_profile_id),
+            self._loop,
+        )
+
+    def _end_scope_fetch(self) -> None:
+        self._scope_fetch_command = ""
+        self._scope_fetch_thread = None
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_scope_fetch_done",
+            Qt.ConnectionType.QueuedConnection,
+        )
+
     @Slot()
-    def fetchMudaeWishlist(self) -> None:
+    def _deliver_scope_fetch_done(self) -> None:
+        self.scopeFetchChanged.emit()
+        self.mudaeWishlistChanged.emit()
+
+    async def _scope_fetch_on_live_session(
+        self,
+        plan: ScopeFetchPlan,
+        command: str,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        """Borrow the running session's gateway, then hand it back.
+
+        Shares `_account_daily_lock` with the `$p`/`$daily` hop so the two
+        cannot both be moving the monitor at once — they are the same
+        manoeuvre, and interleaving them would strand it on a third channel.
+        """
+        lock = self._account_daily_lock
+        try:
+            if lock is None:
+                await self._scope_fetch_hop(plan, command, resolved, channel_profile_id)
+            else:
+                async with lock:
+                    await self._scope_fetch_hop(
+                        plan, command, resolved, channel_profile_id
+                    )
+        except Exception as exc:  # noqa: BLE001 - a fetch must not kill the loop
+            self._on_status(f"Fetch failed: {exc}")
+        finally:
+            self._end_scope_fetch()
+
+    async def _scope_fetch_hop(
+        self,
+        plan: ScopeFetchPlan,
+        command: str,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        actions = self._actions
+        monitor = self._monitor
+        if actions is None or monitor is None:
+            return
+        home_token = self._run_token or str(getattr(monitor, "token", "") or "")
+        home_channel = self._home_discord_channel_id()
+        moved = False
+        try:
+            if plan.route == ROUTE_HOP:
+                channel_id = self._parse_int(resolved.discord_channel_id, "channel ID")
+                self._append_activity_log(f"Fetching ${command} on {resolved.label}")
+                if not await self._switch_monitor_for_dailies(resolved.token, channel_id):
+                    self._on_status(f"Could not reach {resolved.label}")
+                    return
+                moved = True
+            elif not monitor.is_connected:
+                # Already on the right pair but the gateway is down (dropped,
+                # or parked in notification standby). Bring it back before
+                # sending rather than firing into a closed socket.
+                if not await self._switch_monitor_for_dailies(
+                    home_token, int(monitor.channel_id)
+                ):
+                    self._on_status(f"Could not reach {resolved.label}")
+                    return
+            await self._run_scope_command(actions, command, resolved, channel_profile_id)
+        finally:
+            if moved:
+                if home_channel is not None and home_token.strip():
+                    if not await self._switch_monitor_for_dailies(
+                        home_token, home_channel
+                    ):
+                        self._on_status(
+                            "Fetched, but the connection did not come home"
+                        )
+                actions.drain_queue()
+
+    async def _run_scope_command(
+        self,
+        actions: DiscordActions,
+        command: str,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        """Send the command and wait for the answer, attributed to this account."""
+        actions.drain_queue()
+        # Narrow on purpose: only replies arriving between the send and the
+        # answer are filed under this account, so a sheet the *home* account
+        # was already receiving cannot be captured by the borrower.
+        self._scope_fetch_account_id = resolved.account_id
+        try:
+            if command == "wishlist":
+                await self._capture_wishlist_for(
+                    actions, resolved.account_id, channel_profile_id
+                )
+                return
+            await actions.send_command(command)
+            answered = await actions.wait_for(
+                lambda _snapshot, parsed: profile_kind_from_parse(parsed) == command,
+                timeout=SCOPE_FETCH_TIMEOUT,
+            )
+            if answered is None:
+                self._on_status(f"No ${command} reply from Mudae")
+            else:
+                self._on_status(f"${command} · {resolved.label}")
+        finally:
+            self._scope_fetch_account_id = ""
+
+    async def _capture_wishlist_for(
+        self,
+        actions: DiscordActions,
+        account_id: str,
+        channel_profile_id: str,
+    ) -> None:
         """Capture the whole `$wl` listing, by DM or by paging the channel.
 
         Route follows Settings → Mudae direct messages; the paged route is the
         supported path when that is off, not a fallback.
         """
-        if not self._loop or not self._monitor:
-            self._set_status("Connect first")
+        from datetime import datetime, timezone
+
+        from macro.wishlist_capture import capture_wishlist
+
+        result = await capture_wishlist(
+            actions,
+            allow_dms=self._allow_mudae_dms,
+            log=self._append_activity_log,
+        )
+        if not result.ok:
+            self._on_status(result.reason or "Wishlist capture failed")
             return
-        if self._mudae_wishlist_fetching:
-            self._set_status("Already fetching the wishlist")
-            return
-        # Captured under the *run* target: the command is sent on the channel
-        # the macro is connected to, so that is the pair it describes, whatever
-        # the page's own scope bar is pointed at.
-        account_id = self._run_account_id
-        channel_profile_id = self._run_channel_profile_id
-        if not scope_key(account_id, channel_profile_id):
-            self._set_status("Connect to an account and channel first")
-            return
+        listing = MudaeWishlist.from_dict(
+            {
+                **result.data,
+                "route": result.route,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self._mudae_wishlists.set(account_id, channel_profile_id, listing)
+        self._request_persist()
+        note = f"Wishlist captured — {len(listing.entries)} characters"
+        if not listing.complete:
+            note += f" (incomplete: {result.reason})"
+        self._append_activity_log(note)
+        self._on_status(note)
 
-        self._mudae_wishlist_fetching = True
-        self.mudaeWishlistChanged.emit()
+    def _start_temporary_scope_fetch(
+        self,
+        command: str,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        thread = threading.Thread(
+            target=self._temporary_scope_fetch_main,
+            args=(command, resolved, channel_profile_id),
+            name="scope-fetch",
+            daemon=True,
+        )
+        self._scope_fetch_thread = thread
+        thread.start()
 
-        async def _run() -> None:
-            from datetime import datetime, timezone
+    def _temporary_scope_fetch_main(
+        self,
+        command: str,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        """A connection that exists only for the length of one command.
 
-            from macro.wishlist_capture import capture_wishlist
+        Deliberately *not* a Run session: its own loop and monitor, no engine,
+        no roll cycle, no `$p`/`$daily` loops, and none of the run recorders.
+        Nothing it sees is written to the kakera, key, sphere, minigame or
+        chaos logs, and nothing reaches the Run feed — a one-command
+        connection is not a session, and it must not leave one's footprints.
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        monitor: ChannelMonitor | None = None
+        try:
+            channel_id = self._parse_int(resolved.discord_channel_id, "channel ID")
+            holder: dict[str, DiscordActions] = {}
 
-            try:
-                result = await capture_wishlist(
-                    self._actions,
-                    allow_dms=self._allow_mudae_dms,
-                    log=self._append_activity_log,
+            def on_parsed(snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> None:
+                self._on_temporary_parsed(
+                    holder["actions"], resolved.account_id, snapshot, parsed
                 )
-                if not result.ok:
-                    self._on_status(result.reason or "Wishlist capture failed")
+
+            monitor = ChannelMonitor(
+                token=resolved.token,
+                channel_id=channel_id,
+                on_status=self._on_status,
+                on_parsed=on_parsed,
+                allow_mudae_dms=self._allow_mudae_dms,
+            )
+            actions = DiscordActions(monitor)
+            holder["actions"] = actions
+
+            async def runner() -> None:
+                assert monitor is not None
+                self._on_status(f"Connecting to {resolved.label}…")
+                if not await monitor.start_background():
+                    self._on_status(f"Could not reach {resolved.label}")
                     return
-                listing = MudaeWishlist.from_dict(
-                    {
-                        **result.data,
-                        "route": result.route,
-                        "fetched_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
-                self._mudae_wishlists.set(account_id, channel_profile_id, listing)
-                self._request_persist()
-                note = f"Wishlist captured — {len(listing.entries)} characters"
-                if not listing.complete:
-                    note += f" (incomplete: {result.reason})"
-                self._append_activity_log(note)
-                self._on_status(note)
-            except Exception as exc:  # noqa: BLE001
-                self._on_status(f"Wishlist capture failed: {exc}")
-            finally:
-                self._mudae_wishlist_fetching = False
-                QMetaObject.invokeMethod(
-                    self,
-                    "_emit_mudae_wishlist_done",
-                    Qt.ConnectionType.QueuedConnection,
-                )
+                try:
+                    await self._run_scope_command(
+                        actions, command, resolved, channel_profile_id
+                    )
+                finally:
+                    await monitor.stop_background()
 
-        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+            loop.run_until_complete(runner())
+        except Exception as exc:  # noqa: BLE001 - a fetch must not kill the app
+            self._on_status(f"Fetch failed: {exc}")
+        finally:
+            try:
+                loop.close()
+            finally:
+                self._end_scope_fetch()
+
+    def _on_temporary_parsed(
+        self,
+        actions: DiscordActions,
+        account_id: str,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+    ) -> None:
+        """A temporary connection's parse handler — narrow by design.
+
+        Two things happen and no more: the waiter is fed, and a parsed sheet is
+        filed under the account the fetch was for. Everything `_on_parsed`
+        additionally does — the live feed, kakera/key/sphere/chaos recording,
+        macro state — belongs to a *run*, and this is not one.
+        """
+        actions.feed(snapshot, parsed)
+        profile_kind = profile_kind_from_parse(parsed)
+        if not profile_kind:
+            return
+        payload = json.dumps(
+            {
+                "discord_channel_id": snapshot.channel_id,
+                "kind": profile_kind,
+                "fields": profile_fields_from_parse(parsed, profile_kind),
+                "summary": parsed.summary,
+                "guild_id": snapshot.guild_id,
+                "guild_name": snapshot.guild_name,
+                "channel_name": snapshot.channel_name,
+                "account_id": account_id,
+            }
+        )
+        QMetaObject.invokeMethod(
+            self,
+            "_deliver_profile_update",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, payload),
+        )
+
+    def _default_fetch_scope(self) -> tuple[str, str]:
+        """The pair a fetch means when the caller did not name one.
+
+        The Run target while a session holds it, the active selections
+        otherwise — which is what the old Servers-page buttons always meant.
+        """
+        account_id = self._run_account_id or self._accounts.active_account_id
+        channel = self._profiles.active_channel()
+        channel_profile_id = self._run_channel_profile_id or (
+            channel.id if channel else ""
+        )
+        return account_id, channel_profile_id
 
     @Slot()
-    def _emit_mudae_wishlist_done(self) -> None:
-        self.mudaeWishlistChanged.emit()
+    def fetchMudaeWishlist(self) -> None:
+        account_id, channel_profile_id = self._default_fetch_scope()
+        self.fetchForScope("wishlist", account_id, channel_profile_id)
 
     @Slot()
     def fetchSettings(self) -> None:
-        self._send_mudae_command("settings")
+        account_id, channel_profile_id = self._default_fetch_scope()
+        self.fetchForScope("settings", account_id, channel_profile_id)
 
     @Slot()
     def fetchBonus(self) -> None:
-        self._send_mudae_command("bonus")
+        account_id, channel_profile_id = self._default_fetch_scope()
+        self.fetchForScope("bonus", account_id, channel_profile_id)
 
     @Slot()
     def fetchShop(self) -> None:
-        self._send_mudae_command("shop")
-
-    def _send_mudae_command(self, command: str) -> None:
-        if not self._loop or not self._monitor:
-            self._set_status("Connect first")
-            return
-        active = self._profiles.active_discord_channel_id()
-        if not active:
-            self._set_status("Select a channel first")
-            return
-
-        async def _run() -> None:
-            if str(self._monitor.channel_id) != active:
-                resolved = resolve_run_target(
-                    self._accounts,
-                    self._profiles,
-                    self._presets,
-                    self._targets,
-                )
-                if resolved is None:
-                    self._on_status("Select a channel first")
-                    return
-                await self._apply_run_target_switch(resolved)
-                if str(self._monitor.channel_id) != active:
-                    self._on_status("Channel switch failed")
-                    return
-            await self._monitor.send_command(command)
-
-        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+        account_id, channel_profile_id = self._default_fetch_scope()
+        self.fetchForScope("shop", account_id, channel_profile_id)
 
     @Slot(str, result=str)
     def formatMudaeCharacterList(self, text: str) -> str:

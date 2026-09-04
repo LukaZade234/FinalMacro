@@ -23,11 +23,16 @@ Item {
 
     property int sectionIndex: 0
 
+    // `fetch` is the command the scope bar offers while that pill is open, so
+    // the button always fetches the sheet you are looking at. `$ov` has no
+    // parser yet, so it offers nothing rather than a button that cannot work.
     readonly property var sections: [
-        { label: "$settings", component: settingsSection },
-        { label: "$ov", component: ovSection },
-        { label: "$bonus", component: bonusSection }
+        { label: "$settings", component: settingsSection, fetch: "settings" },
+        { label: "$ov", component: ovSection, fetch: "" },
+        { label: "$bonus", component: bonusSection, fetch: "bonus" }
     ]
+
+    readonly property string currentFetch: sections[sectionIndex].fetch
 
     Rectangle {
         anchors.fill: parent
@@ -41,6 +46,7 @@ Item {
         ScopeBar {
             id: scope
             Layout.fillWidth: true
+            fetchCommand: mudaeRoot.currentFetch
         }
 
         RowLayout {

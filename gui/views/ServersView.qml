@@ -427,21 +427,6 @@ Item {
                         Layout.fillWidth: true
                         spacing: 8
                         ThemedButton {
-                            text: "Fetch $settings"
-                            enabled: App.connected && serversRoot.isActiveRunChannel()
-                            onClicked: App.fetchSettings()
-                        }
-                        ThemedButton {
-                            text: "Fetch $bonus"
-                            enabled: App.connected && serversRoot.isActiveRunChannel()
-                            onClicked: App.fetchBonus()
-                        }
-                        ThemedButton {
-                            text: "Fetch $shop"
-                            enabled: App.connected && serversRoot.isActiveRunChannel()
-                            onClicked: App.fetchShop()
-                        }
-                        ThemedButton {
                             text: "Remove channel"
                             danger: true
                             enabled: currentChannel() !== null
@@ -455,11 +440,13 @@ Item {
                         }
                     }
 
+                    // Fetching moved to the scope bars on Mudae and Spheres:
+                    // a sheet belongs to the page that reads it, and from
+                    // there it can be fetched for any pair rather than only
+                    // the connected one.
                     Label {
                         Layout.fillWidth: true
-                        text: serversRoot.isActiveRunChannel()
-                            ? "Active Run target — fetch works while connected."
-                            : "Fetch only works for the Run target channel."
+                        text: "Fetch $settings and $bonus on Mudae; $shop and $wl on Spheres."
                         color: Theme.fgMuted
                         font.pixelSize: 10
                         wrapMode: Text.WordWrap

@@ -24,6 +24,13 @@ Rectangle {
     property bool followingRun: true
     property bool showChannel: true
 
+    // The sheet this page fetches, if any — one of the commands in
+    // `gui/scope_fetch.py`. It sits here rather than in the page body because
+    // the pickers beside it are what a fetch is *for*: the pair on the bar is
+    // the pair the command is sent as, whatever Run is doing.
+    property string fetchCommand: ""
+    property string fetchLabel: fetchCommand ? "$" + fetchCommand : ""
+
     readonly property var accounts: accountData.accounts || []
     readonly property var channels: {
         var out = []
@@ -193,6 +200,14 @@ Rectangle {
             text: "Follow Run"
             implicitHeight: 26
             onClicked: scope.followRun()
+        }
+
+        ScopeFetchButton {
+            visible: scope.fetchCommand !== ""
+            command: scope.fetchCommand
+            commandLabel: scope.fetchLabel
+            accountId: scope.accountId
+            channelProfileId: scope.channelProfileId
         }
     }
 }

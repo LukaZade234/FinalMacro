@@ -1232,11 +1232,20 @@ say *where a bonus comes from* (`$kt`, `$kl`, `$op`, `$shop`, premium,
 spheres clicked). Those suffixes are source tags. Sending them does not
 edit the sheet.
 
-The GUI fetches `$settings`, `$bonus`, and `$shop` onto a channel profile
-(`App.fetchSettings` / `fetchBonus` / `fetchShop`). Parsers:
-`mudae/parsers/settings.py`, `bonus.py`, `shop.py` (catalog in
+The GUI fetches `$settings`, `$bonus`, and `$shop` onto a channel profile.
+Parsers: `mudae/parsers/settings.py`, `bonus.py`, `shop.py` (catalog in
 `bonus_catalog.py` / `shop_catalog.py`). Frozen dumps:
 `tests/mudae_sheet_fixtures.py`.
+
+**Where the fetch buttons are.** Each sheet is fetched from the scope bar of
+the page that reads it — `$settings` and `$bonus` on Mudae, `$shop` and `$wl`
+on Spheres — because the account/server pickers beside the button are what the
+command is sent *as*. A fetch does not need the macro to be connected there,
+or connected at all: `AppBridge.fetchForScope` hops or stands up a temporary
+connection and puts the session back (see ARCHITECTURE.md → "Temporary
+connections"). It refuses only while the macro is busy with something a sheet
+is not worth interrupting. `App.fetchSettings` / `fetchBonus` / `fetchShop` /
+`fetchMudaeWishlist` still exist and mean "for the Run pair".
 
 **Storage is trusted. Most decisions are not yet.** Field-by-field parse tests
 cover every `SETTINGS_FIELD_KEYS` value, the `$bonus` meaning keys
@@ -1276,8 +1285,7 @@ Stored on the channel profile like `$bonus`, but **keyed by account id**
 the connected account, not the server — storing one per channel let a second
 account on the same channel overwrite the first's power max and perk-9 cap.
 A sheet saved before that split is read back for the main account only and
-flagged `inferred` (`App.fetchShop`). Read-only —
-do not send `$shoprefund`.
+flagged `inferred`. Read-only — do not send `$shoprefund`.
 
 
 | Key                        | Type | Later use                                |

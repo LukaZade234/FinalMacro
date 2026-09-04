@@ -56,7 +56,8 @@ FinalMacro/
 | `qmldir` | Registers `Theme` and `SphereAssets` singletons |
 | `accounts.py` / `presets.py` / `server_profiles.py` / `targets.py` | JSON stores inside `data/settings.json` |
 | `sheet_store.py` | Per-account `$bonus` / `$shop` on a channel profile (`$settings` stays flat — it is the server's). Reads a pre-split sheet back for the main account only, flagged `inferred` |
-| `run_target.py` | Resolve active account + channel + preset |
+| `run_target.py` | Resolve an account + channel + preset pair. `resolve_run_target()` reads the *active* selections (what Run would connect to); `resolve_scope_target()` resolves one explicit pair without touching them, which is what a detached `ScopeBar` fetch needs |
+| `scope_fetch.py` | Which of four routes a sheet fetch takes — `send` / `hop` / `temporary` / `blocked` — as plain data, plus the command allowlist. See "Temporary connections" below |
 | `settings.py` | Load/save `data/settings.json` |
 | `import_legacy.py` | Import old MudaeBot `Account_info.json` / `presets.json` |
 | `fonts.py` | Register Space Grotesk + IBM Plex Mono before QML loads |
@@ -66,7 +67,8 @@ FinalMacro/
 | `views/AppWishlistView.qml` | **Advisor › Wishlist** — the app-only character/series list the macro claims from, with the Global-vs-per-pair toggle. Two `components/WishlistSection.qml` columns; a match claims via the wish-ping path (`macro/wishlist.py`, `gui/wishlist_store.py`) |
 | `views/SpheresHubView.qml` | **Spheres hub** — Stock & shop / Upgrades / Characters. Current state and decisions; sphere *history* stays on Statistics › Spheres |
 | `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (stubbed, no parser), `MudaeBonusView` |
-| `components/ScopeBar.qml` | Account + channel picker that starts on the Run target then detaches, so a page can read account B while account A rolls. Unlike `ServerChannelSelectors` it never moves the Run target |
+| `components/ScopeBar.qml` | Account + channel picker that starts on the Run target then detaches, so a page can read account B while account A rolls. Unlike `ServerChannelSelectors` it never moves the Run target. `fetchCommand` puts that page's fetch button on the right of the bar |
+| `components/ScopeFetchButton.qml` | The fetch button in the scope bar. Never disabled for being disconnected — it takes the temporary route — only for the macro being busy, and it names which |
 | `components/` | Themed controls used by Classic and the shared views |
 | `components/MudaeSheetPanel.qml` | One parsed sheet (`$settings` / `$bonus` / `$shop`) as sectioned label/value rows; `sheetKind` picks the slot. Replaced three copy-pasted panels and reads `Theme` sizes rather than hardcoded pixels, so it takes each shell's shape |
 | `assets/kakera/` | Kakera + sphere button artwork |
@@ -187,6 +189,46 @@ under test (`test_roll_cycle.py`, `test_parsers.py`, …).
 Nothing in `macro/` imports QML. The GUI owns persistence and the Discord
 lifecycle; the macro is a library.
 
+### Temporary connections (scope fetch)
+
+Every sheet the app parses — `$settings`, `$bonus`, `$shop`, `$wl` — describes
+one `(account, server)` pair, and can only be obtained by sending a command
+*as that account, in that server*. The pages that read those sheets carry a
+`ScopeBar` that detaches from the Run target, so the pair on screen is
+routinely not the pair the macro is connected to. The fetch buttons used to
+resolve that by refusing: the old ones on Servers were disabled unless the
+channel *was* the Run target and the macro was connected.
+
+Instead, `AppBridge.fetchForScope(command, account_id, channel_profile_id)`
+goes where the scope points and puts the session back. `gui/scope_fetch.py`
+picks the route:
+
+| Route | When | What happens |
+| --- | --- | --- |
+| `send` | Already on this pair | Send, wait for the reply |
+| `hop` | A session exists on a different pair | Move the monitor, send, move it back — the same manoeuvre `$p`/`$daily` performs hourly, sharing `_account_daily_lock` so the two can never interleave |
+| `temporary` | No session at all | Stand one up for the length of the command, then take it down |
+| `blocked` | The macro is mid-anything, or half a scope | Refuse, and say which |
+
+The temporary session is deliberately **not** a Run session: its own thread,
+loop and `ChannelMonitor`, no `RollCycleEngine`, no `$p`/`$daily` or `$us`
+loops, and a narrow `_on_temporary_parsed` that only feeds the waiter and
+files the sheet. Nothing it sees reaches the Run feed or the kakera / key /
+sphere / minigame / chaos logs — a one-command connection is not a session and
+must not leave one's footprints.
+
+Attribution is the subtle part. `_on_parsed` stamps the owning account into
+the payload at the moment the sheet arrives (`_sheet_account_id()`), rather
+than letting `_deliver_profile_update` read `_run_account_id` back on the GUI
+thread — by then the fetch may already have come home, and the sheet would be
+filed under the wrong account. `_scope_fetch_account_id` is held only across
+the send-and-wait, so a sheet the *home* account was already receiving cannot
+be captured by the borrower.
+
+A fetch never interrupts: a running macro, a minigame, a settings apply, a
+pending run action or an in-flight `$p`/`$daily` all block it, because
+borrowing the gateway is only safe when nothing else holds it.
+
 ---
 
 ## Persisted model
@@ -202,7 +244,9 @@ All of this is one file: `data/settings.json` (never commit it).
 | Wishlist | `wishlist` | App-only character/series names the macro claims on sight: `global` flag, the global lists, and `scopes{}` keyed `account_id|channel_profile_id` |
 | Captured `$wl` | `mudae_wishlists` | Mudae's own wishlist per `account_id\|channel_profile_id`: sizes, and each character's spheres and ouroperk roster |
 
-Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
+Resolution for a run: `gui/run_target.py` → `resolve_run_target()`. For a
+fetch on a page's own scope bar: `resolve_scope_target()`, same file, which
+takes the pair explicitly and leaves the active selections alone.
 
 Also in that file: tray / update prefs, `allow_mudae_dms` (opt-in Mudae DM
 reading, see `MUDAE_LOGIC.md`), `ui_layout`, `ui_palette`. Session
