@@ -103,6 +103,7 @@ Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `a
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `perk9_daily.py` | Daily perk-9 click counter; the per-account spawn rate learned from ordinary rolling (`$us` excluded), kept per day over a trailing 2 weeks |
 | `advisor.py` | The `$bw` roll trade (cost exact, optimum blocked on `$wlsz+z!`) and key values (chaos only — it discounts reaction power; claim keys abstain) |
+| `wishlist.py` / `wishlist_capture.py` | The app-only wishlist matcher (a hit claims via the wish-ping path) and the `$wl` listing capture — by DM (`$wlsz+z!`) or by clicking through the paged channel reply, per the Settings DM toggle |
 | `sphere_upgrades.py` | What the next ouroperk level is worth. Prices perk 9 only — value % from logged perk-9 income, the extra click from the perk-9 DP — and **abstains with a reason** on every perk the app cannot price |
 | `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`); forecasts spawns still to come from the learned rate, and forces the bar to 0 in the last hour before the reset |
 | `perk9_runtime.py` | When to send `$ohu9`; local spawn/click tracking between syncs; measures the spawn rate across `$us`-free stretches of rolling |
@@ -199,10 +200,12 @@ All of this is one file: `data/settings.json` (never commit it).
 | How | `presets{}` | `MacroConfig` per preset id |
 | Binding | `targets[]` | `{ account_id, channel_profile_id, preset_id }` |
 | Wishlist | `wishlist` | App-only character/series names the macro claims on sight: `global` flag, the global lists, and `scopes{}` keyed `account_id|channel_profile_id` |
+| Captured `$wl` | `mudae_wishlists` | Mudae's own wishlist per `account_id\|channel_profile_id`: sizes, and each character's spheres and ouroperk roster |
 
 Resolution for a run: `gui/run_target.py` → `resolve_run_target()`.
 
-Also in that file: tray / update prefs, `ui_layout`, `ui_palette`. Session
+Also in that file: tray / update prefs, `allow_mudae_dms` (opt-in Mudae DM
+reading, see `MUDAE_LOGIC.md`), `ui_layout`, `ui_palette`. Session
 logs go under `data/session_logs/`. Kakera / key / sphere / soulmate events
 are `data/events.jsonl` (append-only JSONL; the old `kakera_log.json` /
 `sphere_log.json` / `key_log.json` / `soulmate_log.json` are a one-time

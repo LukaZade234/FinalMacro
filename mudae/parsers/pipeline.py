@@ -19,6 +19,7 @@ from mudae.parsers.marriage import parse_marriage
 from mudae.parsers.settings import parse_settings
 from mudae.parsers.shop import parse_shop, parse_shop_snapshot
 from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
+from mudae.parsers.wishlist import parse_wishlist_result, parse_wishlist_text_result
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.maintenance import is_maintenance_message, parse_maintenance
@@ -46,7 +47,7 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "p": parse_p,
     "daily": parse_daily,
 }
-_KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop"})
+_KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop", "wishlist"})
 
 # GUI kind column — human-readable names for non-command message types.
 _KIND_DISPLAY: dict[MessageKind, str] = {
@@ -63,6 +64,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
     MessageKind.SHOP: "$shop",
+    MessageKind.WISHLIST: "$wl",
     MessageKind.P: "$p",
     MessageKind.DAILY: "$daily",
 }
@@ -99,6 +101,10 @@ def _run_command_parser(
         if snapshot is not None:
             return parse_shop_snapshot(snapshot)
         return parse_shop(content)
+    if parser_id == "wishlist":
+        if snapshot is not None:
+            return parse_wishlist_result(snapshot)
+        return parse_wishlist_text_result(content)
     if parser_id in {"p", "daily"}:
         text = content
         if snapshot is not None:
@@ -209,6 +215,8 @@ def parse_mudae_message(
         )
     if kind == MessageKind.SHOP:
         return parse_shop_snapshot(snapshot)
+    if kind == MessageKind.WISHLIST:
+        return parse_wishlist_result(snapshot)
     if kind == MessageKind.SETTINGS:
         result = parse_settings(snapshot.content)
         _store_settings_cache(snapshot, result)

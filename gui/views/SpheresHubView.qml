@@ -92,6 +92,9 @@ Item {
     }
     Component {
         id: charactersSection
-        SphereCharactersView {}
+        SphereCharactersView {
+            channelProfileId: scope.channelProfileId
+            accountId: scope.accountId
+        }
     }
 }

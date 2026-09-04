@@ -1,0 +1,58 @@
+{
+  "embeds": [
+    {
+      "title": "",
+      "author": "lukazade234's Wishlist - 160/162 $wl, 16/16 $sw",
+      "description": "**Rebecca** ✅ ⭐ 🔐 +188% · **30,000** sp - **Full**\n**Reze** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Audrey Hall** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Lucy** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Hatsune Miku** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Nacchan** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Micchan** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Han Sooyoung** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Fors Wall** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Kasane Teto** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**2B** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**A2** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Ramlethal Valentine** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Classmate** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Shin Hae-in** ✅ ⭐ 🔐 +313% · **30,000** sp - **Full**\n**Ado** ✅ ⭐ 🔐 +188% · **30,000** sp - **Full**\n**Nazuna Nanakusa** ✅ 🔐 +125% · **7,000** sp - **5** (x5), **6**, **8**, **9**, **10**\n**Shizuku Murasaki** ✅ 🔐 · **7,000** sp - **5** (x5), **6**, **8**, **9**, **10**\n**Stocking Anarchy** ✅ 🔐 · **7,000** sp - **5** (x5), **6**, **8**, **9**, **10**\n**Blair** ✅ 🔐 · **7,000** sp - **5** (x5), **6**, **8**, **9**, **10**",
+      "footer": "Page 1 / 8",
+      "image_url": ""
+    }
+  ],
+  "buttons": [
+    {
+      "label": "",
+      "emoji": "wleft",
+      "custom_id": "100000000000000001p200000000000000002p300000000000000003",
+      "kind": "claim",
+      "disabled": false,
+      "style": "secondary"
+    },
+    {
+      "label": "",
+      "emoji": "wright",
+      "custom_id": "100000000000000001p200000000000000002p300000000000000004",
+      "kind": "claim",
+      "disabled": false,
+      "style": "secondary"
+    }
+  ],
+  "components": [
+    {
+      "type": 1,
+      "id": 1,
+      "components": [
+        {
+          "type": 2,
+          "style": 2,
+          "id": 2,
+          "emoji": {
+            "name": "wleft",
+            "id": "300000000000000003"
+          },
+          "custom_id": "100000000000000001p200000000000000002p300000000000000003"
+        },
+        {
+          "type": 2,
+          "style": 2,
+          "id": 3,
+          "emoji": {
+            "name": "wright",
+            "id": "300000000000000004"
+          },
+          "custom_id": "100000000000000001p200000000000000002p300000000000000004"
+        }
+      ]
+    }
+  ],
+  "content": ""
+}

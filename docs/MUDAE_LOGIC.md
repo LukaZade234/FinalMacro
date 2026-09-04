@@ -428,6 +428,170 @@ on hourly rolls.
 
 
 
+## Mudae direct messages
+
+A few Mudae commands answer by **DM** rather than in the channel — `$wlsz+z!`
+is the one this was built for, since it sends the whole wishlist (with the
+sphere upgrades on each character) in one message instead of a paged embed.
+
+The gateway is the whole **account**, not one channel: `discord.py-self`
+delivers the account's DMs over the same connection the run channel uses, so
+no second connection or login is involved. `ChannelMonitor` nonetheless drops
+every DM unless **Settings → Mudae direct messages** is on
+(`allow_mudae_dms`, default **off**) — it is the account's private mail, not
+the shared channel the user pointed the macro at, so it is opt-in.
+
+With the toggle on, `_handle_mudae_dm` is deliberately the narrowest path in
+the reader:
+
+- Only messages with **no guild** (the definition of a DM) and only from
+  Mudae's own bot id (`is_mudae_message`) are looked at. Another guild's
+  channel is still ignored — the toggle opens DMs, not everything the account
+  can see.
+- It parses the snapshot and hands it to `on_parsed`, which is what lets
+  `DiscordActions.wait_for` match a reply that arrives by mail rather than in
+  the channel.
+- It does **not** reach the live feed (that mirrors channel text, and a DM is
+  not in the channel), does not touch `CommandContextTracker` /
+  `ClaimContextTracker` (both keyed to the run channel), and does not cache
+  the message for button clicks.
+- The flag is read per message, so flipping it off stops the reading
+  immediately without a reconnect.
+
+**With the toggle off** the same information has to come from the in-channel
+reply, which Mudae pages — the macro clicks through each page and joins them.
+That is the slower path and a slow page can truncate a long list, which is the
+trade the setting exists to let the user make.
+
+### `$wl` — the wishlist listing
+
+`$wlsz+z!` (DM) and `$wlz+z!` (channel) return the same body: the account's
+wishlist, one line per character. The `s` flag is what redirects a reply to
+DMs and works on most commands; it is only worth using where the reply is long
+enough to be paged, which is why `$settings` / `$bonus` never need it. Mudae
+reacts to the command with a **mailbox** when it sent the DM and an **✕** when
+it could not.
+
+```
+lukazade234's Wishlist - 160/162 $wl, 16/16 $sw
+Rebecca ✅ ⭐ 🔐 +188% · 30,000 sp - Full
+Nazuna Nanakusa ✅ 🔐 +125% · 7,000 sp - 5 (x5), 6, 8, 9, 10
+Tanya Degurechaff ✅ 🔐 · 7,600 sp - 4 (x2), 5 (x5), 6, 8, 9, 10
+Page 1 / 8
+```
+
+The header is the **wishlist size** the `$bw` optimum has always been blocked
+on. `⭐` marks a starwish, and **starwishes are a subset of the `$wl` count,
+not extra slots** — 16 starred rows against `16/16 $sw`, and 160 rows over 8
+pages of 20 against `160/162 $wl`. `+N%` is the character's sphere value bonus
+(absent on most rows), the `N sp` figure is spheres invested, and the tail is
+the **ouroperk roster** — `Full`, or perk numbers with `(xN)` multiplicity.
+That roster is the capture `macro/sphere_upgrades.py` abstains on for perk 1
+and the Spheres → Characters page needs.
+
+Parsed by `mudae/parsers/wishlist.py`, one message at a time; `$wl` bolds
+rows inconsistently (and mid-row, `**7,000** sp`), so bold is stripped rather
+than trusted. `merge_wishlist_pages` joins the parts and de-duplicates by
+name, since paging back and forth revisits rows.
+
+`macro/wishlist_capture.py` drives whichever route the setting allows:
+
+- **DM** — parts arrive back to back with no page footer, so the end is found
+  from the header count plus a quiet gap.
+- **Pages** — 20 rows at a time, navigated with the **two buttons** on the
+  message. They carry Mudae's custom `wleft` / `wright` emoji, so they look
+  like reactions but are ordinary components. **They classify as `claim`**:
+  their custom ids have the same `<id>p<id>p<id>` shape a claim button has, so
+  `classify_button_kind` cannot tell them apart — the forward arrow is found
+  by its `wright` emoji, never by button kind. Mudae edits the one message in
+  place, which is the same click → wait for the edit → read it loop the
+  minigame boards already use. Paging stops when every page number has been
+  seen rather than when the forward button goes quiet, since a paginator that
+  wraps never runs out.
+
+**A reply the macro asked for is routed by command name, not by shape.**
+`parse_mudae_message` pairs a reply with the command just sent and dispatches
+on that, returning **before** `classify_message` runs — so the classifier
+protects only *unpaired* messages (a hand-typed command, or the edit that
+arrives after a page click). `$wl` / `$wlz` / `$wlsz` are therefore aliased to
+a `wishlist` parser in `mudae/commands.py`; without that alias the command is
+unknown, `resolve_command` falls through to detection, and
+`detect_command_from_snapshot` answers **`roll`** for anything with a
+roll-shaped embed. That is what made the listing parse as a roll.
+
+Note the consequence for consumers: a paired reply comes back as
+`COMMAND_RESPONSE` with `parser_command: "wishlist"`, not as
+`MessageKind.WISHLIST` — true of every command, not just this one. Anything
+waiting on a listing must accept both, the way
+`macro.actions.is_tu_parse_result` does for `$tu`.
+
+**Flags reach the alias table two different ways.** `send_command` records
+what the macro sent *verbatim* (`wlz+z!`), while `CommandContextTracker` — which
+watches what the **user** types — has already stripped flags to the bare word
+(`wlz`). Only the second used to hit the aliases, so the identical message
+parsed correctly when typed by hand and as a **roll** when the macro sent it.
+`normalize_command` now falls back to the leading command word, with an exact
+match still winning so `ohu8` / `ohu9` are untouched.
+
+**Page edits nearly died in the reader.** Every page after the first arrives as
+an *edit* of the same message, and `ChannelMonitor._handle_message` drops
+edited Mudae messages whose embed looks like a character embed unless they are
+ownership confirmations. A listing embed does look like one, so page clicks
+were silently discarded before any parser saw them; the reader now lets a
+listing through that filter.
+
+**The channel reply is an embed; the DM is plain text.** The channel form
+carries **no message content at all** — the header is the embed's `author`,
+the rows its `description`, and `Page 1 / 8` its `footer` — so anything
+reading only `content` sees an empty message. `wishlist_text()` reads both
+forms. Classifying it matters for a second reason: with claim-shaped buttons
+and an author line that reads like a character name, an unclassified listing
+page parses as a **roll**, complete with `can_claim: true`.
+
+Either way a listing that lost a part comes back **marked incomplete** rather
+than as a short wishlist — both the `$bw` maths and the perk roster are wrong
+if rows go missing silently.
+
+#### Ouroperks per character
+
+The roster on each row is what a character carries. **Perks 1–5 have six
+levels; perks 6–10 are a single unlock.** At level 0 a perk does nothing.
+
+| # | Levels | What it does | At max |
+| - | ------ | ------------ | ------ |
+| 1 | 6 | Spawn chance up for the character(s) **next to this one in `$wishlist`** | 125% |
+| 2 | 6 | Base kakera value up | 160 |
+| 3 | 6 | Chance of **+1 kakera button** under this character | 55% |
+| 4 | 6 | Chance of **+1 key** for this character | 30% |
+| 5 | 6 | Spheres per kakera button (except purple) you click on a roll of it | 23 |
+| 6 | 1 | 2% chance a random wishlist character appears after rolling it — wishprotected if unclaimed, **3 omega keys** if already yours | — |
+| 7 | 1 | Kakera buttons can become **chaos kakera** on a roll of it (1% per kakera, not red/light/dark/rainbow) | — |
+| 8 | 1 | Spawns **4 kakera buttons** (no purple) at half power on the day's first roll, yours only. Discount covers the day's first 40 clicks; after 40, perk-5 spheres on those buttons are **doubled** | — |
+| 9 | 1 | A **sphere button** on the day's first roll of it; 1/7 per click gives a `$oq`. Up to 10 spheres a day, yours only | — |
+| 10 | 1 | The day's first `$oh` gives **+4 spheres** and +0.5% chance of a `$oq` | — |
+
+**Costs.** Each level of perks 1–5 costs **200, 400, 600, 800, 1000** and then
+**2000** for the sixth — 5,000 to max one. Perks 6–10 cost **1000** each to
+unlock. All ten maxed is therefore `5 × 5000 + 5 × 1000 =` **30,000 sp**,
+which is exactly what the `Full` rows list.
+
+That ladder is not just reference: `gui/mudae_wishlist_store.py` derives each
+character's cost from its roster and shows it against Mudae's own `N sp`
+figure. They agree on every real row seen so far — `5 (x5), 6, 8, 9, 10` is
+3000 + 4000 = 7,000, `5 (x6), …` is 5000 + 4000 = 9,000, `4 (x2), 5 (x5), …`
+is 600 + 3000 + 4000 = 7,600 — so a disagreement means the ladder changed or
+the row was misread, and the page flags it rather than hiding it.
+
+**The `+N%` on a row is not yet explained.** Observed values are 125 / 188 /
+313, and perk 1 maxed is 125%, so it is presumably spawn chance a character
+*receives* from its neighbours' perk 1 rather than its own — but no neighbour
+arithmetic reproduces all three figures, so it is stored and displayed as
+Mudae reports it and nothing is derived from it.
+
+---
+
+
+
 ## Minigames
 
 `$ohu` reports daily uses left / stored for `$oh`, `$oc`, `$oq`, `$ot`.

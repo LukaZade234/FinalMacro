@@ -281,6 +281,56 @@ Item {
 
         PanelCard {
             Layout.fillWidth: true
+            title: "Mudae direct messages"
+            titleSize: 14
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "A few Mudae commands answer by DM instead of in the channel, and send "
+                          + "the whole list at once. With this off, the macro never reads your DMs "
+                          + "and pages through the in-channel reply instead — slower, and a slow "
+                          + "page can cut a long list short."
+                    color: Theme.fgMuted
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Let the macro read Mudae's DMs to this account"
+                        color: Theme.fgSecondary
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+
+                    ThemedSwitch {
+                        checked: App.allowMudaeDms
+                        onToggled: App.setAllowMudaeDms(checked)
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Only messages from Mudae itself are read, and only to answer a command "
+                          + "the macro sent. Nothing from anyone else is looked at, and DMs never "
+                          + "appear in the Run feed."
+                    color: Theme.fgMuted
+                    font.pixelSize: 10
+                    wrapMode: Text.WordWrap
+                }
+            }
+        }
+
+        PanelCard {
+            Layout.fillWidth: true
             title: "System tray"
             titleSize: 14
 

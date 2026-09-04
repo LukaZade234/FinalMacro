@@ -17,7 +17,9 @@ from mudae.claim_context import ClaimContextTracker
 from mudae.command_context import CommandContextTracker
 from mudae.parsers.embed import get_character_owner, is_character_embed, is_ownership_footer
 from mudae.parsers.pipeline import format_entry_for_gui, parse_message
-from mudae.serialization import snapshot_from_message
+from mudae.message_text import snapshot_visible_text as snapshot_text
+from mudae.parsers.wishlist import is_wishlist_message
+from mudae.serialization import is_mudae_message, snapshot_from_message
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
 OnEntryCallback = Callable[[dict[str, Any]], None]
@@ -38,7 +40,14 @@ _CLICK_RETRY_SEC = 1.5
 _RESUME_POLL_SEC = 0.25
 
 class ChannelMonitor:
-    """Connect with a user token and capture every message in a channel."""
+    """Connect with a user token and capture every message in a channel.
+
+    The gateway is the whole *account*, not one channel, so it also delivers
+    the account's DMs. Those are dropped unless ``allow_mudae_dms`` is set:
+    a few Mudae commands (``$wlsz+z!`` and friends) answer by DM rather than
+    in the channel, and reading them is opt-in because it is the account's
+    private mail, not the shared channel the user pointed the macro at.
+    """
 
     def __init__(
         self,
@@ -47,9 +56,12 @@ class ChannelMonitor:
         on_entry: OnEntryCallback | None = None,
         on_status: OnStatusCallback | None = None,
         on_parsed: OnParsedCallback | None = None,
+        *,
+        allow_mudae_dms: bool = False,
     ) -> None:
         self.token = token.strip()
         self.channel_id = channel_id
+        self.allow_mudae_dms = bool(allow_mudae_dms)
         self.on_entry = on_entry
         self.on_status = on_status
         self.on_parsed = on_parsed
@@ -418,8 +430,34 @@ class ChannelMonitor:
             raise RuntimeError(f"Channel {self.channel_id} is not a text channel")
         return channel
 
+    @staticmethod
+    def _is_direct_message(message: discord.Message) -> bool:
+        """A DM is any message with no guild behind it."""
+        return getattr(message, "guild", None) is None
+
+    async def _handle_mudae_dm(self, message: discord.Message, *, edited: bool) -> None:
+        """Parse one Mudae DM and hand it to waiters — nothing else.
+
+        Deliberately narrow. It does not touch ``_commands`` / ``_claims``
+        (both keyed to the run channel, and a DM is not in it), does not cache
+        the message for button clicks, and does **not** reach the live feed:
+        that feed mirrors real channel text, and a DM is by definition not in
+        the channel. All it does is let ``DiscordActions.wait_for`` see the
+        reply to a command whose answer Mudae sends by mail.
+        """
+        self._last_event_at = time.monotonic()
+        snapshot = snapshot_from_message(message, edited=edited)
+        parsed = parse_message(snapshot)
+        self._emit_parsed(snapshot, parsed)
+
     async def _handle_message(self, message: discord.Message, *, edited: bool) -> None:
         if message.channel.id != self.channel_id:
+            if (
+                self.allow_mudae_dms
+                and self._is_direct_message(message)
+                and is_mudae_message(message)
+            ):
+                await self._handle_mudae_dm(message, edited=edited)
             return
         self._last_event_at = time.monotonic()
         self._remember_message(message)
@@ -428,7 +466,13 @@ class ChannelMonitor:
         # Roll embed edits: only show when a claim message was seen and footer matches it.
         if snapshot.is_mudae and snapshot.edited and snapshot.embeds:
             embed = snapshot.embeds[0]
-            if is_character_embed(embed):
+            # A listing page is edited in place on every page click, and its
+            # embed looks like a character embed (an author line and a body),
+            # so the roll-edit filter below would drop every page after the
+            # first before it ever reached a parser.
+            if is_wishlist_message(snapshot_text(snapshot)):
+                pass
+            elif is_character_embed(embed):
                 footer = embed.get("footer") or ""
                 owner = get_character_owner(footer)
                 if not owner or not is_ownership_footer(footer):

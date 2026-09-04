@@ -34,6 +34,7 @@ from gui.server_profiles import ServerProfileStore
 from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
 from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
+from gui.mudae_wishlist_store import MudaeWishlist, MudaeWishlistStore
 from gui.wishlist_store import Wishlist, scope_key
 from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, ActivitySeverity, activity_log_text
@@ -170,6 +171,7 @@ class AppBridge(QObject):
     runActionPendingChanged = Signal()
     usModeOptionsChanged = Signal()
     minimizeToTrayChanged = Signal()
+    allowMudaeDmsChanged = Signal()
     appearanceChanged = Signal()
     runSummaryChanged = Signal()
     updateStatusChanged = Signal()
@@ -189,6 +191,7 @@ class AppBridge(QObject):
     mudaeSettingsPresetsChanged = Signal()
     settingsApplyChanged = Signal()
     wishlistChanged = Signal()
+    mudaeWishlistChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -202,6 +205,8 @@ class AppBridge(QObject):
         self._mudae_settings_presets = MudaeSettingsPresetStore()
         self._targets = TargetStore()
         self._wishlist = Wishlist()
+        self._mudae_wishlists = MudaeWishlistStore()
+        self._mudae_wishlist_fetching = False
         self._apply_saved_settings(saved, initial=True)
         self._macro_state = AccountState()
         self._status = "Disconnected"
@@ -402,6 +407,10 @@ class AppBridge(QObject):
     @Property(bool, constant=False, notify=minimizeToTrayChanged)
     def trayAvailable(self) -> bool:
         return self._tray_available
+
+    @Property(bool, constant=False, notify=allowMudaeDmsChanged)
+    def allowMudaeDms(self) -> bool:
+        return self._allow_mudae_dms
 
     @Property(bool, constant=False, notify=updateCheckingChanged)
     def updateChecking(self) -> bool:
@@ -896,6 +905,7 @@ class AppBridge(QObject):
         self._mudae_settings_presets.load_from_settings(saved)
         self._targets.load_from_settings(saved)
         self._wishlist = Wishlist.from_dict(saved.get("wishlist"))
+        self._mudae_wishlists.load_from_settings(saved)
         if not initial:
             self.wishlistChanged.emit()
         self._sync_sheet_main_account()
@@ -935,6 +945,7 @@ class AppBridge(QObject):
         # dict (the kwarg name is just a label), so these are read from ``saved``
         # directly rather than a nested "run_ui" key.
         self._minimize_to_tray = bool(saved.get("minimize_to_tray", False))
+        self._allow_mudae_dms = bool(saved.get("allow_mudae_dms", False))
 
         layout = str(saved.get("ui_layout") or _DEFAULT_UI_LAYOUT)
         palette = str(saved.get("ui_palette") or _DEFAULT_UI_PALETTE)
@@ -967,6 +978,8 @@ class AppBridge(QObject):
             self.mudaeSettingsPresetsChanged.emit()
             self.usModeOptionsChanged.emit()
             self.minimizeToTrayChanged.emit()
+            self.allowMudaeDmsChanged.emit()
+            self.mudaeWishlistChanged.emit()
             self.updateStatusChanged.emit()
 
     def _record_settings_file_mtime(self) -> None:
@@ -1808,8 +1821,10 @@ class AppBridge(QObject):
             targets=self._targets.to_settings_fragment(),
             servers=self._profiles.to_settings_fragment(),
             wishlist=self._wishlist.to_settings_fragment(),
+            mudae_wishlists=self._mudae_wishlists.to_settings_fragment(),
             run_ui={
                 "minimize_to_tray": self._minimize_to_tray,
+                "allow_mudae_dms": self._allow_mudae_dms,
             },
             appearance={
                 "ui_layout": self._ui_layout,
@@ -1967,6 +1982,23 @@ class AppBridge(QObject):
             return
         self._minimize_to_tray = enabled
         self.minimizeToTrayChanged.emit()
+        self._persist()
+
+    @Slot(bool)
+    def setAllowMudaeDms(self, enabled: bool) -> None:
+        """Opt in to reading Mudae's DMs to this account.
+
+        Takes effect on the live gateway immediately — the monitor drops DMs
+        on its own when the flag is off, so turning it back off does not need
+        a reconnect to stop reading them.
+        """
+        enabled = bool(enabled)
+        if self._allow_mudae_dms == enabled:
+            return
+        self._allow_mudae_dms = enabled
+        if self._monitor is not None:
+            self._monitor.allow_mudae_dms = enabled
+        self.allowMudaeDmsChanged.emit()
         self._persist()
 
     def attach_tray(self, tray: Any) -> None:
@@ -3042,6 +3074,7 @@ class AppBridge(QObject):
             on_entry=self._on_entry,
             on_status=self._on_status,
             on_parsed=self._on_parsed,
+            allow_mudae_dms=self._allow_mudae_dms,
         )
         self._actions = DiscordActions(self._monitor)
         from macro.account_dailies import seconds_until_due
@@ -4405,6 +4438,90 @@ class AppBridge(QObject):
     @Slot()
     def _emit_settings_apply_done(self) -> None:
         self.settingsApplyChanged.emit()
+
+    @Slot(str, str, result=str)
+    def mudaeWishlistFor(self, account_id: str, channel_profile_id: str) -> str:
+        """One scope's captured listing, for Spheres → Characters.
+
+        Blank for a pair that has never been captured — a listing is never
+        shown under a scope it was not taken on.
+        """
+        payload = self._mudae_wishlists.get(
+            account_id, channel_profile_id
+        ).to_client_dict()
+        payload["fetching"] = self._mudae_wishlist_fetching
+        payload["allow_dms"] = self._allow_mudae_dms
+        payload["scoped_ready"] = bool(scope_key(account_id, channel_profile_id))
+        return json.dumps(payload)
+
+    @Slot()
+    def fetchMudaeWishlist(self) -> None:
+        """Capture the whole `$wl` listing, by DM or by paging the channel.
+
+        Route follows Settings → Mudae direct messages; the paged route is the
+        supported path when that is off, not a fallback.
+        """
+        if not self._loop or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._mudae_wishlist_fetching:
+            self._set_status("Already fetching the wishlist")
+            return
+        # Captured under the *run* target: the command is sent on the channel
+        # the macro is connected to, so that is the pair it describes, whatever
+        # the page's own scope bar is pointed at.
+        account_id = self._run_account_id
+        channel_profile_id = self._run_channel_profile_id
+        if not scope_key(account_id, channel_profile_id):
+            self._set_status("Connect to an account and channel first")
+            return
+
+        self._mudae_wishlist_fetching = True
+        self.mudaeWishlistChanged.emit()
+
+        async def _run() -> None:
+            from datetime import datetime, timezone
+
+            from macro.wishlist_capture import capture_wishlist
+
+            try:
+                result = await capture_wishlist(
+                    self._actions,
+                    allow_dms=self._allow_mudae_dms,
+                    log=self._append_activity_log,
+                )
+                if not result.ok:
+                    self._on_status(result.reason or "Wishlist capture failed")
+                    return
+                listing = MudaeWishlist.from_dict(
+                    {
+                        **result.data,
+                        "route": result.route,
+                        "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                self._mudae_wishlists.set(account_id, channel_profile_id, listing)
+                self._request_persist()
+                note = f"Wishlist captured — {len(listing.entries)} characters"
+                if not listing.complete:
+                    note += f" (incomplete: {result.reason})"
+                self._append_activity_log(note)
+                self._on_status(note)
+            except Exception as exc:  # noqa: BLE001
+                self._on_status(f"Wishlist capture failed: {exc}")
+            finally:
+                self._mudae_wishlist_fetching = False
+                QMetaObject.invokeMethod(
+                    self,
+                    "_emit_mudae_wishlist_done",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def _emit_mudae_wishlist_done(self) -> None:
+        self.mudaeWishlistChanged.emit()
 
     @Slot()
     def fetchSettings(self) -> None:

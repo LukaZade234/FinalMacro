@@ -17,6 +17,7 @@ from mudae.parsers.minigame_exhausted import is_minigame_exhausted_message
 from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
+from mudae.parsers.wishlist import is_wishlist_message
 from mudae.parsers.embed import (
     is_character_embed,
     is_ownership_footer,
@@ -70,6 +71,10 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.SETTINGS
     if is_shop_response(content):
         return MessageKind.SHOP
+    # Before the claim heuristics on purpose: a wishlist page is a wall of
+    # bold names, which is exactly what ``is_custom_claim`` calls a claim.
+    if is_wishlist_message(content):
+        return MessageKind.WISHLIST
     if is_tu_response(content):
         return MessageKind.TU
     if is_kakera_react_denied(content):

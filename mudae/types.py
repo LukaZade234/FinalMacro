@@ -31,6 +31,7 @@ class MessageKind(str, Enum):
     KAKERA_BUTTONS = "kakera_buttons"
     OWNERSHIP_UPDATE = "ownership_update"
     SHOP = "shop"
+    WISHLIST = "wishlist"
     P = "p"
     DAILY = "daily"
     CHANNEL = "channel"

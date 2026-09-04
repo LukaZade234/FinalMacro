@@ -46,6 +46,21 @@ COMMAND_ALIASES: dict[str, str] = {
     "setting": "settings",
     "sets": "settings",
     "bonuses": "bonus",
+    # The wishlist listing, in every spelling that reaches it. Flags are
+    # stripped before this ($wlz+z! arrives as "wlz"), and the "s" flag —
+    # which redirects the reply to a DM — is a separate spelling rather than
+    # a separate command.
+    #
+    # This alias is load-bearing, not cosmetic. Without it the typed command
+    # is unknown, so ``resolve_command`` falls through to detection, and
+    # ``detect_command_from_snapshot`` answers "roll" for anything with a
+    # roll-shaped embed — which a listing page is, right down to buttons whose
+    # custom ids look like claim buttons. The listing then parsed as a roll,
+    # with ``can_claim: true``.
+    "wl": "wishlist",
+    "wls": "wishlist",
+    "wlz": "wishlist",
+    "wlsz": "wishlist",
     **ROLL_COMMAND_ALIASES,
 }
 
@@ -167,10 +182,31 @@ RESPONSE_DETECTORS: list[tuple[str, ResponseDetector]] = [
 ]
 
 
+_COMMAND_WORD_RE = re.compile(r"^([a-z][a-z0-9]*)")
+
+
 def normalize_command(command: str) -> str:
-    """Map user-typed command to canonical parser id when known."""
-    key = command.lower()
-    return COMMAND_ALIASES.get(key, key)
+    """Map a typed command to its canonical parser id when known.
+
+    Falls back to the leading word so a command carrying **flags** resolves
+    like the bare one: the macro records what it sent verbatim
+    (``wlz+z!``), while the tracker that watches what the *user* types has
+    already stripped the flags (``wlz``). The same command reaching the
+    aliases two different ways is how ``$wlz+z!`` parsed correctly when
+    hand-typed and as a *roll* when the macro sent it.
+
+    An exact match still wins, so nothing whose own name contains digits
+    (``ohu8``, ``ohu9``) is affected.
+    """
+    key = command.lower().strip()
+    if key in COMMAND_ALIASES:
+        return COMMAND_ALIASES[key]
+    match = _COMMAND_WORD_RE.match(key)
+    if match:
+        word = match.group(1)
+        if word in COMMAND_ALIASES:
+            return COMMAND_ALIASES[word]
+    return key
 
 
 def detect_command_from_response(content: str) -> str | None:
