@@ -480,14 +480,15 @@ Tanya Degurechaff ✅ 🔐 · 7,600 sp - 4 (x2), 5 (x5), 6, 8, 9, 10
 Page 1 / 8
 ```
 
-The header is the **wishlist size** the `$bw` optimum has always been blocked
-on. `⭐` marks a starwish, and **starwishes are a subset of the `$wl` count,
-not extra slots** — 16 starred rows against `16/16 $sw`, and 160 rows over 8
-pages of 20 against `160/162 $wl`. `+N%` is the character's sphere value bonus
-(absent on most rows), the `N sp` figure is spheres invested, and the tail is
-the **ouroperk roster** — `Full`, or perk numbers with `(xN)` multiplicity.
-That roster is the capture `macro/sphere_upgrades.py` abstains on for perk 1
-and the Spheres → Characters page needs.
+The header is the **wishlist size** the `$bw` optimum was blocked on until this
+capture shipped. `⭐` marks a starwish, and **starwishes are a subset of the
+`$wl` count, not extra slots** — 16 starred rows against `16/16 $sw`, and 160
+rows over 8 pages of 20 against `160/162 $wl`. `+N%` is the character's **perk-1
+spawn bonus** (absent on most rows — see the ouroperk section below for the rule
+that reproduces it), the `N sp` figure is spheres invested, and the tail is the
+**ouroperk roster** — `Full`, or perk numbers with `(xN)` multiplicity. That
+roster is the capture `macro/sphere_upgrades.py` abstains on for perk 1, the
+Spheres → Characters page needs, and `Advisor › $bw` weighs each character with.
 
 Parsed by `mudae/parsers/wishlist.py`, one message at a time; `$wl` bolds
 rows inconsistently (and mid-row, `**7,000** sp`), so bold is stripped rather
@@ -582,11 +583,150 @@ figure. They agree on every real row seen so far — `5 (x5), 6, 8, 9, 10` is
 is 600 + 3000 + 4000 = 7,600 — so a disagreement means the ladder changed or
 the row was misread, and the page flags it rather than hiding it.
 
-**The `+N%` on a row is not yet explained.** Observed values are 125 / 188 /
-313, and perk 1 maxed is 125%, so it is presumably spawn chance a character
-*receives* from its neighbours' perk 1 rather than its own — but no neighbour
-arithmetic reproduces all three figures, so it is stored and displayed as
-Mudae reports it and nothing is derived from it.
+**The `+N%` on a row is the character's perk-1 spawn bonus.** It was recorded
+here as unexplained; it is not. Perk 1 raises the spawn chance of the characters
+**either side of its carrier in wishlist order**, and the `$shop` **OP1** upgrade
+feeds a share of that back to the carrier itself:
+
+```
++N% = round_half_up( 125 × neighbours with perk 1 maxed
+                   + 125 × own perk 1 × OP1 spawn_share_pct )
+```
+
+That reproduces **all 160 rows** of the live capture, on an account with OP1 at
+level 5 (`spawn_share_pct` 50). The 16 `Full` characters sit contiguously at the
+head of the list, so the 14 interior rows score `250 + 62.5 → 313`, the two ends
+`125 + 62.5 → 188`, and the two plain rows just outside the block `125 + 0 → 125`
+— which is exactly the 313 / 188 / 125 spread that looked unreproducible. The
+last row also scores 125, off the *first* row: **the list wraps**, which is the
+piece that was missing. Mudae rounds half up, so 312.5 prints as 313.
+
+Nothing derives it in anger — Mudae reports it per row and
+`macro/bw_calc.py::sweep_bw` uses that figure directly. `derive_perk1_pct` exists
+to re-derive it as a **freshness check**: buy an OP1 level after capturing `$wl`
+and every stored `+N%` is stale, which the `$bw` page reports rather than
+silently weighing characters wrong.
+
+**The stored field stays named `sphere_percent`, and that is deliberate.** The
+name is a leftover from when this was read as a sphere-value bonus, and renaming
+it to `perk1_spawn_pct` was tried and reverted: `data/` is Syncthing-shared
+across machines, an instance on an older build round-trips `settings.json`, and
+not recognising the new key made it write every row back with the value gone —
+all 160 at once, silently, leaving the `$bw` sweep weighing every character as
+if perk 1 were absent. Readers accept both names; writers emit the legacy one.
+Any future rename of a persisted key needs the old name written alongside the
+new one for at least one release, or the same thing happens again.
+
+---
+
+
+
+## `$bw` — rolls traded for wish spawns
+
+`$bw N` locks **N of the hour's rolls** and buys a spawn-chance bonus on
+wishlist characters in return, so it has a peak somewhere in the middle. The
+sweep lives in `macro/bw_calc.py` and is shown by `Advisor › $bw`. It reads four
+sheets: `$bonus`, `$wlsz+z!`, `$shop` and (only when `$bonus` could not resolve
+`setrolls` for itself) `$settings`. **The macro never sends `$bw`** — the page is
+advisory and prints the command to run by hand.
+
+**Net rolls.** `net(bw) = setrolls + bonus − bw − bk`, which is
+`$bonus.rolls_per_hour` with the penalties added back and `$bw` re-subtracted.
+The sweep runs `bw` from 0 to where the pool empties, `setrolls + bonus − bk`.
+
+**What `$bw` buys**, in percentage points per roll locked:
+
+| `$bw` range | wish | starwish (**extra**, on top of wish) |
+| ----------- | ---- | ------------------------------------ |
+| 1–5         | +20  | +10                                  |
+| 6–15        | +15  | +10                                  |
+| 16–100      | +10  | +10                                  |
+| 101–200     | +5   | +5                                   |
+| 201+        | +1   | +1                                   |
+
+`$bonus` reports the bonus *at the current `$bw`*, so the sweep strips the `$bw`
+part out and keeps the remainder as a fixed offset. That decomposition is
+checked, not assumed: at `$bw 19` the wish tiers give 290 against a reported
+440, leaving **150**; the 2/2 `$bonus` fixture, captured separately at `$bw 40`,
+gives 500 against 650 and leaves the same **150**. If the remainder ever comes
+out negative the sweep refuses to draw rather than inventing a curve.
+
+`starwish_spawn_bonus_pct` is the **extra a starwish gets on top of the wish
+bonus**, not the total. Mudae closes that bullet with the combined figure —
+`(= 1,315%)` on the fixture, matching `650 + 400 + 265` — which the parser now
+stores as `starwish_spawn_bonus_total_pct` purely so the two fields can be
+checked against Mudae's own sum.
+
+**Spawn chance** is a character's weight over the whole pool's:
+
+```
+weight     = 1 + (wish or starwish bonus + the row's perk-1 +N%) / 100
+pool       = base pool + Σ (1 + that character's bonus / 100)
+p(char)    = weight / pool
+```
+
+Note the asymmetry: perk 1 is in the **numerator only**. It raises its carrier's
+share of the pool rather than enlarging the pool — it shifts spawn chance toward
+the character, it does not add characters to roll against. Counting it in the
+denominator as well put the model 25x further from `bwcalc`'s published table
+(1.6% mean error against 0.06%), which is how the convention was settled.
+
+**Base pool** is every rollable character *outside* the wishlist. It follows the
+server's game mode and disable lists, nothing in the app derives it, and it is a
+user input defaulting to 2,000. It matters: across pools from 500 to 20,000 the
+optimum moves from `$bw` 12 to 30. It also flattens — on the live wishlist the
+current setting of 19 stays within 2.5% of the peak across that whole range, so
+the peak is worth more than the absolute keys/hour, exactly as Colblitz says of
+their own `bwcalc`.
+
+**Keys per spawn** is three independent chances, so the expectations add:
+
+```
+keys = 1                                    guaranteed
+     + $bonus.extra_key_wish_chance_pct/100 account-wide
+     + perk 4 on that character /100        0, 4, 8, 12, 16, 20, 30
+```
+
+**EV** is `Σ_char net(bw) × p(char) × keys(char)`, clipped at the **2,200/hour
+key limit** (see *Hourly key limit* above). In practice the cap cannot bind: a
+real roll pool tops out near 100 rolls an hour at about 2 keys a spawn, two
+orders of magnitude short, so the clip is correctness rather than a live
+constraint.
+
+**`$persrare`** rerolls a roll that lands on a claimed non-wish character up to N
+times, which raises wish spawn chance by `(1 − rᴺ)/(1 − r)` where `r` is the
+claimed share of the pool. It favours *lower* `$bw`, because a smaller pool makes
+`r` larger. `$ov` has no parser, so N is a user input defaulting to **1** — at
+which the expression is exactly 1 and the model is the no-persrare one.
+
+**Slash commands are modelled and not applied.** Mudae counts a flat +10% slash
+bonus into the wish figure it reports (`source_tags` lists `slash`), but the
+macro rolls with the `$` prefix and never receives it, so the sweep takes it back
+out — **of the wish figure only**. Slash is a source of the wish line and not of
+the starwish line, and a starwish's total is the wish bonus *plus* its own extra,
+so it inherits the deduction once; taking it off both offsets docked every
+starwish 20 points instead of 10.
+`SLASH_ROLL_CAP_PER_HOUR` (1,440/hour, Discord's rate limit, past which
+rolls must use `$` and lose the bonus) is defined and unused. If slash rolling is
+ever added, both become live in one branch — until then the page says it is not
+modelling them. On the live account it moves the optimum by one, `$bw` 18 → 19.
+
+**Three optima, because they peak in different places.** A starwish's bonus grows
+faster than a plain wish's, so starwishes stop wanting more `$bw` sooner than the
+wishlist as a whole does, and a single selected character sooner still. The page
+names all three the way `bwcalc` does — whole wishlist, starwishes, selected
+character — rather than picking one and calling it *the* answer.
+
+**Checked against `bwcalc` itself.** Run with slash left on, as Colblitz's own
+run was, the model reproduces their published table for the live account to a
+mean absolute error of **0.06%** across every column, and lands on all three of
+their optima exactly: `$bw` 18 for the whole wishlist (51.7 keys/hour, 33.2% of
+net rolls landing on a wishlist character), 15 for starwishes (12.3 keys/hour,
+6.8%), 15 for the selected character (0.78 keys/hour, "spawns 1 in 233 rolls").
+`tests/test_bw_calc.py` pins that table so a change to the spawn model that
+looks plausible but drifts from an independent implementation of the same
+published method fails loudly. The residual is a consistent ~0.8 of pool weight
+out of ~2,900 — far below the precision of the base-pool guess feeding both.
 
 ---
 
@@ -1259,13 +1399,17 @@ Reaction-power max (`kakera_max_power`) and the perk 9 click cap
 ### `$bonus` meaning keys needed later
 
 
-| Key                            | Type | Typical source tag       | Later use                                         |
-| ------------------------------ | ---- | ------------------------ | ------------------------------------------------- |
-| `kakera_max_power`             | int  | `$kt`                    | Reaction-power cap (wired)                        |
-| `power_cost_per_kakera_button` | %    | —                        | Kakera react budget                               |
-| `additional_spheres`           | int  | clicked + premium        | Perk 9 EV flat SP                                 |
-| `sphere_double_chance_pct`     | %    | `$kt`                    | Perk 9 EV double chance                           |
-| `rolls_per_hour`               | dict | `$k`/`$kl`/`$kt`/premium | `net`, `sources`, `penalties.bw` / `penalties.bk` |
+| Key                              | Type | Typical source tag       | Later use                                         |
+| -------------------------------- | ---- | ------------------------ | ------------------------------------------------- |
+| `kakera_max_power`               | int  | `$kt`                    | Reaction-power cap (wired)                        |
+| `power_cost_per_kakera_button`   | %    | —                        | Kakera react budget                               |
+| `additional_spheres`             | int  | clicked + premium        | Perk 9 EV flat SP                                 |
+| `sphere_double_chance_pct`       | %    | `$kt`                    | Perk 9 EV double chance                           |
+| `rolls_per_hour`                 | dict | `$k`/`$kl`/`$kt`/premium | `net`, `sources`, `penalties.bw` / `penalties.bk` (wired: `$bw` sweep) |
+| `wish_spawn_bonus_pct`           | %    | `$k`/`$bw`/slash         | `$bw` sweep — spawn weight (wired)                |
+| `starwish_spawn_bonus_pct`       | %    | `$kt`/`$bw`/`$tuto`      | `$bw` sweep — the **extra** on top of wish (wired) |
+| `starwish_spawn_bonus_total_pct` | %    | —                        | Mudae's own `(= N%)` sum, checks the two above    |
+| `extra_key_wish_chance_pct`      | %    | `$kt`                    | Keys per wish spawn (wired)                       |
 
 
 One `$bonus` bullet is one field. Multi-number lines (`rolls_per_hour`, `oh_daily`, `megaspheres`, `random_kakera`) stay as a single dict instead of flattened keys. Identity is the meaning key, not the suffix — `$bk` on kakera-buttons is not the `$bk` rolls/hour penalty.
@@ -1398,7 +1542,11 @@ failed `$tu` and a failed roll, in both the hourly and the `$us` cycle.
 ## What the macro does not do (yet)
 
 - External sniping of other people's rolls.
-- Slash-command rolls.
+- Slash-command rolls. `Advisor › $bw` therefore removes the +10% slash spawn
+bonus `$bonus` reports, and leaves the 1,440/hour bonus cap unmodelled; both
+become live in one branch if slash rolling is ever added.
+- Sending `$bw`, `$ov` or any list command. `Advisor › $bw` names a value and
+prints the command; setting it is manual on purpose.
 - Multi-account concurrent connections (config supports it; runtime is
 one Discord session — see Phase D in `ARCHITECTURE.md`).
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`

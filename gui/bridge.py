@@ -26,6 +26,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QFont, QGuiApplication
 
 from gui.accounts import AccountStore
+from gui.bw_options_store import BwOptions, BwOptionsStore
 from gui.mudae_settings_presets import MudaeSettingsPresetStore
 from gui.presets import PresetStore
 from gui.run_summary import build_run_summary
@@ -200,6 +201,7 @@ class AppBridge(QObject):
     wishlistChanged = Signal()
     mudaeWishlistChanged = Signal()
     scopeFetchChanged = Signal()
+    bwOptionsChanged = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -214,6 +216,7 @@ class AppBridge(QObject):
         self._targets = TargetStore()
         self._wishlist = Wishlist()
         self._mudae_wishlists = MudaeWishlistStore()
+        self._bw_options = BwOptionsStore()
         # A scope fetch borrows the connection; while it holds it, sheets that
         # arrive belong to *its* account rather than the Run target's.
         self._scope_fetch_command: str = ""
@@ -702,7 +705,12 @@ class AppBridge(QObject):
 
     @Slot(str, str, result=str)
     def advisorJson(self, channel_profile_id: str, account_id: str) -> str:
-        """`$bw` trade and key rates/values for one account on one channel."""
+        """`$bw` trade and key rates/values for one account on one channel.
+
+        Reads all four sheets the `$bw` sweep needs. Each is fetched
+        independently, so any of them can be missing; the payload says which,
+        and the page offers a fetch for it rather than going blank.
+        """
         from macro.advisor import bw_advisory, key_advisory
 
         wanted = (
@@ -712,26 +720,84 @@ class AppBridge(QObject):
         )
         found = self._profiles.find_channel_by_profile_id(channel_profile_id)
         bonus: dict[str, Any] = {}
+        shop: dict[str, Any] = {}
+        settings: dict[str, Any] = {}
+        sheet_meta: dict[str, Any] = {}
         if found:
-            bonus = self._profiles.account_sheet(
-                found[1], "bonus", account_id=wanted
-            ).fields
+            channel = found[1]
+            for kind in ("bonus", "shop"):
+                read = self._profiles.account_sheet(channel, kind, account_id=wanted)
+                sheet_meta[kind] = {
+                    "read_at": read.read_at,
+                    "inferred": read.inferred,
+                }
+                if kind == "bonus":
+                    bonus = read.fields
+                else:
+                    shop = read.fields
+            settings = dict(channel.settings or {})
+
+        listing = self._mudae_wishlists.get(wanted, channel_profile_id)
+        sheet_meta["wishlist"] = {"read_at": listing.fetched_at, "inferred": False}
+        wishlist = listing.to_dict()
+        options = self._bw_options.get(wanted, channel_profile_id).to_dict()
 
         kakera_per_click = self._mean_kakera_per_click(wanted)
         return json.dumps(
             {
                 "account_id": wanted,
+                "scoped_ready": bool(scope_key(wanted, channel_profile_id)),
                 # No kakera-per-roll figure is passed: see _kakera_per_roll.
-                "bw": bw_advisory(bonus),
+                "bw": bw_advisory(
+                    bonus,
+                    settings=settings,
+                    shop=shop,
+                    wishlist=wishlist,
+                    options=options,
+                    sheet_meta=sheet_meta,
+                ),
                 "keys": key_advisory(
                     rates_by_type=self._key_rates_per_day(wanted),
                     kakera_per_click=kakera_per_click,
                     kakera_base_cost=getattr(
                         self._macro_state, "kakera_base_cost", None
                     ),
+                    wishlist=wishlist,
+                    extra_key_pct=bonus.get("extra_key_wish_chance_pct"),
                 ),
             }
         )
+
+    @Slot(str, str, str)
+    def setBwOptions(
+        self, channel_profile_id: str, account_id: str, options_json: str
+    ) -> None:
+        """Store this pair's `$bw` inputs — base pool, `$persrare`, focus.
+
+        Per pair, never merged: base pool belongs to the server and the wishlist
+        it is weighed against belongs to the account, so one pair's answer is
+        meaningless on another.
+        """
+        wanted = (
+            str(account_id or "").strip()
+            or self._run_account_id
+            or self._profiles.main_account_id
+        )
+        if not scope_key(wanted, channel_profile_id):
+            return
+        try:
+            payload = json.loads(options_json or "{}")
+        except (TypeError, ValueError):
+            return
+        if not isinstance(payload, dict):
+            return
+        current = self._bw_options.get(wanted, channel_profile_id).to_dict()
+        current.update(payload)
+        self._bw_options.set(
+            wanted, channel_profile_id, BwOptions.from_dict(current)
+        )
+        self._persist()
+        self.bwOptionsChanged.emit()
 
     def _event_days(self, kind: str, account_id: str, days: int = 14):
         """Rows of ``kind`` from the trailing window, with the days they span."""
@@ -918,6 +984,7 @@ class AppBridge(QObject):
         self._targets.load_from_settings(saved)
         self._wishlist = Wishlist.from_dict(saved.get("wishlist"))
         self._mudae_wishlists.load_from_settings(saved)
+        self._bw_options.load_from_settings(saved)
         if not initial:
             self.wishlistChanged.emit()
         self._sync_sheet_main_account()
@@ -1834,6 +1901,7 @@ class AppBridge(QObject):
             servers=self._profiles.to_settings_fragment(),
             wishlist=self._wishlist.to_settings_fragment(),
             mudae_wishlists=self._mudae_wishlists.to_settings_fragment(),
+            bw_options=self._bw_options.to_settings_fragment(),
             run_ui={
                 "minimize_to_tray": self._minimize_to_tray,
                 "allow_mudae_dms": self._allow_mudae_dms,

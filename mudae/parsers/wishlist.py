@@ -123,6 +123,11 @@ def parse_wishlist_row(line: str) -> dict[str, Any] | None:
     return {
         "name": name,
         "starwish": STARWISH_EMOJI in flags,
+        # The `+N%` flag is the character's perk-1 spawn bonus: 125% from each
+        # neighbour in wishlist order that has perk 1 maxed (the list wraps),
+        # plus the `$shop` OP1 share of its own. It was read as a sphere-value
+        # bonus and stored as `sphere_percent` for a long time; readers still
+        # accept that key. See `MUDAE_LOGIC.md`'s ouroperk section.
         "sphere_percent": _int(percent_match.group(1)) if percent_match else None,
         "spheres": spheres,
         "upgrades_full": upgrades["full"],

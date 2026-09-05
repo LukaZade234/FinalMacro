@@ -63,7 +63,11 @@ FinalMacro/
 | `fonts.py` | Register Space Grotesk + IBM Plex Mono before QML loads |
 | `shells/` | Classic / Haul / Console / Boxed chrome + per-design Run pages |
 | `views/` | Shared pages (Settings, Accounts, Servers, Presets, Mudae, stats, …) |
-| `views/AdvisorView.qml` | **Advisor hub** — `$bw` / Key EV / Wishlist / Lists / Formatter. Every sub-page states its evidence, and abstains rather than asserting where the data does not support an answer. `ListFormatterView` and `AppWishlistView` are built; `BwAdvisoryView` / `KeyEvView` / `MudaeListsView` were cleared back to empty `Item`s on 2026-09-03 to be redesigned, keeping their `ScopeBar` properties. The `$bw` and Key EV computations survive in `macro/advisor.py` with their tests |
+| `views/AdvisorView.qml` | **Advisor hub** — `$bw` / Key EV / Wishlist / Lists / Formatter. Every sub-page states its evidence, and abstains rather than asserting where the data does not support an answer. `MudaeListsView` is still an empty `Item`; the rest are built |
+| `views/BwAdvisoryView.qml` | **Advisor › `$bw`** — the rolls-against-wish-spawns sweep from `macro/bw_calc.py`. Ordered by what the page is for: the character picker and the **three optimal `$bw`** (whole wishlist / starwishes / selected character) lead, the sweep table sits beside its curve, and the inputs and evidence — both set once — sit at the bottom. The old headline tiles are reduced to one muted strip beside the picker, since they are context for the peaks rather than answers. Fetch buttons are in the body rather than the scope bar, because it reads four sheets and the bar has one slot. It never sends `$bw` |
+| `components/CharacterPicker.qml` | Pick one wishlist character by typing. Filters a couple of hundred names as you type and shows each candidate's starwish flag, perk-1 bonus, perk-4 level and spheres — the numbers that move a character's own `$bw` optimum, so the choice is not made blind. Search state is held explicitly rather than read off the field's focus, which moves to the popup's scrollbar on a drag |
+| `views/KeyEvView.qml` | **Advisor › Key EV** — keys per wish spawn as the sum `1 + $bonus extra-key chance + the character's own perk 4`, the per-type rate from the key log, and the chaos price. Claim keys report their rate and abstain on value: perk 4 says how many arrive, not what one unlocks |
+| `components/BwSweepChart.qml` | The `$bw` curves, drawn tall and narrow beside the sweep table. Two `Canvas` series on **two** axes — the whole wishlist left, the selected character right — because a single character's EV is ~65x below the total and one shared scale flattens it onto the baseline; the axes are colour-matched to their curves. Vertical guides mark each optimum with their labels stacked, since the peaks cluster within a few `$bw`. Axis maxima come off a 1/2/2.5/5/10 step ladder so the curve uses the panel |
 | `views/AppWishlistView.qml` | **Advisor › Wishlist** — the app-only character/series list the macro claims from, with the Global-vs-per-pair toggle. Two `components/WishlistSection.qml` columns; a match claims via the wish-ping path (`macro/wishlist.py`, `gui/wishlist_store.py`) |
 | `views/SpheresHubView.qml` | **Spheres hub** — Stock & shop / Upgrades / Characters. Current state and decisions; sphere *history* stays on Statistics › Spheres |
 | `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (stubbed, no parser), `MudaeBonusView` |
@@ -104,7 +108,8 @@ Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `a
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `perk9_daily.py` | Daily perk-9 click counter; the per-account spawn rate learned from ordinary rolling (`$us` excluded), kept per day over a trailing 2 weeks |
-| `advisor.py` | The `$bw` roll trade (cost exact, optimum blocked on `$wlsz+z!`) and key values (chaos only — it discounts reaction power; claim keys abstain) |
+| `advisor.py` | Assembles `$bonus` / `$settings` / `$shop` / `$wl` into the `$bw` sweep, reports per-sheet readiness so a page can offer the missing fetch, and prices keys (chaos only — it discounts reaction power; claim keys report their rate and abstain on value) |
+| `bw_calc.py` | The `$bw` sweep itself, pure and sheet-free: the published tier tables, the spawn-weight model, `$persrare` rerolls, the 2,200/hour key cap, and the guards that abstain when `$bonus` and the tiers disagree. `derive_perk1_pct` re-derives a `$wl` row's `+N%` as a staleness check |
 | `wishlist.py` / `wishlist_capture.py` | The app-only wishlist matcher (a hit claims via the wish-ping path) and the `$wl` listing capture — by DM (`$wlsz+z!`) or by clicking through the paged channel reply, per the Settings DM toggle |
 | `sphere_upgrades.py` | What the next ouroperk level is worth. Prices perk 9 only — value % from logged perk-9 income, the extra click from the perk-9 DP — and **abstains with a reason** on every perk the app cannot price |
 | `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`); forecasts spawns still to come from the learned rate, and forces the bar to 0 in the last hour before the reset |
@@ -242,7 +247,8 @@ All of this is one file: `data/settings.json` (never commit it).
 | How | `presets{}` | `MacroConfig` per preset id |
 | Binding | `targets[]` | `{ account_id, channel_profile_id, preset_id }` |
 | Wishlist | `wishlist` | App-only character/series names the macro claims on sight: `global` flag, the global lists, and `scopes{}` keyed `account_id|channel_profile_id` |
-| Captured `$wl` | `mudae_wishlists` | Mudae's own wishlist per `account_id\|channel_profile_id`: sizes, and each character's spheres and ouroperk roster |
+| Captured `$wl` | `mudae_wishlists` | Mudae's own wishlist per `account_id\|channel_profile_id`: sizes, and each character's spheres, perk-1 spawn bonus and ouroperk roster |
+| `$bw` inputs | `bw_options` | Per `account_id\|channel_profile_id`: base pool, `$persrare` rerolls, claimed-character count, slash toggle, focus character — the sweep's inputs that no Mudae sheet answers (`gui/bw_options_store.py`) |
 
 Resolution for a run: `gui/run_target.py` → `resolve_run_target()`. For a
 fetch on a page's own scope bar: `resolve_scope_target()`, same file, which

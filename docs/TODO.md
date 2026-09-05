@@ -23,7 +23,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 11. ~~**`$oc` leftover-click lookahead**~~ — remaining-need-aware collect EV + widened hunt-endgame guess threshold, geometric model kept (`macro/oc_solver.py`). +1.25 SP/board on 100 real logged boards, not significant; further `$oc` tuning is blocked on sample size, not ideas.
 12. ~~**`$oh` histogram → DP**~~ — built, and it confirms the shipped heuristic rather than beating it; see **Solvers** below. ~~**app-only wishlist**~~ — shipped (`macro/wishlist.py`, `gui/wishlist_store.py`, Advisor → Wishlist): character and series lists, bulk input in the Formatter's own `$`-joined format, a match claims via the wish-ping path with `$rt`, and a Global toggle switching between one list and one per (account, server). **Auto investor** — new module, known shape.
 13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — tables no longer parse the full log; shared filter state across tabs and a Qt list model can wait.
-14. ~~**Perk 9 threshold**~~ / **`$bw` advisory** — perk-9 EV + DP is wired (`macro/perk9_threshold.py`, opt-in `budget_aware`). `$bw` advisory is **not** blocked on `rolls_per_hour["penalties"]["bw"]` as this list long claimed: that field is parsed (`mudae/parsers/bonus.py:120`), tested (`tests/test_parsers.py:1105`), catalogued and present in live data (`bw: 19`). What it actually lacks is `$wlsz+z!` wishlist sizes, which nothing captures — so the rolls-per-hour trade is computable today and the *optimum* is not.
+14. ~~**Perk 9 threshold**~~ / ~~**`$bw` advisory**~~ — both wired. Perk-9 EV + DP in `macro/perk9_threshold.py` (opt-in `budget_aware`); the `$bw` sweep in `macro/bw_calc.py`, which was blocked on `$wlsz+z!` wishlist sizes until that capture shipped and now names an optimum.
 15. ~~**`$ot` Phase 2**~~ (solver, harness, Extra Chance and a manual Play $ot button shipped; auto-play still off pending one live batch under the new rules) / **use parsed `$settings`/`$bonus` in decisions** / **full daily autonomy** / **Phase D** — real projects.
 16. Last: split `bridge.py`, achievements, GUI polish.
 
@@ -33,7 +33,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 
 Highest first. What makes an overnight run correct and complete.
 
-1. **Use parsed `$settings` / `$bonus` in decisions** — parse-and-store is done; perk 9 DP, `$bw`, and any rule from those fields still wait. ~~claim-via-emoji~~ shipped, but *not* from `$settings`: the roll's own components say which claim mechanic is live, which is strictly better because the server and the account can disagree and only the roll shows the combination.
+1. **Use parsed `$settings` / `$bonus` in decisions** — parse-and-store is done; perk 9 DP and the `$bw` sweep now read those fields, and any *behavioural* rule from them still waits. ~~claim-via-emoji~~ shipped, but *not* from `$settings`: the roll's own components say which claim mechanic is live, which is strictly better because the server and the account can disagree and only the roll shows the combination.
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
 3. ~~**Sphere tracking + EventLog / shared stats**~~ — EventLog + daily cube + paged stats tables. Totals/charts no longer walk every event in QML.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
@@ -42,7 +42,7 @@ Highest first. What makes an overnight run correct and complete.
 7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
 8. ~~**Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).~~ Parser + follow-up in `KakeraReactor` / `chaos_followup.py`; raw windows still go to `data/chaos_log.json`.
 9. **More SP from games we already play** — ~~`$oh` DP~~ done: the shipped heuristic was already EV-optimal on its one real decision (never click a revealed blue/teal), confirmed rather than improved; an endgame bug that forfeited a sitting blue/teal is fixed. ~~`$oc` lookahead~~ — done and measured on real boards (+1.25 SP/board, not significant); `$oc` is at the ceiling of this approach, leave it. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase). Nothing obvious left in this line.
-10. ~~**App-only wishlist**~~ shipped; **`$bw` advisory** — planning, not a session blocker. The `$bw` blocker is `$wlsz+z!` capture, not the `$bonus` penalty field (see **By ease** 14).
+10. ~~**App-only wishlist**~~ and ~~**`$bw` advisory**~~ both shipped. What is left there is the **base pool**: the sweep's one guessed input, currently a user field defaulting to 2,000, and the thing that decides which `$bw` wins (pools from 500 to 20,000 move the optimum from 12 to 30). It is derivable from the server's game mode and disable lists — that is the next real step on this line.
 11. **`$dl` switch**, shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
 
@@ -66,7 +66,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 **Wave 2 — two foundations (do not skip)**
 
-- ~~`$settings` / `$bonus` parse audit~~ — fixtures + meaning catalog + field-by-field tests; capture skips the 16 direct toggles; `$bonus` is read-only (source tags are not sent). Storage trusted; **do not** change claim / kakera / roll behaviour until a later slice wires the fields. Unblocks perk 9 DP / `$bw` *work*, not those behaviours yet. (Claim-via-emoji turned out not to need it — see the Claims section of `MUDAE_LOGIC.md`.)
+- ~~`$settings` / `$bonus` parse audit~~ — fixtures + meaning catalog + field-by-field tests; capture skips the 16 direct toggles; `$bonus` is read-only (source tags are not sent). Storage trusted; **do not** change claim / kakera / roll behaviour until a later slice wires the fields. Unblocked perk 9 DP / `$bw` *work* (both since shipped), not those behaviours. (Claim-via-emoji turned out not to need it — see the Claims section of `MUDAE_LOGIC.md`.)
 - ~~One `EventLog` + JSONL (`data/events.jsonl`; one-time import of the old JSON arrays, which stay on disk).~~
 - ~~Daily cube + paged Statistics (`stats_index`; `App.statsQuery`).~~ Cards/charts sum daily cells; tables load 80 rows at a time. Shared filter state across Kakera/Spheres/Keys/Soulmates and a `QAbstractListModel` can wait.
 
@@ -95,13 +95,13 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 
 **Wave 5 — after one account is boringly reliable**
 
-- App-only wishlist → `$bw` advisory (needs wave 2 bonus). Never auto-send `$bw`.
+- ~~App-only wishlist → `$bw` advisory~~ — both shipped. Never auto-send `$bw`; the page prints the command.
 - Auto sphere / kakera investor (needs wave 3 stock tracking).
 - Phase D.
 - Daily report / session row / achievements (need wave 2 logs).
 - Split `bridge.py`, leftover regexes, GUI polish.
 
-Optional / when asked: `$ov` parser. Skip unless someone wants them: disablelist optimizer, `spcalc`, YOGRTBot, klcalc.
+Optional / when asked: `$ov` parser (its `$persrare` value is the one `$bw` input still guessed). Skip unless someone wants them: disablelist optimizer, `spcalc`, YOGRTBot, klcalc.
 
 ---
 
@@ -113,7 +113,7 @@ Optional / when asked: `$ov` parser. Skip unless someone wants them: disablelist
   channel profile (`App.fetchShop`). `perk9_click_max` drives the daily click
   cap. p9calc / spcalc still wait. Do not send `$shoprefund`.
 - ~~**Chaos parser**~~ — `mudae/parsers/chaos.py` + `macro/chaos_followup.py`. Extra hourly rolls are spent (not left for `$tu` / refill). Free kakera / wish spawns are clicked / claimed. `$kl` and stored minigames are logged only. Raw windows still go to `data/chaos_log.json`.
-- **Optional `$ov` parser** — parse when we need it; do not send it unless asked.
+- **Optional `$ov` parser** — parse when we need it; do not send it unless asked. There is now one concrete want: `$persrare`, the reroll limit `Advisor › $bw` takes as a user field. At the default of 1 the model is exactly the no-persrare one, so this changes an answer only for accounts that actually set it.
 - **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, perk 10 invested-sphere bonuses (`$oq` / `$ot` / flat SP on the first `$oh` of the day), and perk 9. `$oh` hidden clicks that show ``spU`` in chat now grant ``$oc`` (play-all spends them like bonus `$oq`). While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
 - ~~**`$p` / `$daily`**~~ — account-global; one designated channel per account (Accounts tab); auto-send when ready, before rolls; sequential if several accounts have a channel set.
 
@@ -198,8 +198,14 @@ without disturbing a live run.
     income); the extra click is *modelled* through the perk-9 DP and needs a
     spawn estimate. Everything else needs a kakera balance, roster counts or a
     per-board SP model that the app does not have.
-  - Characters **needs new capture** — the shop reports perk levels, never how
-    many characters carry them, which is exactly why OP1 cannot be priced.
+  - ~~Characters **needs new capture**~~ — the `$wlsz+z!` capture supplies it:
+    every wishlist character's roster, and its perk-1 spawn bonus. So OP1 is now
+    priceable in principle — `Advisor › $bw` already reads exactly this to weigh
+    each character — and `sphere_upgrades.py` abstaining on it is a gap that can
+    be closed rather than a missing input. What OP1 changes is the share of
+    perk 1 fed back to its own carrier, so its value is the resulting shift in
+    the `$bw` sweep's EV: the sweep is the pricing model, and wiring it in is
+    the remaining work.
   - Invest stays **blocked**: no kakera balance, and the invest command's syntax
     and reply are undocumented.
 - ~~**Advisor hub**~~ — `$bw` / Key EV / Wishlist / Lists / Formatter
@@ -216,11 +222,21 @@ without disturbing a live run.
   - **Only chaos keys are priced**, and not for claim reasons: a chaos key
     halves the reaction-power cost of a kakera click, so its value is the power
     saved converted to extra clicks at the account's own kakera-per-click
-    (2,706 kakera/use against a measured 5,412/click). The cost cancels out, so
+    (2,650 kakera/use against a measured 5,300/click). The cost cancels out, so
     the figure is robust to the click cost. Bronze / silver / gold / omega are
-    claim keys whose worth is whatever the character returns — no per-character
-    perk-4 level exists, so they report their rate and abstain.
-  - The `$bw` **optimum** stays blocked on `$wlsz+z!` capture.
+    claim keys whose worth is whatever the character returns, and **that has not
+    changed** — but the half that was missing has arrived: the `$wl` capture
+    carries each character's own perk-4 level, so keys *per wish spawn* is now
+    modelled exactly (`1 + $bonus extra-key chance + perk 4`). Perk 4 says how
+    many keys arrive, never what one unlocks, so the value column still abstains.
+  - ~~The `$bw` **optimum** stays blocked on `$wlsz+z!` capture.~~ Unblocked —
+    the sweep is `macro/bw_calc.py` and its method is documented in
+    `MUDAE_LOGIC.md`'s `$bw` section. Two findings came out of building it:
+    the `+N%` on a `$wl` row is the **perk-1 spawn bonus** (`MUDAE_LOGIC.md`
+    had it as a sphere-value bonus and as unexplained; the rule reproduces all
+    160 live rows, and the piece that was missing is that the wishlist wraps),
+    and `starwish_spawn_bonus_pct` is the **extra on top of** wish rather than
+    the total, which Mudae's own `(= N%)` sum now confirms in the parser.
 
 ---
 
@@ -407,7 +423,8 @@ The guide is a fair transcription of their published “How it works” pages. S
 
 - ~~**Perk 9 click/skip DP**~~ — [p9calc](https://colblitz.com/mudae/p9calc)'s `EV = (base × (1 + double) + flat) × (1 + SP9×0.10)` and `V(spawns left, clicks left)` are implemented in `macro/perk9_threshold.py` and gate `passes_sphere_reaction` when the preset's **budget_aware** toggle is on (off = the old static `types_allowed`). Verified against Colblitz's published EV column to ±0.04 on all nine colours; their base SP for dark (104.5) and light (75.9) fill the gap in `SPHERE_BASE_SP`. Spawn rates and values are editable per colour in Presets since the sample is still being re-measured; `estimate_sphere_colour_frequency` shows our own logged mix beside them as advisory only. Against one static filter tuned for a 120-spawn day the DP is +121% at 30 spawns, +47% at 60, +6% at 120, +28% at 250 (`scripts/perk9_bakeoff.py --tuned-for 120`). A standalone “how many OP9 chars to skip teal” page is still optional.
 
-- **`$bw` / key EV — medium, advisory only.** [bwcalc](https://colblitz.com/mudae/bwcalc): sweep `$bw` for keys/hour (wishlist / starwish / per-character). Formulas are published; **absolute** keys/hr are community guesses — the *peak* is what to trust. **Action:** a Settings/Utilities paste of `$bonus` + `$wlsz+z!` (rolls/hour + `$bw` penalty are already parsed) after the app-only wishlist. Never auto-send `$bw`.
+- ~~**`$bw` / key EV**~~ — shipped as `macro/bw_calc.py` + `Advisor › $bw` and `Advisor › Key EV`. [bwcalc](https://colblitz.com/mudae/bwcalc)'s published tier tables, spawn-weight model, `$persrare` rerolls and 2,200/hour key cap are all implemented, and the tables are confirmed against the live `$bonus` at two different `$bw` values. No paste step was needed in the end: every input is a sheet the app already fetches, except the base pool and `$persrare` N, which are user fields. Their warning holds — **absolute** keys/hr are community guesses, the *peak* is what to trust — so the page says the peak is flat and names the base pool as what moves it. `$bw` is never auto-sent; the page prints the command.
+  Still open on this line: derive the base pool from game mode, and parse `$ov` for the real `$persrare` N. Slash commands are modelled but not applied — the macro rolls with `$`; if slash rolling ships, the +10% bonus and the 1,440/hour cap become live in one branch.
 
 - **Disablelist optimizer — skip for now.** [dlcalc](https://colblitz.com/mudae/dlcalc) is set-cover + pool caps. The ILP is a day; the **bundle↔character dump** is the real product and goes stale. Keep the one-click `$dl`/`$adl`/`$wl` switch. Revisit only if we ingest a refreshable dump ([MudaeDB](https://github.com/LilJamJam/MudaeDB) / [DL-Builds](https://github.com/PRCSakura/Mudae-DL-Builds)).
 
@@ -420,6 +437,6 @@ The guide is a fair transcription of their published “How it works” pages. S
 - **Heatmaps / click-history / harvest explainer** — web-solver chrome. Our log line (`format_solver_stats`) is enough.
 - **Their hosted stats tables** — games *their* bot saw, not ours.
 
-Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5). Perk 9 / `$bw` can use stored `$bonus` fields; do not start them as a parser project.
+Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5). Perk 9 and `$bw` are both done, and both did exactly this — read stored `$bonus` fields rather than becoming parser projects.
 
 Public Python references if a port stalls: [Svessinn/Mudae](https://github.com/Svessinn/Mudae) (all four games + sims), [GAP22/oq-solver](https://github.com/GAP22/oq-solver), [mudae-sphere-solver](https://github.com/ShrimpandGGrits/mudae-sphere-solver). Colblitz itself is server-side — no client JS to read.

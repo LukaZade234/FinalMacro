@@ -36,6 +36,10 @@ def test_parse_bonus_player_sheet():
     assert result.fields["wishseries_slots"] == 10
     assert result.fields["wish_spawn_bonus_pct"] == 650
     assert result.fields["starwish_spawn_bonus_pct"] == 665
+    # The unbolded "(= 1,315%)" that closes the bullet, and the reason we know
+    # the field above is the extra on top of wish rather than the total.
+    assert result.fields["starwish_spawn_bonus_total_pct"] == 1315
+    assert result.fields["wish_spawn_bonus_pct"] + 665 == 1315
     assert result.fields["starwish_slots"] == 15
     assert result.fields["wishprotect_spawn_chance"] == "1/499"
     assert result.fields["rt_cooldown"] == "5h"

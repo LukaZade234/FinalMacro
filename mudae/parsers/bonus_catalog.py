@@ -64,6 +64,13 @@ BONUS_MEANINGS: tuple[BonusMeaning, ...] = (
         "Additional % spawn bonus for $starwish",
     ),
     BonusMeaning(
+        "starwish_spawn_bonus_total_pct",
+        "percent",
+        None,
+        False,
+        "Wish + starwish spawn bonus combined, as Mudae totals it",
+    ),
+    BonusMeaning(
         "starwish_slots",
         "int",
         None,

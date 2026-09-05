@@ -151,3 +151,30 @@ def test_bridge_exposes_and_persists_a_capture(tmp_path, monkeypatch):
     on_disk = json.loads(path.read_text())["mudae_wishlists"]["acc-a|chan-1"]
     assert on_disk["wl_used"] == 160
     assert AppBridge()._mudae_wishlists.get("acc-a", "chan-1").owner == "lukazade234"
+
+
+def test_the_perk_one_bonus_reads_under_either_field_name():
+    """`sphere_percent` is the stored name and stays the stored name.
+
+    It is really the character's perk-1 spawn bonus, and a build briefly renamed
+    it to `perk1_spawn_pct`. That is unsafe here: `data/` is Syncthing-shared,
+    an instance on an older build round-trips the file, and not recognising the
+    key made it write the row back with the value gone — 160 of them at once.
+    So the legacy name is what gets written, and both are read.
+    """
+    listing = MudaeWishlist.from_dict(
+        {
+            "owner": "lukazade234",
+            "entries": [
+                {"name": "Rebecca", "sphere_percent": 188, "spheres": 30000,
+                 "upgrades_full": True, "upgrades": {}},
+                {"name": "Reze", "perk1_spawn_pct": 313, "spheres": 30000,
+                 "upgrades_full": True, "upgrades": {}},
+            ],
+        }
+    )
+    assert [entry["sphere_percent"] for entry in listing.entries] == [188, 313]
+    # Written back under the name every build understands.
+    stored = listing.to_dict()["entries"][1]
+    assert stored["sphere_percent"] == 313
+    assert "perk1_spawn_pct" not in stored

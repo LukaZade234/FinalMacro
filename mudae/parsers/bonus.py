@@ -28,6 +28,8 @@ _SOURCE_PART_RE = re.compile(
     re.IGNORECASE,
 )
 _DOLLAR_CMD_RE = re.compile(r"\$([a-zA-Z]+)")
+# The unbolded "(= 1,315%)" that closes the starwish spawn-bonus bullet.
+_STARWISH_TOTAL_RE = re.compile(r"\(\s*=\s*([\d,]+(?:\.\d+)?)\s*%\s*\)")
 _INTERVAL_RE = re.compile(r"this interval:\s*([\d.]+%)", re.IGNORECASE)
 
 _EMOJI_RE = re.compile(r"<:\w+:\d+>\s*")
@@ -345,6 +347,14 @@ def _parse_catalog_line(body: str, extras: list[str]) -> dict[str, Any] | None:
 
     if "spawn bonus for $starwish" in lowered or "spawn bonus for starwish" in lowered:
         parsed["starwish_spawn_bonus_pct"] = headline
+        # The bullet ends with an unbolded "(= 1,315%)" holding the combined
+        # wish + starwish figure. `_headline` only reads bold text, so it is
+        # captured separately — `macro/bw_calc.py` decomposes the two bonuses
+        # into a $bw part and a static part, and Mudae's own total is the one
+        # check on that arithmetic that does not come from the same source.
+        total = _STARWISH_TOTAL_RE.search(body)
+        if total is not None:
+            parsed["starwish_spawn_bonus_total_pct"] = _coerce_value(total.group(1))
         _tag(tags, "starwish_spawn_bonus_pct", line_tags)
         parsed["_source_tags"] = tags
         return parsed

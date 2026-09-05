@@ -81,7 +81,18 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
         spheres = int(raw.get("spheres") or 0)
     except (TypeError, ValueError):
         spheres = 0
+    # The `+N%` is the character's **perk-1 spawn bonus**, not a sphere-value
+    # bonus — see `MUDAE_LOGIC.md`'s ouroperk section for the rule that
+    # reproduces every row of a real capture.
+    #
+    # The key keeps its original, wrong-sounding name deliberately. `data/` is
+    # Syncthing-shared across machines, and an instance running an older build
+    # round-trips this file: renaming the key made that instance write the row
+    # back with the value dropped, wiping all 160 of them. `perk1_spawn_pct` is
+    # still read so a file written by a build that did rename it survives.
     percent = raw.get("sphere_percent")
+    if percent is None:
+        percent = raw.get("perk1_spawn_pct")
     try:
         percent = int(percent) if percent is not None else None
     except (TypeError, ValueError):
