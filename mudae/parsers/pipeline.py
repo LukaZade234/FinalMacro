@@ -30,6 +30,8 @@ from mudae.parsers.minigame_exhausted import (
 )
 from mudae.parsers.ohu import parse_ohu
 from mudae.parsers.ohu8 import parse_ohu8
+from mudae.parsers.limroul import parse_limroul
+from mudae.parsers.ov import parse_ov
 from mudae.parsers.dk import parse_dk
 from mudae.parsers.reaction_power import parse_kakera_react_denied, parse_ku
 from mudae.parsers.tu import parse_tu
@@ -41,6 +43,8 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "tu": parse_tu,
     "ku": parse_ku,
     "settings": parse_settings,
+    "ov": parse_ov,
+    "limroul": parse_limroul,
     "us": parse_us,
     "ohu": parse_ohu,
     "ohu8": parse_ohu8,
@@ -63,6 +67,8 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.MAINTENANCE: "maintenance",
     MessageKind.ROLL_OWNERSHIP: "roll ownership",
     MessageKind.OWNERSHIP_UPDATE: "ownership update",
+    MessageKind.OV: "$ov",
+    MessageKind.LIMROUL: "$limroul",
     MessageKind.SHOP: "$shop",
     MessageKind.WISHLIST: "$wl",
     MessageKind.P: "$p",
@@ -221,6 +227,10 @@ def parse_mudae_message(
         result = parse_settings(snapshot.content)
         _store_settings_cache(snapshot, result)
         return result
+    if kind == MessageKind.OV:
+        return parse_ov(snapshot.content)
+    if kind == MessageKind.LIMROUL:
+        return parse_limroul(snapshot.content)
     if kind == MessageKind.TU:
         return parse_tu(snapshot.content)
     if kind == MessageKind.P:
@@ -320,6 +330,10 @@ def _parse_command_response(
             )
         elif kind == MessageKind.SHOP:
             result = parse_shop_snapshot(snapshot)
+        elif kind == MessageKind.OV:
+            result = parse_ov(snapshot.content)
+        elif kind == MessageKind.LIMROUL:
+            result = parse_limroul(snapshot.content)
         elif kind == MessageKind.SETTINGS:
             result = parse_settings(snapshot.content)
             _store_settings_cache(snapshot, result)

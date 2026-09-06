@@ -117,3 +117,88 @@ def test_kakera_stats_format():
 def test_empty_input():
     assert extract_character_names("") == []
     assert format_mudae_character_list("   ") == ""
+
+
+# --- plain lists ------------------------------------------------------------
+
+# Reported 2026-09-05: pasting a list you are *building* — no ranks, no series,
+# just names — returned nothing at all, because every extractor required a
+# "#N - " prefix.
+PLAIN_LIST = """
+Satsuki Sumeragi
+Kakure Meme
+Yumiko Sakaki
+Yoshimoto Shizuka
+Lavinia Reni
+Mystia Lorelei
+Anko Kitashirakawa
+Lucrezia Borgia (F/R)
+An Shiraishi
+Necoma Karin
+Silvie Rubia
+Maya Fey
+Nodoka Manabe
+Yuki Nagato
+Foxplushy
+""".strip()
+
+PLAIN_EXPECTED = [
+    "Satsuki Sumeragi",
+    "Kakure Meme",
+    "Yumiko Sakaki",
+    "Yoshimoto Shizuka",
+    "Lavinia Reni",
+    "Mystia Lorelei",
+    "Anko Kitashirakawa",
+    "Lucrezia Borgia (F/R)",
+    "An Shiraishi",
+    "Necoma Karin",
+    "Silvie Rubia",
+    "Maya Fey",
+    "Nodoka Manabe",
+    "Yuki Nagato",
+    "Foxplushy",
+]
+
+
+def test_a_plain_list_of_names_one_per_line():
+    assert extract_character_names(PLAIN_LIST) == PLAIN_EXPECTED
+    assert format_mudae_character_list(PLAIN_LIST) == "$".join(PLAIN_EXPECTED)
+
+
+def test_parentheses_in_a_name_survive():
+    """`Lucrezia Borgia (F/R)` is one name, not a name and a note."""
+    assert "Lucrezia Borgia (F/R)" in extract_character_names(PLAIN_LIST)
+
+
+def test_a_plain_list_accepts_the_separators_the_wishlist_boxes_do():
+    assert extract_character_names("Rem$Emilia, Power\nMakima") == [
+        "Rem",
+        "Emilia",
+        "Power",
+        "Makima",
+    ]
+
+
+def test_the_formatters_own_output_pastes_back_into_it():
+    once = format_mudae_character_list(PLAIN_LIST)
+    assert format_mudae_character_list(once) == once
+
+
+def test_a_plain_list_dedupes_and_collapses_whitespace():
+    assert extract_character_names("Rem\n  Marin   Kitagawa\nRem") == [
+        "Rem",
+        "Marin Kitagawa",
+    ]
+
+
+def test_a_listings_chrome_is_still_dropped():
+    """A bare line inside a *ranked* paste is a header or an attachment name,
+    not a character — so the plain-list fallback must not fire there."""
+    text = "Wishlist of lukazade234\n#1 - Rem 💞 - Re:Zero\n#2 - Emilia 💞 - Re:Zero\nImage"
+    assert extract_character_names(text) == ["Rem", "Emilia"]
+
+
+def test_one_bare_name_is_just_a_list_of_one():
+    assert extract_character_names("Foxplushy") == ["Foxplushy"]
+    assert format_mudae_character_list("Foxplushy") == "Foxplushy"

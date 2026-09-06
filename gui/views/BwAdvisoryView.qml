@@ -50,6 +50,45 @@ Item {
     readonly property var sweep: bw.sweep || { available: false, points: [] }
     readonly property var options: bw.options || {}
     readonly property var sheets: bw.inputs || {}
+    // Two of the three typed inputs now have sheets behind them. Each field
+    // stands down when its sheet answered, rather than sitting there inviting a
+    // number that would be ignored.
+    readonly property bool persrareFromOv: (bw.options || {}).persrare_source === "ov"
+    readonly property bool poolFromLimroul: (bw.options || {}).base_pool_source === "limroul"
+
+    // The four roulettes $limroul reports, as picker rows. "Auto" is only a
+    // real answer while they agree; when they differ it is the unanswered state.
+    readonly property var limroulLimits: (bw.options || {}).limroul_limits || {}
+    readonly property bool hasLimroul: Object.keys(root.limroulLimits).length > 0
+    readonly property var poolChoices: {
+        var out = [{ key: "", label: root.autoPoolLabel }]
+        var order = ["wa", "ha", "wg", "hg"]
+        for (var i = 0; i < order.length; i++) {
+            var key = order[i]
+            if (root.limroulLimits[key] === undefined)
+                continue
+            out.push({
+                key: key,
+                label: "$" + key + "  " + Number(root.limroulLimits[key]).toLocaleString(
+                    Qt.locale(), "f", 0)
+            })
+        }
+        return out
+    }
+    readonly property string autoPoolLabel: {
+        var agree = (root.bw.options || {}).limroul_agree
+        return (agree === null || agree === undefined)
+               ? "Pick a roulette"
+               : "All four  " + Number(agree).toLocaleString(Qt.locale(), "f", 0)
+    }
+    function poolChoiceIndex() {
+        var chosen = String((root.bw.options || {}).limroul_pool || "")
+        for (var i = 0; i < root.poolChoices.length; i++) {
+            if (root.poolChoices[i].key === chosen)
+                return i
+        }
+        return 0
+    }
 
     readonly property var entries: wishlist.entries || []
 
@@ -671,7 +710,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 4
                 Layout.alignment: Qt.AlignTop
-                title: "Inputs no sheet answers"
+                title: "Inputs"
                 titleSize: Theme.sizeMedium
 
                 GridLayout {
@@ -682,30 +721,54 @@ Item {
 
                     Label {
                         text: "Base pool"
-                        color: Theme.fg
+                        color: root.poolFromLimroul ? Theme.mute : Theme.fg
                         font.pixelSize: Theme.sizeSmall
                     }
 
+                    // Read-only once $limroul has answered: the pool is that
+                    // sheet's limit less the wishlist, which carries its own
+                    // weight in the sweep, so typing over it would double-count.
                     ThemedSpinBox {
                         Layout.fillWidth: true
                         from: 1
                         to: 200000
                         stepSize: 100
-                        editable: true
+                        editable: !root.poolFromLimroul
+                        enabled: !root.poolFromLimroul
                         value: root.options.base_pool || 2000
                         onValueModified: root.setOption("base_pool", value)
                     }
 
                     Label {
-                        text: "$persrare rerolls"
+                        visible: root.hasLimroul
+                        text: "Roulette"
                         color: Theme.fg
                         font.pixelSize: Theme.sizeSmall
                     }
 
+                    ThemedComboBox {
+                        Layout.fillWidth: true
+                        visible: root.hasLimroul
+                        model: root.poolChoices
+                        textRole: "label"
+                        currentIndex: root.poolChoiceIndex()
+                        onActivated: root.setOption(
+                            "limroul_pool", root.poolChoices[index].key)
+                    }
+
+                    Label {
+                        text: "$persrare"
+                        color: root.persrareFromOv ? Theme.mute : Theme.fg
+                        font.pixelSize: Theme.sizeSmall
+                    }
+
+                    // Read-only once $ov has been fetched: the sheet is Mudae's
+                    // own answer, and this field only ever stood in for it.
                     ThemedSpinBox {
                         Layout.fillWidth: true
                         from: 1
                         to: 20
+                        enabled: !root.persrareFromOv
                         value: root.options.persrare_n || 1
                         onValueModified: root.setOption("persrare_n", value)
                     }
@@ -737,11 +800,25 @@ Item {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Base pool is every rollable character outside your wishlist. It "
-                          + "follows the server's game mode and disable lists, and nothing "
-                          + "derives it yet — 2,000 is a placeholder, and it is what decides "
-                          + "which $bw wins. $persrare comes from $ov, which has no parser; "
-                          + "at 1 reroll the model is unchanged."
+                    text: {
+                        var opts = root.bw.options || {}
+                        if (root.poolFromLimroul) {
+                            return "Base pool is the "
+                                   + Number(opts.limroul_limit).toLocaleString(Qt.locale(), "f", 0)
+                                   + " characters $limroul says you can roll in $"
+                                   + opts.limroul_pool_used + ". It is what decides which "
+                                   + "$bw wins, so it is read rather than typed."
+                        }
+                        if (opts.limroul_needs_pick)
+                            return "Your four roulettes have different $limroul limits, so "
+                                   + "which one you roll decides the base pool. Pick it above; "
+                                   + "until then the typed value stands."
+                        return "Base pool is every rollable character outside your wishlist, "
+                               + "and it is what decides which $bw wins. Fetch $limroul to "
+                               + "read it instead of guessing — 2,000 is only a placeholder. "
+                               + "$persrare comes from $ov the same way; at 1 the model is "
+                               + "unchanged either way."
+                    }
                     color: Theme.mute
                     font.pixelSize: Theme.sizeMicro
                     wrapMode: Text.WordWrap
@@ -764,7 +841,11 @@ Item {
                         { key: "shop", label: "$shop", command: "shop",
                           commandLabel: "$shop" },
                         { key: "settings", label: "$settings", command: "settings",
-                          commandLabel: "$settings" }
+                          commandLabel: "$settings" },
+                        { key: "ov", label: "$ov", command: "ov",
+                          commandLabel: "$ov" },
+                        { key: "limroul", label: "$limroul", command: "limroul",
+                          commandLabel: "$limroul" }
                     ]
 
                     delegate: RowLayout {

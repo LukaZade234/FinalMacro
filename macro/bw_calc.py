@@ -77,10 +77,10 @@ PERK4_KEY_PCT: tuple[float, ...] = (0.0, 4.0, 8.0, 12.0, 16.0, 20.0, 30.0)
 # Perk 1 at max, from `MUDAE_LOGIC.md`'s ouroperk table.
 PERK1_MAX_PCT = 125.0
 
-# Characters that are not on the wishlist, each contributing weight 1. Genuinely
-# unknown: it depends on the server's game mode and disable lists, and nothing in
-# the app derives it yet, so it is an input the page exposes rather than a
-# constant anything should trust.
+# How many different characters the roulette can roll, each contributing weight
+# 1 — the figure `$limroul` reports, wishlist included. Only a placeholder here:
+# it depends on the server's game mode and disable lists, so the page reads it
+# off `$limroul` when that sheet is available and falls back to this when not.
 DEFAULT_BASE_POOL = 2000
 
 # `MUDAE_LOGIC.md` "Hourly key limit" - Mudae refuses key gains past this.

@@ -64,6 +64,11 @@ from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.bonus_catalog import fields_to_bonus_display_dict
 from mudae.parsers.settings import SETTINGS_FIELD_KEYS
+from mudae.parsers.limroul_catalog import (
+    LIMROUL_FIELD_KEYS,
+    fields_to_limroul_display_dict,
+)
+from mudae.parsers.ov_catalog import OV_FIELD_KEYS, fields_to_ov_display_dict
 from mudae.parsers.shop_catalog import fields_to_shop_display_dict
 from mudae.parsers.settings_normalize import normalize_settings_fields
 from mudae.settings_commands import (
@@ -125,12 +130,22 @@ def profile_kind_from_parse(parsed: ParseResult) -> str | None:
         return "bonus"
     if parsed.kind == MessageKind.SHOP:
         return "shop"
+    if parsed.kind == MessageKind.OV:
+        return "ov"
+    if parsed.kind == MessageKind.LIMROUL:
+        return "limroul"
     if parsed.kind != MessageKind.COMMAND_RESPONSE:
         return None
-    parser_cmd = str(parsed.fields.get("parser_command") or "").lower().lstrip("$")
-    if parser_cmd in {"settings", "bonus", "shop"}:
-        return parser_cmd
+    # ``parser_command`` is only stamped when it differs from what was typed, so
+    # a reply to a command that is already its own parser id (``$ov``) carries
+    # only ``command``. Both are exact ids, so both are safe to match on.
+    for key in ("parser_command", "command"):
+        candidate = str(parsed.fields.get(key) or "").lower().lstrip("$")
+        if candidate in {"settings", "bonus", "shop", "ov", "limroul"}:
+            return candidate
     label = str(parsed.fields.get("response_label") or "").lower()
+    # No substring test for ``ov``: two letters match far too much. It is
+    # recognised by its MessageKind and its exact parser id above.
     if "settings" in label:
         return "settings"
     if "bonus" in label:
@@ -160,6 +175,12 @@ def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
 def profile_fields_from_parse(parsed: ParseResult, kind: str) -> dict[str, Any]:
     if kind == "settings":
         allowed = set(SETTINGS_FIELD_KEYS)
+        return {key: value for key, value in parsed.fields.items() if key in allowed}
+    if kind == "ov":
+        allowed = set(OV_FIELD_KEYS)
+        return {key: value for key, value in parsed.fields.items() if key in allowed}
+    if kind == "limroul":
+        allowed = set(LIMROUL_FIELD_KEYS)
         return {key: value for key, value in parsed.fields.items() if key in allowed}
     return {
         key: value
@@ -707,7 +728,7 @@ class AppBridge(QObject):
     def advisorJson(self, channel_profile_id: str, account_id: str) -> str:
         """`$bw` trade and key rates/values for one account on one channel.
 
-        Reads all four sheets the `$bw` sweep needs. Each is fetched
+        Reads every sheet the `$bw` sweep can use. Each is fetched
         independently, so any of them can be missing; the payload says which,
         and the page offers a fetch for it rather than going blank.
         """
@@ -719,23 +740,28 @@ class AppBridge(QObject):
             or self._profiles.main_account_id
         )
         found = self._profiles.find_channel_by_profile_id(channel_profile_id)
-        bonus: dict[str, Any] = {}
-        shop: dict[str, Any] = {}
+        sheets: dict[str, dict[str, Any]] = {
+            "bonus": {},
+            "shop": {},
+            "ov": {},
+            "limroul": {},
+        }
         settings: dict[str, Any] = {}
         sheet_meta: dict[str, Any] = {}
         if found:
             channel = found[1]
-            for kind in ("bonus", "shop"):
+            for kind in ("bonus", "shop", "ov", "limroul"):
                 read = self._profiles.account_sheet(channel, kind, account_id=wanted)
                 sheet_meta[kind] = {
                     "read_at": read.read_at,
                     "inferred": read.inferred,
                 }
-                if kind == "bonus":
-                    bonus = read.fields
-                else:
-                    shop = read.fields
+                sheets[kind] = read.fields
             settings = dict(channel.settings or {})
+        bonus = sheets["bonus"]
+        shop = sheets["shop"]
+        ov = sheets["ov"]
+        limroul = sheets["limroul"]
 
         listing = self._mudae_wishlists.get(wanted, channel_profile_id)
         sheet_meta["wishlist"] = {"read_at": listing.fetched_at, "inferred": False}
@@ -753,6 +779,8 @@ class AppBridge(QObject):
                     settings=settings,
                     shop=shop,
                     wishlist=wishlist,
+                    ov=ov,
+                    limroul=limroul,
                     options=options,
                     sheet_meta=sheet_meta,
                 ),
@@ -4315,6 +4343,24 @@ class AppBridge(QObject):
     ) -> str:
         return self._account_sheet_payload(
             channel_profile_id, "shop", account_id, fields_to_shop_display_dict
+        )
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def formatChannelOvDisplayJson(
+        self, channel_profile_id: str, account_id: str = ""
+    ) -> str:
+        return self._account_sheet_payload(
+            channel_profile_id, "ov", account_id, fields_to_ov_display_dict
+        )
+
+    @Slot(str, result=str)
+    @Slot(str, str, result=str)
+    def formatChannelLimroulDisplayJson(
+        self, channel_profile_id: str, account_id: str = ""
+    ) -> str:
+        return self._account_sheet_payload(
+            channel_profile_id, "limroul", account_id, fields_to_limroul_display_dict
         )
 
     @Slot(str, result=str)

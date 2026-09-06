@@ -1,6 +1,7 @@
 """How a page's fetch button reaches the scope its bar is pointed at.
 
-Every sheet the app parses — ``$settings``, ``$bonus``, ``$shop``, ``$wl`` —
+Every sheet the app parses — ``$settings``, ``$ov``, ``$limroul``, ``$bonus``,
+``$shop``, ``$wl`` —
 describes exactly one ``(account, server)`` pair, and is only obtainable by
 sending a command *as that account, in that server*. So a fetch button on a
 page whose scope bar has been detached from the Run target has a problem the
@@ -41,6 +42,8 @@ from dataclasses import dataclass
 # worth being explicit about.
 SCOPE_FETCH_COMMANDS: dict[str, str] = {
     "settings": "$settings",
+    "ov": "$ov",
+    "limroul": "$limroul",
     "bonus": "$bonus",
     "shop": "$shop",
     "wishlist": "$wl",

@@ -55,7 +55,7 @@ FinalMacro/
 | `palettes.js` / `skins.js` / `clock.js` | Colour themes, layout shells, UTC stats buckets (QML `.pragma library`) |
 | `qmldir` | Registers `Theme` and `SphereAssets` singletons |
 | `accounts.py` / `presets.py` / `server_profiles.py` / `targets.py` | JSON stores inside `data/settings.json` |
-| `sheet_store.py` | Per-account `$bonus` / `$shop` on a channel profile (`$settings` stays flat — it is the server's). Reads a pre-split sheet back for the main account only, flagged `inferred` |
+| `sheet_store.py` | Per-account `$bonus` / `$shop` / `$ov` / `$limroul` on a channel profile (`$settings` stays flat — it is the server's). Reads a pre-split sheet back for the main account only, flagged `inferred` |
 | `run_target.py` | Resolve an account + channel + preset pair. `resolve_run_target()` reads the *active* selections (what Run would connect to); `resolve_scope_target()` resolves one explicit pair without touching them, which is what a detached `ScopeBar` fetch needs |
 | `scope_fetch.py` | Which of four routes a sheet fetch takes — `send` / `hop` / `temporary` / `blocked` — as plain data, plus the command allowlist. See "Temporary connections" below |
 | `settings.py` | Load/save `data/settings.json` |
@@ -70,11 +70,12 @@ FinalMacro/
 | `components/BwSweepChart.qml` | The `$bw` curves, drawn tall and narrow beside the sweep table. Two `Canvas` series on **two** axes — the whole wishlist left, the selected character right — because a single character's EV is ~65x below the total and one shared scale flattens it onto the baseline; the axes are colour-matched to their curves. Vertical guides mark each optimum with their labels stacked, since the peaks cluster within a few `$bw`. Axis maxima come off a 1/2/2.5/5/10 step ladder so the curve uses the panel |
 | `views/AppWishlistView.qml` | **Advisor › Wishlist** — the app-only character/series list the macro claims from, with the Global-vs-per-pair toggle. Two `components/WishlistSection.qml` columns; a match claims via the wish-ping path (`macro/wishlist.py`, `gui/wishlist_store.py`) |
 | `views/SpheresHubView.qml` | **Spheres hub** — Stock & shop / Upgrades / Characters. Current state and decisions; sphere *history* stays on Statistics › Spheres |
-| `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (stubbed, no parser), `MudaeBonusView` |
+| `views/MudaeOvView.qml` | **Mudae › `$ov`** — the player's sheet beside a `$limroul` card, because `$ov`'s own last bullet is the pointer to it. Both are read-only and neither is ever sent unprompted |
+| `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (`$ov`, the player's own settings), `MudaeBonusView` |
 | `components/ScopeBar.qml` | Account + channel picker that starts on the Run target then detaches, so a page can read account B while account A rolls. Unlike `ServerChannelSelectors` it never moves the Run target. `fetchCommand` puts that page's fetch button on the right of the bar |
 | `components/ScopeFetchButton.qml` | The fetch button in the scope bar. Never disabled for being disconnected — it takes the temporary route — only for the macro being busy, and it names which |
 | `components/` | Themed controls used by Classic and the shared views |
-| `components/MudaeSheetPanel.qml` | One parsed sheet (`$settings` / `$bonus` / `$shop`) as sectioned label/value rows; `sheetKind` picks the slot. Replaced three copy-pasted panels and reads `Theme` sizes rather than hardcoded pixels, so it takes each shell's shape |
+| `components/MudaeSheetPanel.qml` | One parsed sheet (`$settings` / `$ov` / `$bonus` / `$shop`) as sectioned label/value rows; `sheetKind` picks the slot, the value/label column widths and whether an unset row is drawn — the two settings sheets print a fixed line list, so a blank row there is news. Replaced three copy-pasted panels and reads `Theme` sizes rather than hardcoded pixels, so it takes each shell's shape |
 | `assets/kakera/` | Kakera + sphere button artwork |
 
 `ShellSwitcher` picks `gui/shells/<Design>Shell.qml` from `Theme.layoutId`.
@@ -108,8 +109,8 @@ Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `a
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
 | `perk9_daily.py` | Daily perk-9 click counter; the per-account spawn rate learned from ordinary rolling (`$us` excluded), kept per day over a trailing 2 weeks |
-| `advisor.py` | Assembles `$bonus` / `$settings` / `$shop` / `$wl` into the `$bw` sweep, reports per-sheet readiness so a page can offer the missing fetch, and prices keys (chaos only — it discounts reaction power; claim keys report their rate and abstain on value) |
-| `bw_calc.py` | The `$bw` sweep itself, pure and sheet-free: the published tier tables, the spawn-weight model, `$persrare` rerolls, the 2,200/hour key cap, and the guards that abstain when `$bonus` and the tiers disagree. `derive_perk1_pct` re-derives a `$wl` row's `+N%` as a staleness check |
+| `advisor.py` | Assembles `$bonus` / `$settings` / `$shop` / `$wl` / `$ov` / `$limroul` into the `$bw` sweep — `$ov` supplying `$persrare` and `$limroul` the base pool, the two inputs the page otherwise takes as typed numbers — reports per-sheet readiness so a page can offer the missing fetch, and prices keys (chaos only — it discounts reaction power; claim keys report their rate and abstain on value) |
+| `bw_calc.py` | The `$bw` sweep itself, pure and sheet-free: the published tier tables, the spawn-weight model, the `$persrare` correction, the 2,200/hour key cap, and the guards that abstain when `$bonus` and the tiers disagree. `derive_perk1_pct` re-derives a `$wl` row's `+N%` as a staleness check |
 | `wishlist.py` / `wishlist_capture.py` | The app-only wishlist matcher (a hit claims via the wish-ping path) and the `$wl` listing capture — by DM (`$wlsz+z!`) or by clicking through the paged channel reply, per the Settings DM toggle |
 | `sphere_upgrades.py` | What the next ouroperk level is worth. Prices perk 9 only — value % from logged perk-9 income, the extra click from the perk-9 DP — and **abstains with a reason** on every perk the app cannot price |
 | `perk9_threshold.py` | Perk-9 adaptive click/skip EV + DP (opt-in `budget_aware`); forecasts spawns still to come from the learned rate, and forces the bar to 0 in the last hour before the reset |
@@ -145,6 +146,8 @@ Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `a
 | `parsers/pipeline.py` | Classify + parse a snapshot. Recognises Mudae's "under maintenance" reply **first**, ahead of the step that pairs a reply with the command that was sent |
 | `parsers/maintenance.py` | Mudae's reboot reply and its stated window |
 | `parsers/minigame.py` | Recognise a sphere-game grid (`$oh` / `$oc` / `$oq` / `$ot`) **before** the claim heuristics — the board prose is all bold names, and Mudae re-edits the grid on every click |
+| `parsers/limroul.py` / `parsers/limroul_catalog.py` | `$limroul`, the roulette's character pool — the `$bw` sweep's base pool, taken flat (a wished character is still in that pool). `limits_agree` answers when all four roulettes match and returns `None` when they differ, because a limit *below* the server ceiling is itself an unlock and averaging them would invent a pool nobody rolls |
+| `parsers/ov.py` / `parsers/ov_catalog.py` | `$ov`, the player's settings. Also classified **before** the claim heuristics, for the same reason as the grid above. Unlike `$settings` a field cannot be keyed on its `($command)` suffix — three separate toggles print `($rdmimg)` — so the catalog resolves a line by command when that is unique and by printed label when it is not, falling back to position with a warning. `persrare_rerolls` converts `$persrare` into the `$bw` sweep's `N`, and returns `None` rather than guessing on wording it does not know |
 | `types.py` | `MessageKind`, `ParseResult`, `MudaeMessageSnapshot` |
 | `event_log.py` | Unified Statistics store (`data/events.jsonl`); one-time import of the old `*_log.json` arrays (those files are left on disk) |
 | `stats_index.py` | In-memory daily cube + paged `recent` rows for Statistics (never dumps the full log to QML). `daily_report()` slices the same cells by **day** instead of by kind for Statistics › Report — totals, colour/method breakdowns with event counts, an **all-time** comparison over *active* days, plus hourly panels, the perk-8/perk-9 click tapes and the day's soulmates, which come from the raw events because the cube keeps neither the hour nor the order. The tapes are the one part that **cannot be generalised**: a perk-8/perk-9 daily allowance belongs to one (account, server) pairing, so they are drawn only when the report is scoped to both and otherwise return `TAPE_SCOPE_NOTE` — the payload's `scope` block says which it is |
@@ -243,7 +246,7 @@ All of this is one file: `data/settings.json` (never commit it).
 | Layer | Store | Role |
 |-------|--------|------|
 | Who | `accounts[]` | Token, name, enabled channels, `$p`/`$daily` channel + cooldowns |
-| Where | `servers[]` / `channels[]` | Channel snowflakes, fetched `$settings` (flat) and `$bonus` / `$shop` (per account), `daily_resets` (per account) |
+| Where | `servers[]` / `channels[]` | Channel snowflakes, fetched `$settings` (flat) and `$bonus` / `$shop` / `$ov` / `$limroul` (per account), `daily_resets` (per account) |
 | How | `presets{}` | `MacroConfig` per preset id |
 | Binding | `targets[]` | `{ account_id, channel_profile_id, preset_id }` |
 | Wishlist | `wishlist` | App-only character/series names the macro claims on sight: `global` flag, the global lists, and `scopes{}` keyed `account_id|channel_profile_id` |

@@ -693,11 +693,25 @@ real roll pool tops out near 100 rolls an hour at about 2 keys a spawn, two
 orders of magnitude short, so the clip is correctness rather than a live
 constraint.
 
-**`$persrare`** rerolls a roll that lands on a claimed non-wish character up to N
-times, which raises wish spawn chance by `(1 − rᴺ)/(1 − r)` where `r` is the
-claimed share of the pool. It favours *lower* `$bw`, because a smaller pool makes
-`r` larger. `$ov` has no parser, so N is a user input defaulting to **1** — at
-which the expression is exactly 1 and the model is the no-persrare one.
+**`$persrare`** is a rarity **multiplier** on characters you already own, worth
+`(1 − rᴺ)/(1 − r)` to wish spawn chance where `r` is the claimed share of the
+pool. It favours *lower* `$bw`, because a smaller pool makes `r` larger. Its
+lowest setting is **1**, which Mudae prints as `none` — multiplying by one
+changes nothing, so `none` is a value rather than an absent one, and it is
+exactly where the expression above equals 1 and the model is the no-persrare
+one. A set value prints as `x2`, `x3`, and so on. N comes from `$ov`; until that
+sheet is fetched the page takes a typed default of 1, and when the sheet answers
+the typed field goes read-only.
+
+**The base pool comes from `$limroul`.** It is how many *different* characters
+the roulette can roll — Mudae's own `Current $limroul: 2,000 $wa, …` — and it
+goes into the sweep flat, wishlist included: a wished character is still a member
+of that pool. The four roulettes can carry different limits, because setting one
+below the server's `$servlimroul` ceiling is itself an unlock, so when they
+differ the page asks which roulette is being rolled rather than averaging them.
+When they agree there is nothing to choose. This is the input that decides which
+`$bw` wins — pools from 500 to 20,000 move the optimum from 12 to 30 — which is
+why reading it beats the 2,000 placeholder it replaced.
 
 **Slash commands are modelled and not applied.** Mudae counts a flat +10% slash
 bonus into the wish figure it reports (`source_tags` lists `slash`), but the
@@ -1360,27 +1374,34 @@ like any other minigame use.
 
 
 
-## `$settings` and `$bonus`
+## `$settings`, `$ov` and `$bonus`
 
 `$settings` is the server's **rule sheet**: prefix, claim/roll timers, sniping,
 whether claim/kakera/sphere buttons are “recognizable”, game mode, etc. Each
 bullet is `label: value ($command)`. Sending `$command` (with args, or
 sometimes bare) changes the live server.
 
+`$ov` is the **player's** half of that pair — the same bullet grammar, the same
+`($command)` suffixes, describing the account rather than the server, and it says
+so itself in its last two lines ("For your unlocked bonuses, see **$bonus**. For
+the server settings, see **$settings**"). It is the same everywhere the account
+rolls, but it is stored per `(account, channel)` like `$bonus` and `$shop`,
+because that is the shape every sheet fetch already files into.
+
 `$bonus` is a **description sheet**, not a list of commands to send. Lines
 say *where a bonus comes from* (`$kt`, `$kl`, `$op`, `$shop`, premium,
 spheres clicked). Those suffixes are source tags. Sending them does not
 edit the sheet.
 
-The GUI fetches `$settings`, `$bonus`, and `$shop` onto a channel profile.
-Parsers: `mudae/parsers/settings.py`, `bonus.py`, `shop.py` (catalog in
-`bonus_catalog.py` / `shop_catalog.py`). Frozen dumps:
+The GUI fetches `$settings`, `$ov`, `$bonus`, and `$shop` onto a channel profile.
+Parsers: `mudae/parsers/settings.py`, `ov.py`, `bonus.py`, `shop.py` (catalogs in
+`ov_catalog.py` / `bonus_catalog.py` / `shop_catalog.py`). Frozen dumps:
 `tests/mudae_sheet_fixtures.py`.
 
 **Where the fetch buttons are.** Each sheet is fetched from the scope bar of
-the page that reads it — `$settings` and `$bonus` on Mudae, `$shop` and `$wl`
-on Spheres — because the account/server pickers beside the button are what the
-command is sent *as*. A fetch does not need the macro to be connected there,
+the page that reads it — `$settings`, `$ov` and `$bonus` on Mudae, `$shop` and
+`$wl` on Spheres — because the account/server pickers beside the button are what
+the command is sent *as*. A fetch does not need the macro to be connected there,
 or connected at all: `AppBridge.fetchForScope` hops or stands up a temporary
 connection and puts the session back (see ARCHITECTURE.md → "Temporary
 connections"). It refuses only while the macro is busy with something a sheet
@@ -1395,6 +1416,93 @@ does not read those fields.
 `RollCycleEngine.apply_settings_fields` still only copies `settimer`.
 Reaction-power max (`kakera_max_power`) and the perk 9 click cap
 (`perk9_click_max`) **are** applied from the run channel's stored sheets.
+
+### `$ov` — the player's settings
+
+Read-only in this app, and **never sent on its own**: Fetch `$ov` on the Mudae
+page's scope bar is the only thing that asks for it.
+
+**Why it needs its own parser rather than a flag on `parse_settings`.** Three
+different lines end in `($rdmimg)` — random images, GIFs/WebP, and custom images
+are three toggles sharing one command name:
+
+```
+· Random images for rolls: **disabled** ($rdmimg)
+· GIFs and WebP displayed when you roll: **enabled** ($rdmimg)
+· Custom images displayed when you roll: **enabled** ($rdmimg)
+```
+
+`$settings` can identify a field by the command in its suffix because every
+command there appears once. `$ov` cannot. So identity is the **key** in
+`mudae/parsers/ov_catalog.py`, resolved from the command when that is unique and
+from the printed label when it is not. An unknown label under a shared command
+falls back to position — they print in a fixed order — and says in a warning that
+it did.
+
+Two other shapes the parser handles: `· Private wishes: **n  n  n** ($wishdm)` is
+a row of one flag per wish kind and is kept as a list, and `· Character pool
+limits: see $limroul` names its command *in the value* with no `($cmd)` suffix at
+all, the same shape `$servlimroul` has on `$settings`.
+
+It was also being **misclassified as a claim** before the parser existed: the
+sheet is a wall of bold values, and `is_custom_claim` counts bold names. The
+classifier now takes `$ov` ahead of the claim heuristics, next to the wishlist
+listing, which fails the same way for the same reason.
+
+**`$persrare` is the one field here with consequences.** It is the `N` the `$bw`
+sweep takes (see the `$bw` section above), and it was one of two inputs on that
+page a person had to type by hand.
+
+It is a **multiplier**, and its lowest setting is one. Mudae prints one as
+`none`, because multiplying by one changes nothing — so `none` means `N = 1`, a
+real value and not a missing one. A set value prints with the multiplier sign:
+
+```
+· Increased rarity for owned characters: **x2** ($persrare)
+```
+
+The parser stores the integer and renders it back to Mudae's wording, so the
+panel still reads `none` while the sweep runs at 1. That is also why `$ov` is
+*offered* by the `$bw` page rather than required: at `N = 1` the correction is
+the identity, so an unfetched `$ov` and a fetched one reading `none` produce the
+same curve by different routes. Wording it does not recognise is kept verbatim
+and converts to nothing, and `bw_advisory` then keeps the typed value and says
+so on the page rather than guessing.
+
+**The other consequential line is `· Character pool limits: see $limroul`**,
+which is a pointer rather than a value — see below.
+
+### `$limroul` — the roulette's character pool
+
+The sheet `$ov` points at, and the `$bw` sweep's **base pool**. It is mostly help
+text; two lines carry data:
+
+```
+$limroul 7000 7000 5000 5000
+...
+Current $limroul: 2,000 $wa, 2,000 $ha, 2,000 $wg, 2,000 $hg
+Less popular characters you can roll:
+$topwa #2,000 (Global: #3,405) · $topha #2,000 (Global: #5,111)
+$topwg #2,000 (Global: #8,083) · $tophg #2,000 (Global: #11,077)
+```
+
+- **`Current $limroul`** is how many different characters each roulette can roll,
+  the less popular ones having been disabled. This is the figure the `$bw` sweep
+  weighs a wishlist against, and it goes in **flat** — the wishlist is part of
+  that pool, not something to take out of it.
+- **The example command** is the *server's* ceiling, the same numbers
+  `$settings` reports as `servlimroul`. Kept so the two can be checked against
+  each other.
+- **The `$top…` lines** give the rank of the least popular character each
+  roulette still reaches, locally and globally. The gap is the server's own
+  disable list: local #2,000 sitting at global #3,405 means 1,405 more popular
+  characters are off here.
+
+The four roulettes need not agree — a limit *below* the server ceiling is itself
+an unlock ("Only Player Premium and kakeraloots/kakeratowers let you use lower
+values") — so `Advisor › $bw` takes the pool automatically when they match and
+asks which roulette is being rolled when they do not. Never sent automatically;
+Fetch `$limroul` is the only thing that asks for it.
 
 ### `$bonus` meaning keys needed later
 
@@ -1545,8 +1653,10 @@ failed `$tu` and a failed roll, in both the hourly and the `$us` cycle.
 - Slash-command rolls. `Advisor › $bw` therefore removes the +10% slash spawn
 bonus `$bonus` reports, and leaves the 1,440/hour bonus cap unmodelled; both
 become live in one branch if slash rolling is ever added.
-- Sending `$bw`, `$ov` or any list command. `Advisor › $bw` names a value and
-prints the command; setting it is manual on purpose.
+- Sending `$bw` or any list command. `Advisor › $bw` names a value and prints
+the command; setting it is manual on purpose. `$ov` is *read* on request (Fetch
+`$ov` on the Mudae scope bar) and never sent on its own; nothing this app does
+edits it.
 - Multi-account concurrent connections (config supports it; runtime is
 one Discord session — see Phase D in `ARCHITECTURE.md`).
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`

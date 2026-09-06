@@ -5,7 +5,14 @@ from __future__ import annotations
 import re
 
 from mudae.buttons import is_claim_button, is_kakera_button
-from mudae.commands import is_bonus_response, is_settings_response, is_shop_response, is_tu_response
+from mudae.commands import (
+    is_bonus_response,
+    is_limroul_response,
+    is_ov_response,
+    is_settings_response,
+    is_shop_response,
+    is_tu_response,
+)
 from mudae.message_text import snapshot_visible_text
 from mudae.parsers.claim import is_custom_claim, is_marriage_claim
 from mudae.parsers.claim_interval import is_claim_interval_message
@@ -69,6 +76,12 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         return MessageKind.BONUS
     if is_settings_response(content):
         return MessageKind.SETTINGS
+    # Before the claim heuristics, like the wishlist below: the player sheet
+    # is a wall of bold values and ``is_custom_claim`` counts bold names.
+    if is_ov_response(content):
+        return MessageKind.OV
+    if is_limroul_response(content):
+        return MessageKind.LIMROUL
     if is_shop_response(content):
         return MessageKind.SHOP
     # Before the claim heuristics on purpose: a wishlist page is a wall of

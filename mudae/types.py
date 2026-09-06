@@ -11,6 +11,8 @@ class MessageKind(str, Enum):
     COMMAND = "command"
     COMMAND_RESPONSE = "command_response"
     SETTINGS = "settings"
+    OV = "ov"
+    LIMROUL = "limroul"
     BONUS = "bonus"
     ROLL = "roll"
     ROLL_OWNERSHIP = "roll_ownership"

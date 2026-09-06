@@ -212,7 +212,7 @@ def test_setrolls_falls_back_to_the_settings_sheet():
 def test_each_sheet_reports_its_own_readiness_and_what_to_do():
     out = bw_advisory(_bonus(), wishlist=_wishlist(), shop=_shop())
     inputs = out["inputs"]
-    assert set(inputs) == {"bonus", "settings", "shop", "wishlist"}
+    assert set(inputs) == {"bonus", "settings", "shop", "wishlist", "ov", "limroul"}
     assert inputs["bonus"]["ready"] is True
     assert inputs["wishlist"]["ready"] is True
     assert inputs["shop"]["ready"] is True
@@ -220,6 +220,14 @@ def test_each_sheet_reports_its_own_readiness_and_what_to_do():
     assert inputs["settings"]["ready"] is False
     assert inputs["settings"]["needed"] is False
     assert inputs["settings"]["required"] is False
+    # $ov supplies $persrare; at the default of one reroll it changes nothing,
+    # so it is offered rather than demanded. See tests/test_ov_parse.py.
+    assert inputs["ov"]["ready"] is False
+    assert inputs["ov"]["required"] is False
+    # $limroul supplies the base pool; without it the page falls back to the
+    # typed placeholder rather than going blank. See tests/test_limroul_parse.py.
+    assert inputs["limroul"]["ready"] is False
+    assert inputs["limroul"]["required"] is False
 
 
 def test_a_missing_sheet_says_which_command_fetches_it():
@@ -270,6 +278,19 @@ def test_options_come_back_defaulted_and_are_honoured():
         "claimed_pool": 0,
         "uses_slash": False,
         "focus_name": "",
+        # Neither player sheet was fetched, so both derived inputs fall back to
+        # what the page has been told, and say so.
+        "persrare_source": "manual",
+        "persrare_printed": None,
+        "persrare_typed": 1,
+        "base_pool_source": "manual",
+        "base_pool_typed": 2000,
+        "limroul_pool": "",
+        "limroul_pool_used": "",
+        "limroul_limit": None,
+        "limroul_limits": {},
+        "limroul_agree": None,
+        "limroul_needs_pick": False,
     }
     # A bigger pool dilutes every wishlist character, so more $bw is worth buying.
     bigger = bw_advisory(_bonus(), wishlist=_wishlist(), options={"base_pool": 8000})

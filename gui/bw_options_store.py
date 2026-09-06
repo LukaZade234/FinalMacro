@@ -1,15 +1,24 @@
 """The `$bw` page's inputs, per ``(account, channel)``.
 
-Three of the sweep's inputs are not in any sheet Mudae will send, so the page
-asks for them and this remembers the answers:
+What the sweep needs and no sheet reliably supplies, so the page asks and this
+remembers the answers:
 
-* **base pool** — how many characters are rollable outside the wishlist. It
-  depends on the server's game mode and disable lists, and nothing derives it
-  yet, so it defaults to :data:`macro.bw_calc.DEFAULT_BASE_POOL` and the page
-  says as much.
-* **`$persrare` rerolls and the claimed-character count** — `$ov` has no parser,
-  so the reroll limit cannot be read. At the default of 1 the model is exactly
-  the no-persrare one, which is why leaving `$ov` unparsed costs nothing.
+* **base pool** — how many different characters the roulette can roll, the
+  wishlist included. A *fallback* since ``$limroul`` parsed: that sheet reports
+  the figure per roulette and :func:`macro.advisor.bw_advisory` prefers it,
+  flat. This typed value stands when ``$limroul`` has not been fetched, or when
+  the four roulettes disagree and ``limroul_pool`` has not named one.
+* **which roulette** (``limroul_pool``) — blank means "they agree, take any".
+  Setting one below the server's ceiling is itself an unlock, so the four can
+  differ and there is then a real choice to make.
+* **`$persrare` rerolls** — a *fallback* rather than the answer since ``$ov``
+  parsed: :func:`macro.advisor.bw_advisory` prefers the sheet's own value and
+  falls back to this when ``$ov`` has not been fetched, or printed a value
+  :func:`mudae.parsers.ov.persrare_rerolls` does not recognise. At the default
+  of 1 the model is exactly the no-persrare one, so an unfetched ``$ov`` costs
+  nothing.
+* **the claimed-character count** — the ``r`` the reroll correction divides by.
+  Nothing reports it; only ``$persrare`` above makes it matter at all.
 * **slash rolling** — off, because the macro rolls with the `$` prefix.
 
 Plus the focus character, so a page reopened stays on the row you were reading.
@@ -27,6 +36,7 @@ from typing import Any
 
 from gui.wishlist_store import scope_key
 from macro.bw_calc import DEFAULT_BASE_POOL
+from mudae.parsers.limroul import ROULETTES
 
 # Room to model a tiny private server or a whole unrestricted pool, without
 # letting a typo produce a curve with no meaning.
@@ -35,6 +45,12 @@ MAX_BASE_POOL = 200_000
 # `$persrare` accepts a small reroll limit; past a handful the correction is
 # indistinguishable from its own limit.
 MAX_PERSRARE_N = 20
+
+
+def _roulette(value: Any) -> str:
+    """One of Mudae's four roulettes, or blank for "whichever, they agree"."""
+    text = str(value or "").strip().lower().lstrip("$")
+    return text if text in ROULETTES else ""
 
 
 def _clamp(value: Any, low: int, high: int, default: int) -> int:
@@ -54,6 +70,9 @@ class BwOptions:
     claimed_pool: int = 0
     uses_slash: bool = False
     focus_name: str = ""
+    # "" | "wa" | "ha" | "wg" | "hg" — blank asks the advisor to take $limroul's
+    # own answer when the four roulettes agree.
+    limroul_pool: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> BwOptions:
@@ -66,6 +85,7 @@ class BwOptions:
             claimed_pool=_clamp(data.get("claimed_pool"), 0, MAX_BASE_POOL, 0),
             uses_slash=bool(data.get("uses_slash")),
             focus_name=str(data.get("focus_name") or "").strip(),
+            limroul_pool=_roulette(data.get("limroul_pool")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -75,6 +95,7 @@ class BwOptions:
             "claimed_pool": self.claimed_pool,
             "uses_slash": self.uses_slash,
             "focus_name": self.focus_name,
+            "limroul_pool": self.limroul_pool,
         }
 
 

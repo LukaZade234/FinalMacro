@@ -1,4 +1,22 @@
-"""Extract Mudae character names from pasted list text."""
+"""Extract Mudae character names from pasted list text.
+
+Two shapes of input, told apart by whether anything in the text carries a
+**rank marker** (``#12 - `` or ``82 - ``):
+
+* A *Mudae listing* — ``$wl``, ``$top``, a kakera ranking — where each entry is
+  a rank, a name and a tail of series and stats. The patterns below strip that
+  tail, and lines with no rank at all are chrome ("Image", a page header) and
+  are dropped.
+* A *plain list of names*, one per line, which is what you have when you are
+  building a list rather than pasting one back. Nothing to strip: every line is
+  a name. This is split the way :func:`macro.wishlist.parse_wishlist_input`
+  splits the wishlist boxes — on ``$``, commas and newlines — so the formatter's
+  own output pastes back into itself and into those boxes unchanged.
+
+The two are never mixed. If any rank marker is present the text is a listing,
+and bare lines in it stay chrome; the fallback would otherwise turn a listing's
+header into a character.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +39,13 @@ _NAME_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 _SKIP_LINES = frozenset({"image"})
+
+# What tells a Mudae listing apart from a plain list of names. Same alternation
+# ``_ENTRY_SPLIT`` looks ahead for, so the two agree on what counts as an entry.
+_RANK_MARKER = re.compile(r"#\d+\s*-\s*|(?<![#\d])\d+\s*-\s*")
+
+# A plain list's separators, matching ``macro.wishlist.parse_wishlist_input``.
+_PLAIN_SPLIT = re.compile(r"[$,\n\r]+")
 
 
 def _clean_name(raw: str) -> str:
@@ -55,16 +80,38 @@ def _extract_name(entry: str) -> str | None:
     return None
 
 
+def _plain_names(text: str) -> list[str]:
+    """Every non-blank chunk of a plain list, as a name."""
+    out: list[str] = []
+    for chunk in _PLAIN_SPLIT.split(text):
+        name = _clean_name(chunk)
+        if name and name.lower() not in _SKIP_LINES:
+            out.append(name)
+    return out
+
+
 def extract_character_names(text: str) -> list[str]:
-    """Return character names found in Mudae list text, in source order."""
+    """Return character names found in the pasted text, in source order.
+
+    Handles a Mudae listing and a plain list of names — see the module
+    docstring for how the two are told apart.
+    """
     if not text or not text.strip():
         return []
 
+    if _RANK_MARKER.search(text):
+        found = [
+            name
+            for name in (_extract_name(entry) for entry in _split_entries(text))
+            if name
+        ]
+    else:
+        found = _plain_names(text)
+
     names: list[str] = []
     seen: set[str] = set()
-    for entry in _split_entries(text):
-        name = _extract_name(entry)
-        if not name or name in seen:
+    for name in found:
+        if name in seen:
             continue
         seen.add(name)
         names.append(name)

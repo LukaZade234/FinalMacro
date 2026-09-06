@@ -40,6 +40,9 @@ from macro.bw_calc import (
     derive_perk1_pct,
     sweep_bw,
 )
+from mudae.parsers.limroul import ROULETTES, limits_agree
+from mudae.parsers.limroul_catalog import pool_size
+from mudae.parsers.ov import persrare_rerolls
 
 # A kakera click costs this share of the power bar by default; `$bonus` overrides
 # it per account via `macro.sheet_caps`.
@@ -53,12 +56,15 @@ _KEY_ABSTAIN = (
     "is real — but nothing here models what unlocking a character is worth."
 )
 
-# The four sheets a $bw answer needs, and what to do when one is missing.
+# The sheets a $bw answer reads, and what to do when one is missing.
 SHEET_PROMPTS: dict[str, str] = {
     "bonus": "Fetch $bonus — rolls per hour, the wish bonuses and the extra-key chance.",
     "settings": "Fetch $settings — only needed when $bonus could not read setrolls.",
     "shop": "Fetch $shop — cross-checks the wishlist's perk-1 figures.",
     "wishlist": "Fetch $wl — every wishlist character's starwish flag and perks.",
+    "ov": "Fetch $ov — reads $persrare so the reroll limit is not typed by hand.",
+    "limroul": "Fetch $limroul — how many characters each roulette can roll, "
+               "which is the base pool the curve is weighed against.",
 }
 
 # Sheets without which no curve exists at all.
@@ -171,6 +177,8 @@ def _sheet_inputs(
     settings: dict[str, Any] | None,
     shop: dict[str, Any] | None,
     wishlist: dict[str, Any] | None,
+    ov: dict[str, Any] | None,
+    limroul: dict[str, Any] | None,
     sheet_meta: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
     """Per-sheet readiness, which is what the page's fetch row renders."""
@@ -181,12 +189,19 @@ def _sheet_inputs(
         "settings": bool((settings or {}).get("setrolls") is not None),
         "shop": _shop_perk1_share(shop) is not None,
         "wishlist": bool((wishlist or {}).get("entries")),
+        # Ready means the one field this page reads came through, not that the
+        # sheet arrived: an $ov whose $persrare line did not parse leaves the
+        # reroll limit exactly as unanswered as no $ov at all.
+        "ov": persrare_rerolls((ov or {}).get("persrare")) is not None,
+        "limroul": bool((limroul or {}).get("limits")),
     }
     needed = {
         "bonus": True,
         "settings": rolls is not None and rolls.get("base") is None,
         "shop": True,
         "wishlist": True,
+        "ov": True,
+        "limroul": True,
     }
     meta = sheet_meta if isinstance(sheet_meta, dict) else {}
     out: dict[str, dict[str, Any]] = {}
@@ -203,12 +218,97 @@ def _sheet_inputs(
     return out
 
 
+def _base_pool(
+    limroul: dict[str, Any] | None,
+    opts: dict[str, Any],
+) -> dict[str, Any]:
+    """The sweep's ``base_pool``, and how it was arrived at.
+
+    ``$limroul`` reports how many different characters each roulette can roll,
+    and that figure goes in **flat**: the wishlist is part of that pool, not
+    something to take out of it. (This is also what `bwcalc` does, and the
+    sweep's 0.06% agreement with its published table was measured with the raw
+    pool figure as the input.)
+
+    Which roulette applies is a real question and not one to average away: the
+    four limits can differ, since setting one below the server's ceiling is
+    itself an unlock. When they agree there is nothing to choose and the pool is
+    taken automatically; when they differ, a roulette has to be named, and until
+    one is the typed value stands.
+    """
+    typed = int(_number(opts.get("base_pool"), DEFAULT_BASE_POOL))
+    limits = (limroul or {}).get("limits") or {}
+    chosen = str(opts.get("limroul_pool") or "").strip().lower()
+    if chosen and chosen not in ROULETTES:
+        chosen = ""
+
+    agreed = limits_agree(limits)
+    # The stored choice and the roulette actually used are separate: with all
+    # four agreeing there is nothing to pick, and echoing back the one we
+    # happened to read would show as an explicit choice the user never made.
+    used = chosen or ("" if agreed is None else ROULETTES[0])
+    limit = pool_size(limits, used) if used else None
+
+    out: dict[str, Any] = {
+        "base_pool": typed,
+        "source": "manual",
+        "roulette": chosen,
+        "roulette_used": "",
+        "limits": {key: limits[key] for key in ROULETTES if key in limits},
+        "limits_agree": agreed,
+        "limit": None,
+        "typed": typed,
+        # True when $limroul is here but cannot answer on its own, which is the
+        # one case the page has to ask about rather than report.
+        "needs_pick": bool(limits) and agreed is None and not chosen,
+    }
+    if limit is None:
+        return out
+
+    out["base_pool"] = limit
+    out["source"] = "limroul"
+    out["limit"] = limit
+    out["roulette_used"] = used
+    return out
+
+
+def _persrare(
+    ov: dict[str, Any] | None, opts: dict[str, Any]
+) -> dict[str, Any]:
+    """The sweep's reroll ``N``, and where it came from.
+
+    ``$ov`` wins when it parses, because it is Mudae's own answer and the manual
+    field only ever existed to stand in for it. When it does not — no sheet, or
+    a ``$persrare`` value :func:`mudae.parsers.ov.persrare_rerolls` does not
+    recognise — the typed value stands and the page says which it is using, so a
+    number on this page is never ambiguous about its provenance.
+    """
+    typed = int(_number(opts.get("persrare_n"), 1))
+    printed = (ov or {}).get("persrare")
+    from_sheet = persrare_rerolls(printed)
+    if from_sheet is not None:
+        return {
+            "n": from_sheet,
+            "source": "ov",
+            "printed": None if printed is None else str(printed),
+            "typed": typed,
+        }
+    return {
+        "n": typed,
+        "source": "manual",
+        "printed": None if printed is None else str(printed),
+        "typed": typed,
+    }
+
+
 def bw_advisory(
     bonus: dict[str, Any] | None,
     *,
     settings: dict[str, Any] | None = None,
     shop: dict[str, Any] | None = None,
     wishlist: dict[str, Any] | None = None,
+    ov: dict[str, Any] | None = None,
+    limroul: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
     sheet_meta: dict[str, Any] | None = None,
     kakera_per_roll: float | None = None,
@@ -225,6 +325,8 @@ def bw_advisory(
                 settings=settings,
                 shop=shop,
                 wishlist=wishlist,
+                ov=ov,
+                limroul=limroul,
                 sheet_meta=sheet_meta,
             ),
         }
@@ -242,7 +344,10 @@ def bw_advisory(
     )
 
     opts = options if isinstance(options, dict) else {}
+    persrare = _persrare(ov, opts)
     listing = wishlist if isinstance(wishlist, dict) else {}
+    characters = characters_from_wishlist(listing.get("entries"))
+    base_pool = _base_pool(limroul, opts)
     source_tags = (bonus or {}).get("source_tags") or {}
     slash_in_sheet = "slash" in str(source_tags.get("wish_spawn_bonus_pct") or "").lower()
 
@@ -256,9 +361,9 @@ def bw_advisory(
                 (bonus or {}).get("starwish_spawn_bonus_pct")
             ),
             extra_key_pct=_number((bonus or {}).get("extra_key_wish_chance_pct")),
-            characters=characters_from_wishlist(listing.get("entries")),
-            base_pool=int(_number(opts.get("base_pool"), DEFAULT_BASE_POOL)),
-            persrare_n=int(_number(opts.get("persrare_n"), 1)),
+            characters=characters,
+            base_pool=int(base_pool["base_pool"]),
+            persrare_n=int(persrare["n"]),
             claimed_pool=int(_number(opts.get("claimed_pool"))),
             uses_slash=bool(opts.get("uses_slash")),
             slash_in_sheet=slash_in_sheet,
@@ -283,6 +388,31 @@ def bw_advisory(
                 f"{_number(printed_total):.0f}%, but its two fields add to "
                 f"{our_total:.0f}% — starwish weights in the curve are suspect."
             )
+    if base_pool["source"] == "limroul":
+        notes.append(
+            f"Base pool is $limroul's {base_pool['limit']:,} characters in "
+            f"${base_pool['roulette_used']}, read rather than typed."
+        )
+    elif base_pool["needs_pick"]:
+        spread = ", ".join(
+            f"{value:,} ${key}" for key, value in base_pool["limits"].items()
+        )
+        notes.append(
+            f"$limroul differs by roulette ({spread}) — pick the one you roll to "
+            f"take the base pool from it; until then the typed "
+            f"{base_pool['typed']:,} stands."
+        )
+    if persrare["source"] == "ov" and persrare["n"] > 1:
+        notes.append(
+            f"$persrare is {persrare['printed']} on $ov, so the curve applies "
+            f"the reroll correction at N = {persrare['n']} and the typed value "
+            f"({persrare['typed']}) is ignored."
+        )
+    elif persrare["printed"] is not None and persrare["source"] == "manual":
+        notes.append(
+            f"$ov prints $persrare as {persrare['printed']!r}, which does not "
+            f"convert to a reroll limit — using the typed N = {persrare['n']}."
+        )
     if bw_penalty <= 0:
         notes.append("$bw is not costing any rolls right now.")
     if kakera_per_roll is None:
@@ -318,11 +448,24 @@ def bw_advisory(
             settings=settings,
             shop=shop,
             wishlist=wishlist,
+            ov=ov,
+            limroul=limroul,
             sheet_meta=sheet_meta,
         ),
         "options": {
-            "base_pool": int(_number(opts.get("base_pool"), DEFAULT_BASE_POOL)),
-            "persrare_n": int(_number(opts.get("persrare_n"), 1)),
+            "base_pool": int(base_pool["base_pool"]),
+            "base_pool_source": base_pool["source"],
+            "base_pool_typed": base_pool["typed"],
+            "limroul_pool": base_pool["roulette"],
+            "limroul_pool_used": base_pool["roulette_used"],
+            "limroul_limit": base_pool["limit"],
+            "limroul_limits": base_pool["limits"],
+            "limroul_agree": base_pool["limits_agree"],
+            "limroul_needs_pick": base_pool["needs_pick"],
+            "persrare_n": int(persrare["n"]),
+            "persrare_source": persrare["source"],
+            "persrare_printed": persrare["printed"],
+            "persrare_typed": persrare["typed"],
             "claimed_pool": int(_number(opts.get("claimed_pool"))),
             "uses_slash": bool(opts.get("uses_slash")),
             "focus_name": str(opts.get("focus_name") or ""),

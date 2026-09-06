@@ -4,16 +4,16 @@ import QtQuick.Layouts
 import gui 1.0
 
 /*
-    One parsed Mudae sheet — `$settings`, `$bonus` or `$shop` — as label/value
-    rows grouped into sections.
+    One parsed Mudae sheet — `$settings`, `$ov`, `$bonus` or `$shop` — as
+    label/value rows grouped into sections.
 
     Replaces three near-identical panels that differed only in which bridge slot
     they called, an empty-state hint, whether valueless rows were hidden, a
     starwish/bku icon on `$bonus`, and a value-column width fraction. Those are
     now the properties below.
 
-    `$bonus` and `$shop` describe the *connected account*, not the server, so
-    they are stored per account (`gui/sheet_store.py`) and this panel reports
+    `$ov`, `$bonus` and `$shop` describe the *connected account*, not the server,
+    so they are stored per account (`gui/sheet_store.py`) and this panel reports
     which account it is showing and when that sheet was read. A sheet saved
     before that split is marked `inferred` rather than passed off as measured.
 
@@ -26,7 +26,7 @@ Item {
     implicitHeight: 320
     implicitWidth: 280
 
-    // "settings" | "bonus" | "shop"
+    // "settings" | "ov" | "bonus" | "shop"
     property string sheetKind: "settings"
     property string channelProfileId: ""
     // Blank asks the bridge for the account this channel is run as.
@@ -35,15 +35,27 @@ Item {
     property var displayData: ({ sections: [], field_count: 0 })
 
     readonly property bool isSettings: sheetKind === "settings"
+    readonly property bool isOv: sheetKind === "ov"
     readonly property string commandName: "$" + sheetKind
 
-    // `$settings` shows every field so a blank one still reads as "not set".
-    // The other two only report what Mudae actually returned.
-    readonly property bool hideEmptyRows: !isSettings
+    // The two settings sheets print a fixed line list, so a field with no value
+    // is news — it means Mudae stopped printing it — and stays visible as "—".
+    // `$bonus` and `$shop` list only what you have unlocked, where an unset row
+    // is the normal case and a wall of them is noise.
+    readonly property bool hideEmptyRows: !isSettings && !isOv
     readonly property bool showCommandChip: sheetKind !== "shop"
     readonly property bool showFieldIcon: sheetKind === "bonus"
+    // `$ov` labels are sentences ("Emoji for disabled characters"), where the
+    // other sheets' are two or three words, so the label column widens for it
+    // rather than eliding most of the sheet.
+    readonly property real labelWidth: isOv ? 212 : 118
+    readonly property real labelMaxWidth: isOv ? 260 : 140
+
     readonly property real valueWidthFraction: {
         if (sheetKind === "shop") return 0.55
+        // `$ov` values are phrases ("depend on the $togglebutton value"), not
+        // numbers, so they need more of the row than the other sheets.
+        if (sheetKind === "ov") return 0.46
         if (sheetKind === "bonus") return 0.42
         return 0.35
     }
@@ -96,6 +108,8 @@ Item {
                 raw = App.formatChannelBonusDisplayJson(channelProfileId, accountId)
             else if (sheetKind === "shop")
                 raw = App.formatChannelShopDisplayJson(channelProfileId, accountId)
+            else if (sheetKind === "ov")
+                raw = App.formatChannelOvDisplayJson(channelProfileId, accountId)
             else
                 raw = App.formatChannelSettingsDisplayJson(channelProfileId)
             displayData = JSON.parse(raw)
@@ -222,8 +236,8 @@ Item {
                             }
 
                             Label {
-                                Layout.preferredWidth: 118
-                                Layout.maximumWidth: 140
+                                Layout.preferredWidth: panel.labelWidth
+                                Layout.maximumWidth: panel.labelMaxWidth
                                 Layout.alignment: Qt.AlignVCenter
                                 text: modelData.label || modelData.field || ""
                                 color: Theme.dim

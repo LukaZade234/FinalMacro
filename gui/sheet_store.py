@@ -1,4 +1,5 @@
-"""Account-scoped ``$bonus`` / ``$shop`` sheets on a channel profile.
+"""Account-scoped ``$bonus`` / ``$shop`` / ``$ov`` / ``$limroul`` sheets on a
+channel profile.
 
 Channel profiles store::
 
@@ -7,10 +8,13 @@ Channel profiles store::
         ...
     }
     shop_by_account: { ... same shape ... }
+    ov_by_account:   { ... same shape ... }
+    limroul_by_account: { ... same shape ... }
 
 ``$settings`` deliberately stays flat on the channel: it is the *server's* rule
-sheet and reads the same whoever fetched it. The other two are not. ``$bonus``
-mixes server settings with the connected account's own perks, and ``$shop`` is
+sheet and reads the same whoever fetched it. The others are not. ``$bonus``
+mixes server settings with the connected account's own perks, ``$ov`` is the
+player's own half of the settings pair, and ``$shop`` is
 that account's ouroperk sheet — ``docs/MUDAE_LOGIC.md`` says so and then says it
 is "stored on the channel profile like ``$bonus``", which is the bug: with
 several accounts on one channel, whichever fetched last won, and
@@ -28,6 +32,14 @@ account** and flagged ``inferred`` — the treatment
 rows. Every other account starts empty, which is honest: we do not know their
 sheets. The first real fetch per account replaces the guess, and writing an
 account sheet drops the legacy blob so it cannot be inferred twice.
+
+``$ov`` and ``$limroul`` have no pre-split era to inherit from — they shipped
+after the split — so they never infer: an account that has not fetched one reads
+empty. That also makes it
+the cheap side of the ``data/`` Syncthing hazard: an older build on another
+machine round-tripping ``settings.json`` drops the ``ov_by_account`` key it does
+not know about, and the loss is one re-fetchable sheet rather than data nothing
+else holds.
 """
 
 from __future__ import annotations
@@ -38,7 +50,7 @@ from typing import Any
 from mudae.clock import utc_now
 
 # ``$settings`` is not here on purpose — see the module docstring.
-ACCOUNT_SHEET_KINDS = ("bonus", "shop")
+ACCOUNT_SHEET_KINDS = ("bonus", "shop", "ov", "limroul")
 
 
 def by_account_field(kind: str) -> str:

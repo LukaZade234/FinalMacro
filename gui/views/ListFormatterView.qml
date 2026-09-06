@@ -5,9 +5,13 @@ import gui 1.0
 import "../components"
 
 /*
-    Advisor › Formatter — the list formatter, moved verbatim from the Utilities
-    page when that page was absorbed into this hub. Same `mudae/list_formatter.py`
-    behind it, same bridge slot, same tests.
+    Advisor › Formatter — the list formatter, moved from the Utilities page when
+    that page was absorbed into this hub. `mudae/list_formatter.py` is behind it.
+
+    It takes two shapes of input: a Mudae listing, whose ranks and series get
+    stripped, and a plain list of names, which is taken as written. The copy says
+    both, because the page used to promise only the first and silently returned
+    nothing for the second.
 */
 Item {
     id: formatterRoot
@@ -33,7 +37,7 @@ Item {
 
         Label {
             Layout.fillWidth: true
-            text: "Paste Mudae list output — wishlists, $top, kakera rankings — and get the names back joined with $ for commands like $tt."
+            text: "Paste Mudae list output — wishlists, $top, kakera rankings — or just type names one per line, and get them back joined with $ for commands like $tt."
             color: Theme.fgMuted
             font.pixelSize: 11
             wrapMode: Text.WordWrap
@@ -53,7 +57,7 @@ Item {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Paste Mudae list output (wishlists, $top, kakera rankings, etc.). Character names are extracted and joined with $ for commands like $tt or custom searches."
+                    text: "Paste Mudae list output (wishlists, $top, kakera rankings) and the ranks, series and stats are stripped off. A plain list of names — one per line, or separated by $ or commas — is taken as-is, which is what you want when you are building a list rather than pasting one back. Either way the names come out joined with $ for commands like $tt."
                     color: Theme.fgMuted
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap
@@ -75,7 +79,7 @@ Item {
                             inputArea.text = ""
                             outputArea.text = ""
                             listFormatterResult = { names: [], count: 0, formatted: "" }
-                            statusLabel.text = "Paste a Mudae list above, then Format."
+                            statusLabel.text = "Paste a list above, then Format."
                         }
                     }
 
@@ -91,7 +95,7 @@ Item {
                         id: statusLabel
                         text: listFormatterResult.count > 0
                             ? (listFormatterResult.count + " name" + (listFormatterResult.count === 1 ? "" : "s"))
-                            : "Paste a Mudae list above, then Format."
+                            : "Paste a list above, then Format."
                         color: listFormatterResult.count > 0 ? Theme.success : Theme.fgMuted
                         font.pixelSize: 11
                     }
@@ -128,7 +132,7 @@ Item {
                                 id: inputArea
                                 width: parent.width
                                 wrapMode: TextArea.Wrap
-                                placeholderText: "#1 - Hatsune Miku 💞 - VOCALOID\n#2 - Zero Two 💞 - …"
+                                placeholderText: "#1 - Hatsune Miku 💞 - VOCALOID\n#2 - Zero Two 💞 - …\n\n…or just:\nHatsune Miku\nZero Two"
                                 font.family: "Consolas, monospace"
                                 font.pixelSize: 11
                                 color: Theme.fgSecondary
@@ -141,7 +145,7 @@ Item {
                                 }
                                 onTextChanged: {
                                     if (text.trim().length === 0)
-                                        statusLabel.text = "Paste a Mudae list above, then Format."
+                                        statusLabel.text = "Paste a list above, then Format."
                                 }
                             }
                         }

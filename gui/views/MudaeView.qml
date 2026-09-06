@@ -24,11 +24,10 @@ Item {
     property int sectionIndex: 0
 
     // `fetch` is the command the scope bar offers while that pill is open, so
-    // the button always fetches the sheet you are looking at. `$ov` has no
-    // parser yet, so it offers nothing rather than a button that cannot work.
+    // the button always fetches the sheet you are looking at.
     readonly property var sections: [
         { label: "$settings", component: settingsSection, fetch: "settings" },
-        { label: "$ov", component: ovSection, fetch: "" },
+        { label: "$ov", component: ovSection, fetch: "ov" },
         { label: "$bonus", component: bonusSection, fetch: "bonus" }
     ]
 
@@ -96,6 +95,8 @@ Item {
     Component {
         id: ovSection
         MudaeOvView {
+            channelProfileId: scope.channelProfileId
+            accountId: scope.accountId
             accountName: scope.accountName
         }
     }

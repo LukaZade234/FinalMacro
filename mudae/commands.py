@@ -103,6 +103,18 @@ def is_bonus_response(content: str) -> bool:
     )
 
 
+def is_ov_response(content: str) -> bool:
+    from mudae.parsers.ov import is_ov_response as _is_ov
+
+    return _is_ov(content)
+
+
+def is_limroul_response(content: str) -> bool:
+    from mudae.parsers.limroul import is_limroul_response as _is_limroul
+
+    return _is_limroul(content)
+
+
 def is_shop_response(content: str) -> bool:
     from mudae.parsers.shop import is_shop_response as _is_shop
 
@@ -171,6 +183,8 @@ def is_roll_response(snapshot: MudaeMessageSnapshot) -> bool:
 RESPONSE_DETECTORS: list[tuple[str, ResponseDetector]] = [
     ("bonus", is_bonus_response),
     ("settings", is_settings_response),
+    ("ov", is_ov_response),
+    ("limroul", is_limroul_response),
     ("shop", is_shop_response),
     ("tu", is_tu_response),
     ("ku", is_ku_response),

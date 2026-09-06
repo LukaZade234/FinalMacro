@@ -1,4 +1,5 @@
-"""Frozen ``$settings`` / ``$bonus`` / ``$shop`` dumps for parser tests.
+"""Frozen ``$settings`` / ``$ov`` / ``$limroul`` / ``$bonus`` / ``$shop`` dumps for
+parser tests.
 
 Key Server 0 ``$settings`` matches a live Premium-3 GM2 capture. Key Server -1
 ``$settings`` is reconstructed from a stored channel profile (same command
@@ -258,4 +259,64 @@ SHOP_REPLY_MIXED_LIVE = (
     "Spheres clicked from **perk 9** give more spheres: **100% **\n"
     "\u200b\n"
     "[**LVL 8**]  The first $oh of the day has a chance to give 1 $ot for each character you have fully upgraded (120 characters max): +2% > **+2.25%**"
+)
+
+# Live Key Server 0 ``$ov`` (Player Premium 2, $persrare unset). Note the three
+# separate toggles that all end in ``($rdmimg)`` — the reason ``$ov`` needs a
+# label catalog where ``$settings`` can key on the command alone.
+OV_REPLY = (
+    "**\u2692\ufe0f __Player Settings__** \u2692\ufe0f\n"
+    "\u2b50\u2b50 Player Premium 2 \u2b50\u2b50\n"
+    "\n"
+    "\xb7 Increased rarity for owned characters: **none** ($persrare)\n"
+    "\xb7 Private wishes: **n  n  n** ($wishdm)\n"
+    "\xb7 Kakera badges notifications: **enabled** ($kakeradm)\n"
+    "\xb7 Emoji notification for disabled characters: **enabled** ($hideinfodisable)\n"
+    "\xb7 Allow other users to move pages: **enabled** ($togglemovepage)\n"
+    "\xb7 Letters added next to kakera or spheres buttons for yourself: **disabled** ($toggleletters)\n"
+    "\xb7 Obtaining mudapins from kakeraloots: **disabled** ($disablepins)\n"
+    "\n"
+    "\xb7 Footer informations for rolls: **enabled** ($setfooter)\n"
+    "\xb7 Random images for rolls: **disabled** ($rdmimg)\n"
+    "\xb7 GIFs and WebP displayed when you roll: **enabled** ($rdmimg)\n"
+    "\xb7 Custom images displayed when you roll: **enabled** ($rdmimg)\n"
+    "\xb7 Image links for rolls: **disabled** ($imglink)\n"
+    "\xb7 Buttons added under rolls: **depend on the $togglebutton value** ($perstogglebutton)\n"
+    "\xb7 Rolls left message displayed: **below the image** ($rollsleft)\n"
+    "\xb7 Keys displayed when you roll a character you don't own: **disabled** ($displaykeys)\n"
+    "\xb7 Character pool limits: see $limroul\n"
+    "\n"
+    "For your unlocked bonuses, see **$bonus**\n"
+    "For the server settings, see **$settings**"
+)
+
+# Live Key Server 0 ``$limroul`` (all four roulettes at 2,000; the server's own
+# ceiling is the 7000/7000/5000/5000 in the example command, which matches what
+# ``$settings`` reports as ``servlimroul``).
+LIMROUL_REPLY = (
+    "Syntax: $limroul <$wa limit> <$ha limit> <$wg limit> <$hg limit>\n"
+    "Effect: define the number of different characters you can roll in each "
+    "roulette (by disabling the less popular characters). Only applies to your "
+    "rolls.\n"
+    "\n"
+    "Disable the maximum amount of less popular characters (popularity by claim "
+    "rank) with this single command:\n"
+    "$limroul 7000 7000 5000 5000\n"
+    "\n"
+    "=> This command means you can only roll 7,000 different $wa, 7,000 different "
+    "$ha, 5,000 different $wg and 5,000 different $hg. Less popular characters "
+    "are disabled.\n"
+    "\n"
+    "You can enable specific characters or series with $antidisable\n"
+    "You can disable specific series with $disable (the same amount of characters "
+    "are enabled if you go below the limits mentioned above)\n"
+    "\n"
+    "Only Player Premium and kakeraloots/kakeratowers let you use lower values "
+    "than the ones mentioned above (thus disabling more characters). Note that "
+    "you can just use $limroul 1 1 1 1 to be safe with your lowest limits.\n"
+    "\n"
+    "Current $limroul: 2,000 $wa, 2,000 $ha, 2,000 $wg, 2,000 $hg\n"
+    "Less popular characters you can roll:\n"
+    "$topwa #2,000 (Global: #3,405) \u00b7 $topha #2,000 (Global: #5,111)\n"
+    "$topwg #2,000 (Global: #8,083) \u00b7 $tophg #2,000 (Global: #11,077)"
 )

@@ -6,7 +6,13 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from gui.sheet_store import SheetRead, clean_by_account, read_sheet, write_sheet
+from gui.sheet_store import (
+    SheetRead,
+    by_account_field,
+    clean_by_account,
+    read_sheet,
+    write_sheet,
+)
 from mudae.parsers.bonus import merge_bonus_fields
 
 
@@ -31,6 +37,12 @@ class ChannelProfile:
     shop: dict[str, Any] = field(default_factory=dict)
     bonus_by_account: dict[str, Any] = field(default_factory=dict)
     shop_by_account: dict[str, Any] = field(default_factory=dict)
+    # ``$ov`` is the *player's* settings sheet and ``$limroul`` the pool limits
+    # it points at, so both are per account like the two above. Neither has a
+    # pre-split twin: they shipped after the split, so there is no unattributed
+    # blob to read back and nothing to infer.
+    ov_by_account: dict[str, Any] = field(default_factory=dict)
+    limroul_by_account: dict[str, Any] = field(default_factory=dict)
     settings_summary: str = ""
     bonus_summary: str = ""
     shop_summary: str = ""
@@ -51,6 +63,8 @@ class ChannelProfile:
             shop=dict(data.get("shop") or {}),
             bonus_by_account=clean_by_account(data.get("bonus_by_account")),
             shop_by_account=clean_by_account(data.get("shop_by_account")),
+            ov_by_account=clean_by_account(data.get("ov_by_account")),
+            limroul_by_account=clean_by_account(data.get("limroul_by_account")),
             settings_summary=str(data.get("settings_summary") or ""),
             bonus_summary=str(data.get("bonus_summary") or ""),
             shop_summary=str(data.get("shop_summary") or ""),
@@ -107,18 +121,17 @@ class ServerProfileStore:
         *,
         account_id: str,
     ) -> SheetRead:
-        """One account's ``$bonus`` / ``$shop`` for a channel.
+        """One account's ``$bonus`` / ``$shop`` / ``$ov`` / ``$limroul``.
 
         Falls back to the pre-split blob for the main account only, flagged
-        ``inferred``; see :mod:`gui.sheet_store`.
+        ``inferred``; see :mod:`gui.sheet_store`. The two newer sheets have no
+        such blob, so they simply read empty until that account fetches them.
         """
-        legacy = channel.bonus if kind == "bonus" else channel.shop
+        legacy = getattr(channel, kind, {}) if kind in ("bonus", "shop") else {}
         legacy_summary = (
-            channel.bonus_summary if kind == "bonus" else channel.shop_summary
+            getattr(channel, f"{kind}_summary", "") if kind in ("bonus", "shop") else ""
         )
-        by_account = (
-            channel.bonus_by_account if kind == "bonus" else channel.shop_by_account
-        )
+        by_account = getattr(channel, by_account_field(kind), {})
         return read_sheet(
             by_account,
             account_id=account_id,
@@ -340,6 +353,22 @@ class ServerProfileStore:
             channel.settings = dict(fields)
             if summary:
                 channel.settings_summary = summary
+        elif kind in ("ov", "limroul"):
+            # No pre-split slot to fall back on, so a sheet with no account to
+            # credit is dropped rather than filed under a guess.
+            owner = str(account_id or "").strip() or self.main_account_id
+            if owner:
+                slot = by_account_field(kind)
+                setattr(
+                    channel,
+                    slot,
+                    write_sheet(
+                        getattr(channel, slot),
+                        account_id=owner,
+                        fields=dict(fields),
+                        summary=summary,
+                    ),
+                )
         elif kind in ("bonus", "shop"):
             # No account to credit (no accounts configured yet, or a fetch off a
             # target that never resolved) means the sheet is genuinely

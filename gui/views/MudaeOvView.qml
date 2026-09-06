@@ -5,31 +5,49 @@ import gui 1.0
 import "../components"
 
 /*
-    Mudae › $ov — personal settings.
+    Mudae › $ov — the player's settings.
 
     The account-side twin of `$settings`, and like it something you configure
-    and copy between servers, which is why it belongs on this page rather than
-    with the read-only totals.
+    rather than earn, which is why it sits between the server's rules and the
+    read-only totals `$bonus` reports.
 
-    There is no parser yet: `$ov` appears twice in `TODO.md` and nowhere in the
-    code, and `TODO.md` is explicit that we do not send it unless asked. The tab
-    is here so the section has its final shape and the gap is visible instead of
-    implied. Once parsed it reuses everything `$settings` already has — the same
-    sheet panel, the same diff-preview-apply pipeline — keyed to the account
-    rather than the server.
+    Two fields here are load-bearing, and both are `$bw` inputs that page used to
+    ask a person to type. `$persrare` is the rarity multiplier the sweep takes as
+    `N`. And the sheet's last bullet — `Character pool limits: see $limroul` —
+    points at the sheet in the right-hand card, whose limits are the sweep's base
+    pool, the single input that decides which `$bw` wins.
+
+    `$limroul` is a separate command and a separate stored sheet, shown here
+    because this is the line that names it.
 */
 Item {
     id: root
     clip: true
 
+    property string channelProfileId: ""
+    property string accountId: ""
     property string accountName: ""
 
-    readonly property var plannedFields: [
-        "Personal roll display",
-        "Emoji / reaction style",
-        "Notification preferences",
-        "Display language"
-    ]
+    // Re-read whenever a fetch lands: `limroulRevision` is referenced inside the
+    // binding purely so bumping it re-runs this.
+    property int limroulRevision: 0
+
+    readonly property var limroul: {
+        var _ = root.limroulRevision
+        if (!channelProfileId)
+            return { sections: [], field_count: 0 }
+        try {
+            return JSON.parse(
+                App.formatChannelLimroulDisplayJson(channelProfileId, accountId))
+        } catch (e) {
+            return { sections: [], field_count: 0 }
+        }
+    }
+    Connections {
+        target: App
+        function onServersChanged() { root.limroulRevision++ }
+        function onConfigChanged() { root.limroulRevision++ }
+    }
 
     RowLayout {
         anchors.fill: parent
@@ -38,11 +56,28 @@ Item {
         PanelCard {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            // An explicit share: without it the two cards are sized from their
-            // implicit widths, and a card of wrapping prose asks for the row.
-            Layout.preferredWidth: 420
-            Layout.minimumWidth: 260
-            title: "$ov (personal settings)"
+            Layout.minimumWidth: 320
+            title: "$ov (parsed)"
+            titleSize: Theme.sizeMedium
+            fillContentVertically: true
+
+            MudaeSheetPanel {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                sheetKind: "ov"
+                channelProfileId: root.channelProfileId
+                accountId: root.accountId
+            }
+        }
+        // A fixed sidebar rather than a share of the row: it holds a short fixed
+        // list, so any width it wins beyond that is width the sheet's own
+        // label/value rows needed — and `$ov` values are phrases, not numbers.
+        PanelCard {
+            Layout.preferredWidth: 380
+            Layout.minimumWidth: 280
+            Layout.maximumWidth: 440
+            Layout.fillHeight: true
+            title: "Character pool limits ($limroul)"
             titleSize: Theme.sizeMedium
             fillContentVertically: true
 
@@ -55,114 +90,132 @@ Item {
                     Layout.fillWidth: true
                     spacing: 8
 
-                    Rectangle {
-                        Layout.preferredHeight: 18
-                        Layout.preferredWidth: notParsed.implicitWidth + 14
-                        radius: Theme.radiusXs
-                        color: Theme.fade(Theme.warn, 0.16)
-                        border.width: 1
-                        border.color: Theme.fade(Theme.warn, 0.4)
-
-                        Label {
-                            id: notParsed
-                            anchors.centerIn: parent
-                            text: Theme.sectionLabel("parser not written")
-                            color: Theme.warn
-                            font.pixelSize: Theme.sizeMicro
-                            font.weight: Font.DemiBold
-                            font.letterSpacing: Theme.tracking(Theme.sizeMicro)
-                        }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "How many different characters each roulette can roll — "
+                              + "the $bw sweep's base pool, and the one input that decides "
+                              + "which $bw wins."
+                        color: Theme.mute
+                        font.pixelSize: Theme.sizeSmall
+                        wrapMode: Text.WordWrap
                     }
 
-                    Item { Layout.fillWidth: true }
+                    ScopeFetchButton {
+                        Layout.alignment: Qt.AlignTop
+                        command: "limroul"
+                        commandLabel: "$limroul"
+                        accountId: root.accountId
+                        channelProfileId: root.channelProfileId
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    visible: root.limroul.field_count === 0
+                    text: "Not fetched yet."
+                    color: Theme.mute
+                    font.pixelSize: Theme.sizeSmall
+                    wrapMode: Text.WordWrap
                 }
 
                 Repeater {
-                    model: root.plannedFields
+                    model: (root.limroul.sections[0] || {}).rows || []
 
                     delegate: RowLayout {
-                        required property string modelData
+                        required property var modelData
 
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
+                        Layout.preferredHeight: 34
                         spacing: 10
-                        opacity: 0.45
+                        visible: !!modelData.has_value
 
                         Rectangle {
                             Layout.preferredWidth: 4
                             Layout.preferredHeight: 14
                             Layout.alignment: Qt.AlignVCenter
                             radius: 2
-                            color: Theme.mute
-                            opacity: 0.35
+                            color: Theme.good
+                            opacity: 0.85
                         }
 
-                        Label {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: modelData
-                            color: Theme.dim
-                            font.pixelSize: Theme.sizeSmall
-                            elide: Text.ElideRight
+                            spacing: 0
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: modelData.label
+                                color: Theme.fg
+                                font.pixelSize: Theme.sizeSmall
+                                elide: Text.ElideRight
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                visible: !!modelData.detail
+                                text: modelData.detail
+                                color: Theme.mute
+                                font.pixelSize: Theme.sizeMicro
+                                elide: Text.ElideRight
+                            }
                         }
 
                         Label {
-                            text: "—"
-                            color: Theme.mute
+                            Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                            text: modelData.display
+                            color: Theme.fg
+                            font.family: Theme.monoFamily
                             font.pixelSize: Theme.sizeSmall
+                            font.weight: Font.Medium
                         }
                     }
                 }
 
+                Label {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 2
+                    visible: root.limroul.field_count > 0
+                    text: root.limroul.limits_agree === null
+                          || root.limroul.limits_agree === undefined
+                          ? "The four differ, so Advisor › $bw has to be told which "
+                            + "roulette you roll before it can take the pool from here."
+                          : "All four agree, so Advisor › $bw takes the base pool from "
+                            + "here without being asked which roulette you roll."
+                    color: Theme.dim
+                    font.pixelSize: Theme.sizeMicro
+                    wrapMode: Text.WordWrap
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 4
+                    Layout.preferredHeight: 1
+                    color: Theme.border
+                    opacity: 0.6
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "$persrare is the other field here with consequences: the rarity "
+                          + "multiplier on characters you already own, which raises wish "
+                          + "spawn chance and favours a lower $bw. Its lowest setting is 1, "
+                          + "which Mudae prints as none because multiplying by one changes "
+                          + "nothing."
+                    color: Theme.dim
+                    font.pixelSize: Theme.sizeSmall
+                    wrapMode: Text.WordWrap
+                }
+
                 Item { Layout.fillHeight: true }
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Illustrative field names — nothing is fetched or stored yet."
+                    text: "Read-only here. Neither sheet is ever sent on its own — the "
+                          + "Fetch buttons are the only things that ask for them."
                     color: Theme.mute
                     font.pixelSize: Theme.sizeMicro
                     wrapMode: Text.WordWrap
                 }
-            }
-        }
-
-        PanelCard {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            // An explicit share: without it the two cards are sized from their
-            // implicit widths, and a card of wrapping prose asks for the row.
-            Layout.preferredWidth: 420
-            Layout.minimumWidth: 260
-            title: "Before this tab works"
-            titleSize: Theme.sizeMedium
-            fillContentVertically: true
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: 10
-
-                Label {
-                    Layout.fillWidth: true
-                    text: "$ov has no parser, no command alias and no stored fields. "
-                          + "It needs a parser in mudae/parsers/, a response detector in "
-                          + "mudae/commands.py and a MessageKind, like every other sheet."
-                    color: Theme.dim
-                    font.pixelSize: Theme.sizeSmall
-                    wrapMode: Text.WordWrap
-                }
-
-                Label {
-                    Layout.fillWidth: true
-                    text: "Once it parses, this page reuses the $settings machinery "
-                          + "unchanged: the same sheet panel, and the same "
-                          + "diff → preview → dry run → apply → verify pipeline, keyed "
-                          + "to the account instead of the server."
-                    color: Theme.dim
-                    font.pixelSize: Theme.sizeSmall
-                    wrapMode: Text.WordWrap
-                }
-
-                Item { Layout.fillHeight: true }
             }
         }
     }
