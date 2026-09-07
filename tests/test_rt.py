@@ -132,13 +132,6 @@ def test_post_roll_uses_rt_before_wish_claim():
     actions = AsyncMock()
     actions.send_command = AsyncMock(return_value=12345)
     actions.wait_for_mudae_tick = AsyncMock(return_value=True)
-    actions.wait_for_rt_use = AsyncMock(
-        return_value=ParseResult(
-            kind=MessageKind.TU,
-            summary="$rt",
-            fields={"rt_used": True, "claim_available": True},
-        )
-    )
     actions.fetch_message_snapshot = AsyncMock(return_value=None)
     actions.click_button = AsyncMock(return_value=True)
     actions.wait_for_claim = AsyncMock(
@@ -184,13 +177,6 @@ def test_post_roll_rt_then_someone_else_claimed_first():
     actions = AsyncMock()
     actions.send_command = AsyncMock(return_value=12345)
     actions.wait_for_mudae_tick = AsyncMock(return_value=True)
-    actions.wait_for_rt_use = AsyncMock(
-        return_value=ParseResult(
-            kind=MessageKind.TU,
-            summary="$rt",
-            fields={"rt_used": True, "claim_available": True},
-        )
-    )
     fresh_snapshot = object()
     actions.fetch_message_snapshot = AsyncMock(return_value=fresh_snapshot)
 
@@ -223,7 +209,19 @@ def test_post_roll_rt_then_someone_else_claimed_first():
     assert any("already claimed by RivalUser" in line for line in logs)
 
 
-def test_post_roll_rt_aborts_without_tick():
+def _rt_record() -> RollRecord:
+    return RollRecord(
+        message_id=1,
+        character_name="Char",
+        fields={
+            "can_claim": True,
+            "claimed": False,
+            "buttons": [{"label": "Claim", "custom_id": "123p456p789"}],
+        },
+    )
+
+
+def _rt_handler(actions, logs: list[str]) -> tuple[PostRollHandler, AccountState]:
     state = AccountState(claim_available=False, rt_available=True)
     config = MacroConfig(
         character_claim=CharacterClaimRules(
@@ -231,24 +229,84 @@ def test_post_roll_rt_aborts_without_tick():
             auto_use_rt=True,
         )
     )
+    return PostRollHandler(actions, config, state, log=logs.append), state
+
+
+def test_post_roll_rt_without_tick_asks_tu_and_gives_up_when_still_on_cooldown():
+    """A lost tick is not proof the reset was missed — $tu is asked, and believed."""
     actions = AsyncMock()
     actions.send_command = AsyncMock(return_value=12345)
     actions.wait_for_mudae_tick = AsyncMock(return_value=False)
-    logs: list[str] = []
-    handler = PostRollHandler(actions, config, state, log=logs.append)
-    record = RollRecord(
-        message_id=1,
-        character_name="Char",
-        fields={"can_claim": True, "claimed": False, "buttons": [{"custom_id": "123p456p789"}]},
+    actions.wait_for_tu = AsyncMock(
+        return_value=ParseResult(
+            kind=MessageKind.TU,
+            summary="$tu",
+            fields={"claim_available": False, "claim_cooldown_minutes": 42},
+        )
     )
+    logs: list[str] = []
+    handler, _state = _rt_handler(actions, logs)
 
     claimed = asyncio.run(
-        handler.claim_record(record, reason="Wish rolled and pinged you", allow_rt=True)
+        handler.claim_record(_rt_record(), reason="Wish rolled and pinged you", allow_rt=True)
     )
 
     assert claimed is False
-    actions.wait_for_rt_use.assert_not_called()
+    actions.click_button.assert_not_called()
     assert any("no Mudae tick" in line for line in logs)
+    assert any("still on cooldown" in line for line in logs)
+
+
+def test_post_roll_rt_claims_on_the_tick_alone():
+    """The tick is Mudae's whole answer to $rt — nothing else is waited for.
+
+    The macro used to sit for 12s waiting for a reply message that Mudae never
+    sends, then cancel the claim when it did not arrive, losing the wish and the
+    reset together.
+    """
+    actions = AsyncMock()
+    actions.send_command = AsyncMock(return_value=12345)
+    actions.wait_for_mudae_tick = AsyncMock(return_value=True)
+    actions.fetch_message_snapshot = AsyncMock(return_value=None)
+    logs: list[str] = []
+    handler, state = _rt_handler(actions, logs)
+
+    claimed = asyncio.run(
+        handler.claim_record(_rt_record(), reason="Wish rolled and pinged you", allow_rt=True)
+    )
+
+    assert claimed is True
+    actions.click_button.assert_awaited_once()
+    actions.wait_for_tu.assert_not_called()  # no confirmation needed after a tick
+    actions.send_command.assert_awaited_once_with("rt", prefix="$")
+    assert state.rt_available is False
+    assert any("confirmed by tick" in line for line in logs)
+
+
+def test_post_roll_rt_lost_tick_is_recovered_by_tu():
+    """A tick is a gateway event and can be lost; $tu is the only other evidence."""
+    actions = AsyncMock()
+    actions.send_command = AsyncMock(return_value=12345)
+    actions.wait_for_mudae_tick = AsyncMock(return_value=False)
+    actions.wait_for_tu = AsyncMock(
+        return_value=ParseResult(
+            kind=MessageKind.TU,
+            summary="$tu",
+            fields={"claim_available": True, "rt_next_minutes": 1200},
+        )
+    )
+    actions.fetch_message_snapshot = AsyncMock(return_value=None)
+    logs: list[str] = []
+    handler, state = _rt_handler(actions, logs)
+
+    claimed = asyncio.run(
+        handler.claim_record(_rt_record(), reason="Wish rolled and pinged you", allow_rt=True)
+    )
+
+    assert claimed is True
+    actions.click_button.assert_awaited_once()
+    assert state.rt_available is False
+    assert any("$tu confirms" in line for line in logs)
 
 
 def test_instant_trigger_does_not_use_rt_on_cooldown():
@@ -310,13 +368,6 @@ def _rt_actions(*, sniped: bool = False):
     actions = AsyncMock()
     actions.send_command = AsyncMock(return_value=12345)
     actions.wait_for_mudae_tick = AsyncMock(return_value=True)
-    actions.wait_for_rt_use = AsyncMock(
-        return_value=ParseResult(
-            kind=MessageKind.TU,
-            summary="$rt",
-            fields={"rt_used": True, "claim_available": True},
-        )
-    )
     actions.fetch_message_snapshot = AsyncMock(
         return_value=object() if sniped else None
     )

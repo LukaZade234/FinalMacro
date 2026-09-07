@@ -20,10 +20,20 @@ from macro.rule_eval import passes_character_claim
 from macro.state import AccountState
 
 
-_RT_RESPONSE_TIMEOUT_SEC = 12.0
 _RT_PAUSE_BEFORE_SEC = 1.0
 _RT_TICK_TIMEOUT_SEC = 8.0
+# Enough spacing that the claim does not land in the same instant as the reset,
+# which Mudae can answer as though the reset had not happened. Deliberately
+# short: this is paid on *every* $rt, including the ones that were going to work,
+# and it comes straight out of a claim window that is only ~45s wide. If the
+# claim does not land, the escalating retry ladder below is what handles it —
+# that cost is only paid when something actually went wrong.
 _RT_SETTLE_AFTER_TICK_SEC = 1.0
+# The tick is the only thing Mudae sends, so a lost one leaves no evidence at
+# all. ``$tu`` is the one thing that can still say whether the reset landed;
+# asking costs a command and recovers both the reset and the claim, where giving
+# up throws away a scarce daily token. Kept short so the claim timer survives it.
+_RT_TU_CONFIRM_TIMEOUT_SEC = 8.0
 
 # A claim that got no reply is not a claim that failed — the click may have
 # landed and only the confirmation been lost, which is exactly how a paid ``$ot``
@@ -44,14 +54,16 @@ _CLAIM_ATTEMPTS = len(_CLAIM_RETRY_PAUSES_SEC) + 1
 _CLAIM_REPLY_TIMEOUT_SEC = 8.0
 
 # Shortest an ``$rt`` detour can take: the pause before sending, the settle
-# after Mudae's tick, and a tick and a reply that both arrive at once. Used only
-# to refuse a spend that *cannot* pay off — a roll with less than this left on
-# its claim timer will have a dead button by the time ``$rt`` returns, so
+# after Mudae's tick, and a tick that arrives promptly (the 3s). Derived from
+# those two constants so lengthening either one moves this with it, rather than
+# leaving a hardcoded floor behind. Used only to refuse a
+# spend that *cannot* pay off — a roll with less than this left on its claim
+# timer will have a dead button by the time ``$rt`` returns, so
 # sending it burns a reset for nothing. Deliberately optimistic: the cost of
 # being wrong here is a lost claim, while the cost of being wrong the other way
 # is only a wasted ``$rt``, and the timer is normally 45s against a roll that is
 # a second or two old.
-_RT_ROUND_TRIP_FLOOR_SEC = 5.0
+_RT_ROUND_TRIP_FLOOR_SEC = _RT_PAUSE_BEFORE_SEC + _RT_SETTLE_AFTER_TICK_SEC + 3.0
 
 
 @dataclass
@@ -357,30 +369,57 @@ class PostRollHandler:
             timeout=_RT_TICK_TIMEOUT_SEC,
         )
         if not ticked:
-            self._log(
-                f"$rt: no Mudae tick within {_RT_TICK_TIMEOUT_SEC:g}s — claim cancelled"
-            )
-            return False
+            # No tick is not proof the command was missed — a reaction can be
+            # lost like any other gateway event — and it is the only signal
+            # there is, so ask $tu rather than write the reset off.
+            self._log(f"$rt: no Mudae tick within {_RT_TICK_TIMEOUT_SEC:g}s")
+            return await self._confirm_rt_with_tu(character=character)
 
+        # Mudae answers ``$rt`` with a tick on the command message and nothing
+        # else — there is no reply to read, so the tick *is* the confirmation.
+        # This used to wait 12s for a reply that was never coming, and then
+        # cancel the claim when it did not arrive.
         self._log(
-            f"$rt: tick received — waiting {_RT_SETTLE_AFTER_TICK_SEC:g}s "
+            f"$rt: confirmed by tick — waiting {_RT_SETTLE_AFTER_TICK_SEC:g}s "
             "before claim"
         )
         await asyncio.sleep(_RT_SETTLE_AFTER_TICK_SEC)
-
-        parsed = await self._actions.wait_for_rt_use(timeout=_RT_RESPONSE_TIMEOUT_SEC)
-        if parsed is None:
-            self._log(f"$rt: no Mudae response within {_RT_RESPONSE_TIMEOUT_SEC:g}s — claim cancelled")
-            return False
-
-        if not apply_rt_response(self._state, dict(parsed.fields)):
-            self._log("$rt: response did not open a claim slot — claim cancelled")
-            return False
+        apply_rt_response(self._state, {"rt_used": True, "claim_available": True})
 
         # Remember who the reset was bought for. If this claim then falls
         # through, ``claim_best`` must not spend the slot on someone else.
         self._state.rt_claim_slot_for = character or "a wish"
         self._log("$rt OK — claim slot available")
+        return True
+
+    async def _confirm_rt_with_tu(self, *, character: str = "") -> bool:
+        """Ask ``$tu`` whether the reset landed when the tick never arrived.
+
+        The tick is the only thing Mudae sends, so losing it leaves no other
+        evidence — and reporting the reset as failed loses the claim *and*
+        leaves a reset that may already be spent recorded as still available for
+        the rest of the day. ``$tu`` is the one thing that can settle it.
+        """
+        self._log("$rt: asking $tu whether the reset landed")
+        message_id = await self._actions.send_command("tu", prefix=self._config.prefix)
+        if message_id is None:
+            self._log("$rt: $tu send failed — claim cancelled")
+            return False
+        parsed = await self._actions.wait_for_tu(timeout=_RT_TU_CONFIRM_TIMEOUT_SEC)
+        if parsed is None:
+            self._log(
+                f"$rt: no $tu reply within {_RT_TU_CONFIRM_TIMEOUT_SEC:g}s — "
+                "claim cancelled"
+            )
+            return False
+
+        fields = dict(parsed.fields)
+        if not apply_rt_response(self._state, fields):
+            self._log("$rt: $tu says the claim is still on cooldown — claim cancelled")
+            return False
+
+        self._state.rt_claim_slot_for = character or "a wish"
+        self._log("$rt OK — $tu confirms the claim slot is open")
         return True
 
     def _claim_method(self, record: RollRecord) -> str:

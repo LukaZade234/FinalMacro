@@ -1,8 +1,14 @@
 # TODO
 
-Open work. Game rules: [`MUDAE_LOGIC.md`](MUDAE_LOGIC.md). Code map: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Open work. Game rules: [`MUDAE_LOGIC.md`](MUDAE_LOGIC.md). Code map: [`ARCHITECTURE.md`](ARCHITECTURE.md). Unused parsed fields: [`PARSED_FIELDS.md`](PARSED_FIELDS.md).
 
-Follow **Unlock path** unless you specifically want a quick win or a single high-impact slice. Skip list is at the bottom of **Colblitz tools**. New holes from a full-app pass: **Found in audit**.
+Follow **Unlock path** unless you specifically want a quick win or a single high-impact slice. Skip list is at the bottom of **Colblitz tools**. Completed work is kept as short history — full forensic detail for anything struck through lives in git history, the referenced modules, and `MUDAE_LOGIC.md`, not here.
+
+---
+
+## Next up
+
+Per **By ease**, the cheapest open item is the **`$dl`/`$adl`/`$wl` one-click switch** (GUI + send, no optimizer — still greenfield: no alias, parser, or stored list contents, and the current lists are never read back from Mudae). Per **By importance**, the two things actually worth doing are wiring *behavioural* rules off the already-parsed `$settings`/`$bonus` fields, and **full daily autonomy** (one connect covers rolls, reacts, minigames, dailies, and skips minigames already exhausted). The **auto sphere/kakera investor** is now unblocked (stock tracking shipped) and is the next real feature in Wave 5. Phase D and achievements only matter if multi-account or a leaderboard is actually wanted.
 
 ---
 
@@ -10,21 +16,21 @@ Follow **Unlock path** unless you specifically want a quick win or a single high
 
 Cheapest first. “Easy” means a sitting or two and little new machinery.
 
-1. ~~**Empty states** — copy.~~ `gui/emptyStates.js`: disconnected vs nothing recorded vs filters.
-2. ~~**Compile leftover parser regexes** — mechanical.~~ Module-level `_…_RE` in `tu`, `roll`, `settings`, `claim`, `kakera`, `bonus`, `utils`, etc.
-3. ~~**Humanized delays** — jitter existing sleeps.~~ Opt-in on the Rolls preset tab (`humanize_roll_delay` + adjustable `roll_delay_jitter_sec`).
-4. ~~**Reaction power max on the account page** — `kakera_max_power` is parsed from `$bonus`; still not wired (hardcoded `155`).~~ Wired from the run channel's `$bonus` (`macro/sheet_caps.py`).
-5. ~~**Timezones** — pick UTC (Mudae dailies), fix QML “today”.~~ Live feed is local; stats “today” is UTC.
-6. ~~**`$p` / `$daily`** — send at the right time; parsers exist.~~ Account-global; designated channel on the Accounts tab; priority over rolls.
-7. ~~**Chaos parser** — after `data/chaos_log.json` has documented cases; capture is in place.~~ Parser in `mudae/parsers/chaos.py`; extra rolls are spent this hour, free kakera / wish follow-ups are acted on, power discount applied on spend, omega keys logged. `$kl` / stored minigames are logged only.
-8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer. **Entirely greenfield** despite the low ease rank: no command aliases, no parser, no stored list contents, and the current lists are never read back from Mudae. Note the scopes differ — `$dl` / `$adl` are server rule lists, `$wl` is the account wishlist.
-9. ~~**Save power for perk 8** / **`$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain / schedule on the preset (`us_keep_draining`, local window, roll cap). Run page is only the Roll `$us` button.
-10. ~~**Sphere tracking audit** (+ perk-9 colour, `$oc` from `$oh`) — investigation, then a log field.~~ Perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted as SP, no overlap between `$oh` reward / perk 10 / kakera / perk 9; Statistics “today” matches hand tally. Optional `scripts/sphere_audit.py` deferred unless needed again.
-11. ~~**`$oc` leftover-click lookahead**~~ — remaining-need-aware collect EV + widened hunt-endgame guess threshold, geometric model kept (`macro/oc_solver.py`). +1.25 SP/board on 100 real logged boards, not significant; further `$oc` tuning is blocked on sample size, not ideas.
-12. ~~**`$oh` histogram → DP**~~ — built, and it confirms the shipped heuristic rather than beating it; see **Solvers** below. ~~**app-only wishlist**~~ — shipped (`macro/wishlist.py`, `gui/wishlist_store.py`, Advisor → Wishlist): character and series lists, bulk input in the Formatter's own `$`-joined format, a match claims via the wish-ping path with `$rt`, and a Global toggle switching between one list and one per (account, server). **Auto investor** — new module, known shape.
-13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — tables no longer parse the full log; shared filter state across tabs and a Qt list model can wait.
-14. ~~**Perk 9 threshold**~~ / ~~**`$bw` advisory**~~ — both wired. Perk-9 EV + DP in `macro/perk9_threshold.py` (opt-in `budget_aware`); the `$bw` sweep in `macro/bw_calc.py`, which was blocked on `$wlsz+z!` wishlist sizes until that capture shipped and now names an optimum.
-15. ~~**`$ot` Phase 2**~~ (solver, harness, Extra Chance and a manual Play $ot button shipped; auto-play still off pending one live batch under the new rules) / **use parsed `$settings`/`$bonus` in decisions** / **full daily autonomy** / **Phase D** — real projects.
+1. ~~**Empty states**~~ — `gui/emptyStates.js`: disconnected vs nothing recorded vs filters.
+2. ~~**Compile leftover parser regexes**~~ — module-level `_…_RE` across `mudae/parsers/`.
+3. ~~**Humanized delays**~~ — opt-in roll jitter on the Presets Rolls tab.
+4. ~~**Reaction power max on the account page**~~ — wired from the run channel's `$bonus` (`macro/sheet_caps.py`).
+5. ~~**Timezones**~~ — UTC for Mudae dailies / stats “today”; live feed stays local.
+6. ~~**`$p` / `$daily`**~~ — account-global, designated channel, priority over rolls.
+7. ~~**Chaos parser**~~ — `mudae/parsers/chaos.py`: extra rolls spent, free kakera/wish acted on, power discount applied, omega keys logged.
+8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer. Note the scopes differ — `$dl`/`$adl` are server rule lists, `$wl` is the account wishlist.
+9. ~~**Perk 8 power save / `$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain/schedule on the preset. Run page is only the Roll `$us` button.
+10. ~~**Sphere tracking audit**~~ — perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted, no overlap between SP sources; Statistics “today” matches hand tally.
+11. ~~**`$oc` leftover-click lookahead**~~ — remaining-need-aware EV + widened hunt threshold. +1.25 SP/board on 100 real boards, not significant; blocked on sample size, not ideas.
+12. ~~**`$oh` histogram → DP**~~ (confirms the shipped heuristic) and ~~**app-only wishlist**~~ (shipped) — both done. **Auto investor** — new module, known shape, still open.
+13. ~~**EventLog + JSONL**~~ then ~~**daily cube + paged stats**~~ — shared filter state across tabs and a Qt list model can wait.
+14. ~~**Perk 9 threshold**~~ / ~~**`$bw` advisory**~~ — both wired (`macro/perk9_threshold.py`, `macro/bw_calc.py`).
+15. ~~**`$ot` full pipeline**~~ — solver, harness, Extra Chance, and auto-play all shipped (`PLAYABLE_MINIGAMES`); the manual **Play $ot** button stays. / **use parsed `$settings`/`$bonus` in decisions** / **full daily autonomy** / **Phase D** — real projects, still open.
 16. Last: split `bridge.py`, achievements, GUI polish.
 
 ---
@@ -33,16 +39,16 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 
 Highest first. What makes an overnight run correct and complete.
 
-1. **Use parsed `$settings` / `$bonus` in decisions** — parse-and-store is done; perk 9 DP and the `$bw` sweep now read those fields, and any *behavioural* rule from them still waits. ~~claim-via-emoji~~ shipped, but *not* from `$settings`: the roll's own components say which claim mechanic is live, which is strictly better because the server and the account can disagree and only the roll shows the combination.
+1. **Use parsed `$settings` / `$bonus` in decisions** — parse-and-store is done; perk 9 DP and the `$bw` sweep read those fields, but any *behavioural* rule from them still waits. Field-by-field survey of what is wired vs. sitting unused: [`PARSED_FIELDS.md`](PARSED_FIELDS.md). ~~Claim-via-emoji~~ shipped, but deliberately reads the roll's own components instead — the server and account can disagree, and only the roll shows the live combination.
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
-3. ~~**Sphere tracking + EventLog / shared stats**~~ — EventLog + daily cube + paged stats tables. Totals/charts no longer walk every event in QML.
+3. ~~**Sphere tracking + EventLog / shared stats**~~ — daily cube + paged stats tables; totals/charts no longer walk every event in QML.
 4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
-5. ~~**Unused or mis-spent daily budget**~~ — `$ot` (`macro/ot_game.py`) exploits **Extra Chance**: **915 base SP a board across the 27 real boards, 100.2% of the all-ships ceiling, vs the 745.5 those boards actually paid** (+168.9, t = 3.72), 7 boards cleared outright, on a balance the logs used to show sitting at `$ot 3 unused` run after run. Ten hand-played games confirmed the mechanic before it was promoted into `PLAYABLE_MINIGAMES`; it now runs in play-all and after-refill auto-play, and the **Play $ot** button on the Run page stays for an on-demand single play. ~~Perk 9 static filter~~ — opt-in adaptive threshold spends the daily clicks by EV, and the click-expiry bug that undermined it is fixed (see **Found in audit**).
-6. ~~**Reconnect / overlap holes** — `macro_active` cleared mid-run; hourly Start allowed during `$oh`.~~ `macro_active` has **more than one owner** (the roll cycle for a session, each minigame for a board) and the GUI lets them overlap — a manual `$oh` is allowed during the hourly refill wait. The save-and-restore idiom every owner used could not express that, so `mudae/macro_activity.py` replaces it with an owner **depth count**: the flag is true while any owner holds it, false only when the last releases. Three defects closed — a *stale true* (Stop during a manual `$oh` left `observe` silenced for the rest of the connection), the *reconnect window* (`_clear_channel_state` dropped the flag and each caller restored it only after `start_background`, ~30s of mis-attributed `$tu`; the gateway no longer owns the flag at all), and a *real collision* (`_wait_for_hourly_refill` and `_on_scheduled_wake` now yield to a running minigame via the engine's `minigames_busy` hook, 180s cap). `RollCycleEngine.start` / `start_us_mode` also re-check busy on the loop thread, closing the Qt-thread TOCTOU the GUI check alone left open.
-7. ~~**Timezones** — “today” and daily series lie across UTC midnight.~~ UTC `date_key` + UTC stats buckets; live feed local.
-8. ~~**Overnight completeness** — chaos *parser* (capture is `data/chaos_log.json`).~~ Parser + follow-up in `KakeraReactor` / `chaos_followup.py`; raw windows still go to `data/chaos_log.json`.
-9. **More SP from games we already play** — ~~`$oh` DP~~ done: the shipped heuristic was already EV-optimal on its one real decision (never click a revealed blue/teal), confirmed rather than improved; an endgame bug that forfeited a sitting blue/teal is fixed. ~~`$oc` lookahead~~ — done and measured on real boards (+1.25 SP/board, not significant); `$oc` is at the ceiling of this approach, leave it. `$oq` stays MIXED (95.6% / 344.8, matches Colblitz MIXED; leave the DP chase). Nothing obvious left in this line.
-10. ~~**App-only wishlist**~~ and ~~**`$bw` advisory**~~ both shipped. What is left there is the **base pool**: the sweep's one guessed input, currently a user field defaulting to 2,000, and the thing that decides which `$bw` wins (pools from 500 to 20,000 move the optimum from 12 to 30). It is derivable from the server's game mode and disable lists — that is the next real step on this line.
+5. ~~**Unused or mis-spent daily budget**~~ — `$ot` Extra Chance (+168.9 SP, t=3.72, 100.2% of ceiling, 7/27 boards cleared outright) and the perk-9 adaptive threshold both shipped.
+6. ~~**Reconnect / overlap holes**~~ — `mudae/macro_activity.py`'s owner **depth count** replaced the save/restore idiom, closing a stale-true bug, a reconnect window, and a real minigame/hourly-refill collision.
+7. ~~**Timezones**~~ — UTC `date_key` + UTC stats buckets; live feed local.
+8. ~~**Overnight completeness**~~ — chaos parser + follow-up wired end to end.
+9. ~~**More SP from games we already play**~~ — `$oh` DP confirms the shipped heuristic, `$oc` lookahead measured (+1.25 SP/board, n.s.), `$oq` MIXED matches Colblitz. Nothing obvious left in this line.
+10. ~~**App-only wishlist**~~ and ~~**`$bw` advisory**~~ both shipped, including the base pool — no longer a guessed input, it now comes from `$limroul`.
 11. **`$dl` switch**, shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
 
@@ -52,436 +58,223 @@ Highest first. What makes an overnight run correct and complete.
 
 Do this order. Early waves make later ones cheaper; items in the same wave can run in parallel.
 
-**Wave 1 — cheap data, harness, and stop-the-bleeding**
-
-- ~~ParseLab must not persist the live token on keystroke~~ — Debug uses the Run/Accounts token and no longer has a token field.
-- ~~Soulmate rows: write `account_id` / `account_name` from Mudae `owner` (lukazade234).~~ QML fallback is `"Unknown"` only if a row still has no name.
-- ~~After `force_reconnect`, restore `macro_active` if it was set.~~ Superseded: reconnecting no longer clears the flag, so there is nothing to restore (`mudae/macro_activity.py`; see importance item 6).
-- ~~`$oq` MIXED hunt.~~ Replay harness in `macro/oq_replay.py` (`scripts/oq_bakeoff.py`). Opening is Colblitz `(1,1)` (index 6). Finding 3 purples auto-reveals the 4th as a clickable red — we claim it, we do not search hidden cells. Two-purple hunt uses expectimax. Full replay MIXED **95.6% red / 344.8 avg** (Colblitz 95.4% / 342.7).
-- ~~Timezones.~~ Mudae dailies / `date_key` / stats “today” are UTC (`mudae/clock.py`, `gui/clock.js`). In-app live feed stays local time (Classic `ActivityLogPanel` + Haul `RunModel.timeOf`).
-- ~~Sphere tracking audit~~ — colour on `sphere_click`, `$oc` granted from `$oh` (not SP), no double-count vs perk 10 / kakera / perk 9; Statistics “today” verified. First `$oh` invested-sphere line is **perk 10** (`$oq` / `$ot` / flat SP) — SP source `perk10`, extra `$oq`/`$ot` on the `$oh` minigame session. Unblocks perk 9 frequencies and the `$oh` DP. `$oh` dark `turns into` + `(Free)` and light `breaks down into` tracker lines are parsed. Minigame boards: `data/minigame_log.json` / Statistics → Minigames.
-- ~~Chaos parser in the same key/sphere pass.~~ Capture: every Mudae message after a `kakeraC` click until the next commanded roll **or 8s of silence** goes to `data/chaos_log.json`. Parser + acting is the next bullet.
-- ~~**Chaos parser wired**~~ — `mudae/parsers/chaos.py` on the `+$k` body (`+N rolls this hour`, stored `$oh`/`$oc`/`$oq`/`$ot`, `$kl`, `N%` power discount, omega `$ok`, owned free kakera, wish spawn). Shop 5 `(Shop 5) +1 $ot stored!` is separate (any kakera react). Extra rolls are added to `rolls_left` and spent before hourly refill. Free kakera clicked at 0 power; wish uses `claim_on_wish_ping` + `$rt` when that toggle is on. Discount applies when spending tracked power, not as a pre-click guess.
-- ~~Reaction-power max is parsed (`kakera_max_power`) but not wired.~~ `kakera_max_power` from `$bonus` and `perk9_click_max` from `$shop` are applied to the run-channel state.
-
-**Wave 2 — two foundations (do not skip)**
-
-- ~~`$settings` / `$bonus` parse audit~~ — fixtures + meaning catalog + field-by-field tests; capture skips the 16 direct toggles; `$bonus` is read-only (source tags are not sent). Storage trusted; **do not** change claim / kakera / roll behaviour until a later slice wires the fields. Unblocked perk 9 DP / `$bw` *work* (both since shipped), not those behaviours. (Claim-via-emoji turned out not to need it — see the Claims section of `MUDAE_LOGIC.md`.)
-- ~~One `EventLog` + JSONL (`data/events.jsonl`; one-time import of the old JSON arrays, which stay on disk).~~
-- ~~Daily cube + paged Statistics (`stats_index`; `App.statsQuery`).~~ Cards/charts sum daily cells; tables load 80 rows at a time. Shared filter state across Kakera/Spheres/Keys/Soulmates and a `QAbstractListModel` can wait.
-
-**Wave 3 — close the daily loop on one account**
-
-- ~~`$p` / `$daily`~~ — designated per-account channel; auto-send on cooldown with roll priority.
-- ~~Extend `daily_resets` (already used for perk 8) to `$oh` / `$oc` / `$oq` / `$ot` and sphere stock~~ — `macro/minigame_daily.py` + `macro/perk9_daily.py`; play-all / hourly skip minigames until UTC refill. Perk 9 / megasphere counts persist for the Run tab; the reactor does not skip — Mudae stops spawning those buttons.
-- ~~**Perk 8 power / `$dk` reserve**~~ — optional on the perk-8 budget panel (`perk_8_power_save`). Off = old click/`$dk` rules. On = pay remaining perk-8 first (they expire at UTC midnight); after 40/40 still take chaos kakera and hold `$dk` unless a new use is back by midnight. Usual `$dk` cooldown is **20h**.
-- ~~**`$us` control**~~ — preset drain policy + optional **local** time window (`us_schedule_*`, not UTC). Manual / keep-draining / power stop / session roll cap live on Presets → `$us`. **Roll `$us`** starts immediately (ignores the window). The window is an automatic drain while connected, like `$p` / `$daily`; leftover `$us` stays on the stack at end time. Hourly waiting for a refill yields to the window, then resumes.
-
-**Wave 4 — spend the daily budget better**
-
-- ~~Perk 9 adaptive threshold~~ — `macro/perk9_threshold.py`: EV formula + `V(spawns, clicks)` DP, opt-in `SphereReactionRules.budget_aware`. Colours/rates editable per preset (Colblitz's 138,925-roll table as defaults). Spawns left come from `$ohu9`'s `(Perk 9) Rolled today`. Score with `scripts/perk9_bakeoff.py`.
-- ~~`$ot` Phase 2 enumerator~~ — `macro/ot_solver.py`. The message states the fleet (`Number of different colors: N` ⇒ `N − 4` length-2 ships), so the board is a known-fleet placement problem. **It does not enumerate**: a configuration is one of only 5,520 legal (teal, green, yellow) triples plus a set of disjoint dominoes, and the dominoes are *counted* by a memoised DP. Per-cell marginals come from one identity — the configurations leaving cell `c` empty are the packings of the free region without `c` — which reproduces a brute-force DFS exactly (597,408 / 1,890,960 / 3,082,032 / 2,485,616 placements for 6/7/8/9 colours) at 0.28s cold and ~0.002s once three cells are known. Harness: `macro/ot_replay.py` + `scripts/ot_bakeoff.py`, over 27 real boards and two generators.
-  **`$ot` plays by hand only** — `macro/ot_game.py` behind a Run-page button, never automatic. See “Daily loop and scheduling”.
-- ~~**`$ot` Extra Chance**~~ — a blue ends the board only when it is the 4th-or-later **and** ≥5 ship cells have been clicked; below that it is granted as `(Extra chance)`, repeatably. Confirmed by ten logged games splitting exactly on that predicate — nine locked the grid at their 4th blue with 6–16 hits, the tenth reached it with 3 and stayed live while the macro stopped itself and abandoned 18 cells. `ot_solver.ot_game_over` owns the rule; `EXTRA_CHANCE` keeps the old reading for the bakeoff. Policy is two-phase: **hold the certain ships back and hunt blues** (`ev + 600·P(blue)`) while nothing can end the board, then the old harvest-and-probe. **+168.9 SP (t = 3.72) on the 27 real boards, 100.2% of ceiling, 7 boards cleared outright.** Deferring is on at every colour count (a win at 6 under both generators, never significantly negative anywhere); the blue bonus only at 6–7 (`OT_BLUE_BONUS_COLORS`) — at 8–9 `--sweep-blue-bonus 120` is negative at every value from 150 up, reaching **−111 (t = −2.6) at 8 and −154 (t = −3.9) at 9**, because 5–7 blues run the four ship hits out before the hunt lands. `K/(5−h)`, `K·(5−h)/5` and blue-density scaling were all tried as unified alternatives and all still lose at 8–9.
-- ~~**`OT_RARE_WEIGHTS` re-measured**~~ — was the Colblitz `$oh` per-cell *spawn* rates; ship rarity does **not** track sphere rarity. Over the 26 rare slots then available those weights predict 1.2 reds and 0.2 rainbows against **4 and 3** observed, which valued an unidentified length-2 cell on a 7-colour board at ~92 SP instead of ~208 and made the solver walk past rare ships. Now the observed counts (L 13 / D 6 / R 4 / W 3), re-checked against the log rather than pinned.
-- ~~**Button clicks had no retry, no reconnect and no error message**~~ — `ChannelMonitor.click_button` was `except Exception: return False`, so a failure was both unrecoverable and undiagnosable. Found when the first Extra Chance `$ot` board died at `click failed — stopping` with **six certain ships (220 free SP) still on the grid** and nothing in the log saying why. Reconstructed from the reward line: the macro logged `+1188` where its own twelve clicks account for 1042, a difference of exactly one `spY (+146)`, and the cell it was about to press was a certain yellow — so **the click reached Mudae and paid out, and only the reply was lost**. Fixes: clicks now retry like sends (`_CLICK_ATTEMPTS`), refetch the message between attempts, reconnect when the gateway is down, and always name the error; `send_command` reconnects too (only rolls had that, via `RollCycleEngine`); `is_transient_discord_error` never mentioned **429 / rate limits / timeouts / 500**, which is most likely what this was — `$ot` presses 12–25 buttons a board, and the click spacing that day went 2s, 2s, 2s … 5s, 3s, 14s, fail. The `$ot` loop no longer treats one refusal as fatal: it refreshes the grid (which is what recovers a landed-but-unreported click), skips a cell that refuses twice, and says what it abandoned if it does give up. **Still open:** `$oh` / `$oc` / `$oq` keep `if not ok: break` — the transport retry now covers them, but every click there is paid, so skipping a cell is not obviously right and was left alone.
-- **`$ot` policy review (2026-08-30, 27 real boards)** — the solver takes **915 SP a board against a 912.8 all-ships ceiling (100.2%)**, clears **7 of 27 boards outright**, and leaves **9.6% of total board SP** unclicked. Two structural findings say that remainder is mostly not winnable:
-  **The endgame is already optimal.** On every board that lost SP, the post-hunt phase collected *everything* that was certain when the hunt ended, and more (cells that became certain later). The entire loss is decided during the hunt.
-  **`p_blue` is well calibrated.** Over 316 hunt-phase clicks: predicted 0.555 vs actual 0.573, tracking inside each populated bucket (0.4–0.5 → 0.44, 0.5–0.6 → 0.59, 0.6–0.7 → 0.71, 0.7–0.8 → 0.74, 0.9–1.0 → 1.00). The belief model means what it says, so a hunt click that hits a ship is variance, not a mis-estimate. Five boards hold 67% of the loss and all five simply ran their four ship-hit tokens out early.
-  **Measured dead ends** (all on the 27 real boards unless noted): **entropy term** added to the hunt (`+w·entropy`, w = 5…100) — 0.0 at w ≤ 10, negative above. **Token-scaled bonus** (`bonus·k/(5−hits)`, k = 1/2/4) — −11.2 / +2.0 / −16.5, none significant. **Resolve-aware hunt** — scoring a hunt click by how much of the board the reveal makes *certain* (`+γ·E[harvest unlocked]`), the one idea with a real mechanism behind it, since what survives the phase is exactly what is certain when it ends. On the 27 real boards it looked like the best candidate found: γ = 0.25 → +13.5 (t = 1.24), γ = 0.5 → **+30.3 (t = 1.95)** — but γ = 1.0 reverses to −3.9, and a single interior peak is the shape of a fitted sample. Off the tuning set it evaporates: **+3.5 (t = 0.43) and −10.2 (t = −0.46)** on 70 generated boards each at 6 and 7 colours, for **20× the solver time**. Same trap as the `$oc` MIXED hunt. **Last-token rule** (on the final ship hit, order by `p_blue` alone) — +11.6 (t = 1.01) on the real boards and directionally positive at volume but only 1 of 4 generated cells significant (+5.0 / +6.0 / +11.3\* / +0.9), i.e. ~1% and mostly noise. Do not re-derive these without a much larger log.
-- **`$ot` reward model** — `base_value` is `SPHERE_BASE_SP` and is *not* what Mudae pays: `2 × base_value + 36 × clicks` is exact on 5 of 10 logged games and within 3% on 4 more. The per-click term is strategically real (every extra click ≥56 SP) but the multiplier is account-scoped, so it lives in `ot_replay.OT_CLICK_BONUS_SP` for reporting only. To pin it properly the loop would have to keep the raw reward text and the grid's own multiplier line, which it currently discards.
-- ~~`$oc` leftover-click lookahead~~ — shipped, then audited against **100 real logged boards** (`scripts/oc_bakeoff.py --from-log docs/minigames_to_use.jsonl`). `macro/oc_solver.py`: collect-phase EV tracks remaining need per region instead of a fixed weight per colour, and hunt widens its "guess red" threshold from `≤2` candidates to `≤clicks_left` once 3 or fewer clicks remain. **Measured: +1.25 SP/board (335.80 vs 334.55), t = 1.41 — not significant, changes only 2 boards in 100; ~200 boards needed to confirm.** Directionally positive, kept, but do not describe it as a win. A deeper recursive hunt lookahead was tried and reverted (it lost SP and, on a real screenshot-derived fixture, talked itself out of ever guessing red). ~~`$oh` DP only if the wave 1 histogram is stable~~ — histogram was already stable (the same 96-board table this section built), DP built and confirms the shipped heuristic (see **Solvers**). `$oq` MIXED matches Colblitz — leave it.
-- **`$oc` measured dead ends** — all replayed on the same 100 boards, none shippable. **MIXED hunt scoring** (`info_gain + β·EV`, mirroring `$oq`): +1.35 SP, t = 0.43, would need **~2,200 boards** to confirm; the synthetic benchmark rated it best at β≈0.3, and a 30-board sample rated it −8.83 SP, which flipped to +1.35 at 100 boards — it was noise both times. **Disjoint O/G regions**: 0.00 SP, and *disproven* — greens sit on orthogonally adjacent cells 22% of the time, so the region overlap is correct, not a bug. **Clicking the centre**: 0.00 SP. **Real `SPHERE_BASE_SP` values**: 0.00 SP (shipped anyway — it is the correct objective). Do not re-derive these without a much larger log.
+**Waves 1–4 are complete.** Rolls, claims, minigames (`$oh`/`$oc`/`$oq`/`$ot`), dailies, perk 8/9 budgets, `$us`, the `$settings`/`$bonus`/`$shop`/`$limroul`/`$ov` parsers, EventLog + daily-cube stats, and the perk-9/`$bw` calculators are all shipped — see **By ease**, **By importance**, and **Found in audit** above for what each one fixed, and `MUDAE_LOGIC.md` for the mechanics themselves.
 
 **Wave 5 — after one account is boringly reliable**
 
 - ~~App-only wishlist → `$bw` advisory~~ — both shipped. Never auto-send `$bw`; the page prints the command.
-- Auto sphere / kakera investor (needs wave 3 stock tracking).
-- Phase D.
-- Daily report / session row / achievements (need wave 2 logs).
-- Split `bridge.py`, leftover regexes, GUI polish.
+- **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click. Wave-3 stock tracking (its prerequisite) is done, so this is now open to start.
+- **Phase D**.
+- **Daily report / session row / achievements** — daily report shipped (`Statistics › Report`); session row and achievements still open.
+- Split `bridge.py`, GUI polish. (Leftover regexes done.)
 
-~~Optional / when asked: `$ov` parser~~ — shipped (`mudae/parsers/ov.py` + `ov_catalog.py`, Mudae › `$ov`). `$persrare` feeds the `$bw` sweep's `N`, and its companion `$limroul` parser (`mudae/parsers/limroul.py`) feeds the base pool — neither is typed any more. Skip unless someone wants them: disablelist optimizer, `spcalc`, YOGRTBot, klcalc.
+~~Optional / when asked: `$ov` parser~~ — shipped; also feeds the `$bw` sweep's `$persrare` N. Skip unless someone wants them: disablelist optimizer, spcalc, YOGRTBot, klcalc.
 
 ---
 
 ## Parsers and server rules
 
-- ~~**`$settings` / `$bonus` parse audit**~~ — parsers trusted for storage (`tests/mudae_sheet_fixtures.py`, `mudae/parsers/bonus_catalog.py`). Capture tool skips or reverts the 16 direct toggles; `$bonus` dump is read-only. **Follow-ups (not done):** driving `CharacterClaimRules` / kakera / sphere reacts from settings. ~~claim-via-emoji~~ is done and deliberately reads the roll instead of these fields. `kakera_max_power` and perk 9 click cap are wired from the run channel's sheets.
-- ~~**`$shop` parser**~~ — ouroperk sheet (OP1–OP10, perk 9 extra clicks +
-  SP%, megasphere rewards). Components V2 capture + parse-and-store on the
-  channel profile (`App.fetchShop`). `perk9_click_max` drives the daily click
-  cap. p9calc / spcalc still wait. Do not send `$shoprefund`.
-- ~~**Chaos parser**~~ — `mudae/parsers/chaos.py` + `macro/chaos_followup.py`. Extra hourly rolls are spent (not left for `$tu` / refill). Free kakera / wish spawns are clicked / claimed. `$kl` and stored minigames are logged only. Raw windows still go to `data/chaos_log.json`.
-- ~~**`$limroul` parser**~~ — `mudae/parsers/limroul.py` + `limroul_catalog.py`, stored per `(account, channel)`, shown on Mudae › `$ov` beside the sheet that points at it, fetched only by **Fetch `$limroul`**. `Current $limroul: 2,000 $wa, …` is the `$bw` sweep's **base pool**, which closes the last of that page's guessed inputs. It goes in **flat** — the wishlist is part of the pool, not something to subtract. The four roulettes can differ (a limit below the server's `$servlimroul` ceiling is itself an unlock), so the page takes the pool automatically when they agree and asks which roulette you roll when they do not, rather than averaging. The sheet's `$top…` lines also give local-vs-global rank, whose gap is the server's own disable list.
-- ~~**`$ov` parser**~~ — `mudae/parsers/ov.py` with the label catalog in `ov_catalog.py`, stored per `(account, channel)` beside `$bonus`/`$shop`, shown on Mudae › `$ov`, fetched only by the scope bar's **Fetch `$ov`** — never sent on its own. Two findings: the sheet was being **classified as a claim** (a wall of bold values reads as a wall of bold names, the same failure the wishlist listing has), and a field here **cannot be keyed on its `($command)` suffix** the way `$settings` is, because three different toggles print `($rdmimg)`. `$persrare` now supplies the `$bw` sweep's `N` and the typed field goes read-only when it does. `$persrare` is a **multiplier**, not a count of rerolls: its lowest setting is 1 and Mudae prints that as `none` because multiplying by one changes nothing; a set value prints `x2`. Stored as the integer, rendered back to Mudae's wording.
-- **Sphere tracking audit** — totals / sources look wrong. Check roll clicks vs `$oh` / `$oc` / `$oq` rewards, perk 10 invested-sphere bonuses (`$oq` / `$ot` / flat SP on the first `$oh` of the day), and perk 9. `$oh` hidden clicks that show ``spU`` in chat now grant ``$oc`` (play-all spends them like bonus `$oq`). While here, log perk-9 button **colour** (not just SP amount) so the Colblitz p9 threshold can use our own frequencies.
-- ~~**`$p` / `$daily`**~~ — account-global; one designated channel per account (Accounts tab); auto-send when ready, before rolls; sequential if several accounts have a channel set.
+- ~~**`$settings` / `$bonus` parse audit**~~ — parsers trusted for storage (`tests/mudae_sheet_fixtures.py`, `mudae/parsers/bonus_catalog.py`); capture skips the 16 direct toggles, `$bonus` dump is read-only. **Open follow-up:** driving `CharacterClaimRules` / kakera / sphere reacts from these fields — claim-via-emoji deliberately reads the roll instead.
+- ~~**`$shop` parser**~~ — ouroperk sheet (OP1–OP10, perk-9 extra clicks + SP%, megasphere rewards); `perk9_click_max` drives the daily click cap. p9calc/spcalc-style planners still wait. Do not send `$shoprefund`.
+- ~~**Chaos parser**~~ — `mudae/parsers/chaos.py` + `macro/chaos_followup.py`. Extra hourly rolls are spent, not left for `$tu`/refill; free kakera and wish spawns are clicked/claimed; `$kl` and stored minigames are logged only.
+- ~~**`$limroul` parser**~~ — feeds the `$bw` sweep's base pool directly and flat (the wishlist is part of the pool, not subtracted out); the page asks which roulette you roll only when the four disagree, rather than averaging.
+- ~~**`$ov` parser**~~ — feeds the `$bw` sweep's `$persrare` N (a multiplier, not a reroll count); fetched only by the scope bar, never sent on its own.
+- ~~**Sphere tracking audit**~~ — see Wave 1; perk-9 colour, `$oh`→`$oc` accounting, and perk-10/perk-9/kakera overlap all verified against hand tally.
+- ~~**`$p` / `$daily`**~~ — account-global; one designated channel per account; sequential if several accounts have a channel set.
 
-Do not change per-server claim / kakera / roll rules until a slice *uses* the parsed settings / bonus fields (parse-and-store is done; wiring is not).
+Do not change per-server claim / kakera / roll rules until a slice *uses* the parsed settings / bonus fields.
 
 ---
 
 ## Daily loop and scheduling
 
-- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill. `$p`/`$daily` send on a designated channel; perk 8 / minigame skip live in `daily_resets`; `$us` keep-draining can pause/resume on the preset.
-- ~~**Save power for perk 8 refresh**~~ — `macro/perk8_power.py` keeps bar + `$dk` payable for today's remaining perk-8 clicks (horizon `min(N hours, time until UTC midnight)`, default 4h). Today beats tomorrow: unused clicks die at reset. After 40/40, chaos kakera still click; `$dk` on those only if a replacement is back by midnight (typical cooldown **20h**). Purple stays free.
+- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill.
+- ~~**Save power for perk 8 refresh**~~ — `macro/perk8_power.py`, horizon `min(N hours, time until UTC midnight)`, default 4h. Purple stays free.
 - **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click.
-- ~~**`$ot` solver**~~ — `macro/ot_solver.py` + `macro/ot_replay.py` + `scripts/ot_bakeoff.py`, and `macro/ot_game.py` playing the **Extra Chance** line (915 SP a board on the 27 real boards, 100.2% of ceiling, 7 cleared outright). ~~**Promoted out of manual-only**~~ — `$ot` is in `PLAYABLE_MINIGAMES`, so play-all spends it and it runs itself after the daily refill, same as `$oh` / `$oc` / `$oq`; the **Play $ot** button on all four Run shells stays for an on-demand single play.
-- ~~**`$us` control**~~ — drain / optional local schedule on the preset; session roll cap and window end are hard stops. Power stop is a separate toggle. Reset-margin already exists (`us_reset_margin_minutes`).
-- ~~**Humanized delays** — jitter command / click timing so the session is less metronomic.~~ Opt-in roll jitter in preset Rolls settings.
+- ~~**`$ot` solver + auto-play**~~ — in `PLAYABLE_MINIGAMES`, same as `$oh`/`$oc`/`$oq`; the **Play $ot** button stays for an on-demand single play.
+- ~~**`$us` control**~~ — drain / optional local schedule on the preset; session roll cap and window end are hard stops.
+- ~~**Humanized delays**~~ — opt-in roll jitter.
 
 ---
 
 ## Accounts and servers
 
-- **Multi account / server runtime (Phase D)** — config already has accounts, channels, presets, and `targets[]`. Runtime is still one Discord connection. Coordinator must resolve `(account, channel) → preset` per target (never “first preset on the account”). Covers alt accounts and a multi-server setup UI. See Phase D in `ARCHITECTURE.md`.
-- **App-only wishlist** — wishlist the macro claims from, separate from Mudae’s `$wish`.
-- **`$dl` / `$adl` / `$wl` one-click switch** — swap those lists from the GUI without typing the commands. Not the same as Colblitz’s disablelist *optimizer* (needs a bundle database we do not have).
+- **Multi account / server runtime (Phase D)** — config already has accounts, channels, presets, and `targets[]`. Runtime is still one Discord connection. Coordinator must resolve `(account, channel) → preset` per target (never “first preset on the account”). See Phase D in `ARCHITECTURE.md`.
+- **`$dl` / `$adl` / `$wl` one-click switch** — swap those lists from the GUI without typing the commands. Not the same as Colblitz's disablelist *optimizer* (needs a bundle database we do not have).
 
 ---
 
 ## New sections (Mudae / Spheres / Advisor)
 
 A dozen planned features shared one problem: they all read off — or advise on —
-one `(account, server)` pair, and had nowhere to live. The sheets were buried in
-a sub-tab of Servers; `Utilities` was a top-level page holding one paste-in tool.
-Agreed shape: **three hubs**, each a pill bar over a `Loader` in the
-`StatisticsView` idiom, so every sub-page is a real view rather than a card.
-Each carries a `ScopeBar` that starts on the Run target and can then be moved
-without disturbing a live run.
+one `(account, server)` pair, and had nowhere to live. Agreed shape: **three hubs**
+(Mudae / Spheres / Advisor), each a pill bar over a `Loader`, each carrying a
+`ScopeBar` that starts on the Run target and can then move without disturbing a
+live run.
 
-- ~~**Account-scope the sheets**~~ — prerequisite, see **Found in audit**.
-- ~~**Fetch buttons on the scope bar, with temporary connections**~~ — the
-  three `Fetch $…` buttons on Servers (and `Fetch $wl` inside Spheres ›
-  Characters) moved to the right-hand side of each page's `ScopeBar`, because
-  the pickers beside them are what a sheet is fetched *as*. They used to be
-  disabled unless the channel was the Run target **and** the macro was
-  connected — which made a detached scope bar's fetch button a lie. Now
-  `AppBridge.fetchForScope` goes where the scope points: it sends in place,
-  hops the live monitor over and back (sharing `$p`/`$daily`'s lock), or stands
-  up a temporary connection with no engine and no logging, and refuses only
-  while the macro is busy — naming which. `gui/scope_fetch.py` holds the route
-  policy as plain data; the sheet's owning account is stamped at arrival rather
-  than read back on the GUI thread, so a borrowed connection cannot file
-  another account's sheet under the Run target's.
-- ~~**One `MudaeSheetPanel`**~~ — replaced three copy-pasted display panels and
-  reads `Theme` sizes instead of hardcoded pixels.
-- ~~**Mudae hub**~~ — `$settings` (the parsed sheet only; the drift + copy
-  editor is unmounted, see `ARCHITECTURE.md`) /
-  `$ov` (the player's own settings) / `$bonus`. Grouped by what a sheet *is*:
-  `$settings` and `$ov` are configurable and copyable between servers, `$bonus`
-  is what they and the account's perks add up to.
-- ~~**Statistics › Report**~~ — a sixth pill (`DailyReportView.qml`,
-  `stats_index.daily_report`). UTC-day picker, KPI row for all four kinds against
-  a **trailing 7-day** baseline (not all history, so a long-running account is
-  judged on its current pace; a day with no history reports *no baseline* rather
-  than 0%), a clickable 14-day trend, kakera-by-method / spheres-by-source /
-  keys-by-type breakdowns, and a **daily budgets** panel. That panel is the
-  point: unspent perk-8 and perk-9 clicks expire at the reset, so an incomplete
-  day is otherwise invisible until the next morning. **Budgets are today-only** —
-  those records are live daily state cleared at the reset, so a past day's spend
-  is not recoverable and the page says so instead of drawing an empty bar, and
-  **scoped-only** — the budget belongs to one (account, server) pairing, so the
-  scope bar has to name one before there is a budget to report.
-  Hourly detail was left out: the cube is per-day, and an hourly axis would mean
-  walking raw events.
-- ~~**Spheres hub**~~ — Stock & shop (`$shop` moved here off Servers; it is the
-  sphere economy, not a setting) / Upgrades / Characters. Notes from building it:
-  - The two stock figures are **the same pool read by two commands**, confirmed
-    by the account's owner: `$ohu` prints a stock line and `$shop` prints its
-    own balance, and they mean the same thing. The bridge publishes one resolved
-    `stock.spheres` (preferring `$ohu`, which is re-read far more often) plus
-    `stock.spheres_source`; the raw `ohu_stock` / `shop_spheres` keys stay in the
-    payload. Only the resolved figure is shown, and Upgrades prices
-    affordability off the same one so the two pages cannot disagree.
-  - **Cost is `(level + 1) × level_cost_step`**, from the sheet's "cost increased
-    by +4,000 **per level**" — not a flat 4,000 per upgrade. Mudae never prints
-    the figure for a specific level, so the UI labels it derived.
-  - `macro/sphere_upgrades.py` prices **perk 9 only** and abstains with a reason
-    on the other nine. Value % is *measured* (logged perk-9 `sphere_click`
-    income); the extra click is *modelled* through the perk-9 DP and needs a
-    spawn estimate. Everything else needs a kakera balance, roster counts or a
-    per-board SP model that the app does not have.
-  - ~~Characters **needs new capture**~~ — the `$wlsz+z!` capture supplies it:
-    every wishlist character's roster, and its perk-1 spawn bonus. So OP1 is now
-    priceable in principle — `Advisor › $bw` already reads exactly this to weigh
-    each character — and `sphere_upgrades.py` abstaining on it is a gap that can
-    be closed rather than a missing input. What OP1 changes is the share of
-    perk 1 fed back to its own carrier, so its value is the resulting shift in
-    the `$bw` sweep's EV: the sweep is the pricing model, and wiring it in is
-    the remaining work.
-  - Invest stays **blocked**: no kakera balance, and the invest command's syntax
-    and reply are undocumented.
-- ~~**Advisor hub**~~ — `$bw` / Key EV / Wishlist / Lists / Formatter
-  (`macro/advisor.py`). `Utilities` is absorbed, so the rail stays at ten.
-  Notes from building it:
-  - **`$bw` is not converted to kakera, and that is deliberate.** The cost side
-    is exact off `$bonus` (−19 rolls/h → 456 rolls/day here). Converting to
-    kakera needs the *marginal* kakera a roll yields, which the log cannot give:
-    rolls are not events, so the only denominator is the rolls a day
-    theoretically allowed (`rolls/hour × 24`, assuming round-the-clock rolling),
-    and the numerator mixes roll-proportional income with `$daily` / `$p` /
-    claims. That produced **499 kakera/roll** on the live account — a number
-    with no defensible meaning. The page shows rolls lost and stops.
-  - **Only chaos keys are priced**, and not for claim reasons: a chaos key
-    halves the reaction-power cost of a kakera click, so its value is the power
-    saved converted to extra clicks at the account's own kakera-per-click
-    (2,650 kakera/use against a measured 5,300/click). The cost cancels out, so
-    the figure is robust to the click cost. Bronze / silver / gold / omega are
-    claim keys whose worth is whatever the character returns, and **that has not
-    changed** — but the half that was missing has arrived: the `$wl` capture
-    carries each character's own perk-4 level, so keys *per wish spawn* is now
-    modelled exactly (`1 + $bonus extra-key chance + perk 4`). Perk 4 says how
-    many keys arrive, never what one unlocks, so the value column still abstains.
-  - ~~The `$bw` **optimum** stays blocked on `$wlsz+z!` capture.~~ Unblocked —
-    the sweep is `macro/bw_calc.py` and its method is documented in
-    `MUDAE_LOGIC.md`'s `$bw` section. Two findings came out of building it:
-    the `+N%` on a `$wl` row is the **perk-1 spawn bonus** (`MUDAE_LOGIC.md`
-    had it as a sphere-value bonus and as unexplained; the rule reproduces all
-    160 live rows, and the piece that was missing is that the wishlist wraps),
-    and `starwish_spawn_bonus_pct` is the **extra on top of** wish rather than
-    the total, which Mudae's own `(= N%)` sum now confirms in the parser.
+- ~~**Account-scope the sheets**~~, ~~**fetch buttons with temporary connections**~~ (`gui/scope_fetch.py`), ~~**one `MudaeSheetPanel`**~~ — all shipped.
+- ~~**Mudae hub**~~ — `$settings` (parsed sheet only; the drift/copy editor is unmounted, see `ARCHITECTURE.md`) / `$ov` / `$bonus`.
+- ~~**Statistics › Report**~~ — `DailyReportView.qml`: KPI row vs a trailing 7-day baseline, 14-day trend, per-kind breakdowns, and a **daily budgets** panel (today-only and scoped-only by design, since perk-8/9 budgets are live daily state per (account, server)).
+- ~~**Spheres hub**~~ — Stock & shop / Upgrades / Characters.
+  - Stock and shop balance are **one pool**, confirmed by the account owner — the bridge publishes one resolved `stock.spheres` + `stock.spheres_source`; Upgrades prices affordability off the same figure so the two pages cannot disagree.
+  - Upgrade cost is `(level + 1) × level_cost_step`, not a flat per-upgrade amount.
+  - `macro/sphere_upgrades.py` prices perk 9 only. **Open:** wire OP1's perk-1 spawn-bonus value through the `$bw` sweep now that the `$wl` capture supplies each character's roster and bonus.
+  - Invest stays blocked — no kakera balance, and the invest command's syntax/reply are undocumented.
+- ~~**Advisor hub**~~ — `$bw` / Key EV / Wishlist / Lists / Formatter.
+  - `$bw` is deliberately **not** converted to kakera — the log has no marginal kakera-per-roll figure, only a meaningless average (499 ka/roll on the live account). The page shows rolls lost and stops.
+  - Only chaos keys are priced (power saved → extra clicks). Claim-key *count* per wish spawn is modelled via perk 4; their *value* still abstains, since perk 4 says how many keys arrive, never what one unlocks.
+  - ~~`$bw` optimum~~ — unblocked by the `$wl` capture. Two findings folded into `MUDAE_LOGIC.md`: the `+N%` on a `$wl` row is the perk-1 spawn bonus (it wraps around the wishlist), and `starwish_spawn_bonus_pct` is the extra on top of wish, not the total.
 
 ---
 
 ## Statistics and GUI
 
-Do the shared model first; the copy-paste and most of the slowness go away with it.
-
-- ~~**Stats payload is rebuilt from scratch on every event**~~ — `stats_index` keeps a daily cube; QML gets summary fields plus 80 `recent` rows (`App.statsQuery`). A `QAbstractListModel` can still replace JSON paging later.
-- **Four stats views still copy filter chrome** — account/server combos are per-tab. Share filter state so “account: X” on Kakera stays X on Spheres.
-- ~~**`uniqueSources()` is O(n²)**~~ — breakdowns come from the cube.
-- ~~**`filteredEntries()` walked the full log in QML**~~ — tables bind to `payload.recent`.
-- **Wave 2 EventLog (storage):** one `data/events.jsonl` for kakera / spheres / keys / soulmates. Existing `data/*_log.json` arrays are imported once and left on disk.
-- ~~**Timezones** — log `date_key` is UTC; QML “today” / week / month use local `Date`.~~ `mudae/clock.py` + `gui/clock.js`: UTC for `date_key` / stats “today”; live feed local.
-- ~~**Reaction power max is hardcoded `155`**~~ — run-channel `$bonus.kakera_max_power` via `macro/sheet_caps.py`; 155 remains the fallback when `$bonus` has not been fetched.
-- ~~**Empty states**~~ — disconnected vs nothing recorded vs filters (`gui/emptyStates.js`).
-- **Session row on Statistics** — one line per connect/disconnect with kakera + spheres + keys + claims. Today each log is filtered alone (`gui/run_summary.py` already does a session haul on Run).
-- ~~**Daily report**~~ — `Statistics › Report` (`gui/views/DailyReportView.qml`): a mosaic
-  of one day, with tiles sized to what they hold and no two neighbours sharing a chart form
-  — hourly stacked columns, a key pie, a kakera-colour bubble scatter, a sphere treemap,
-  the perk-8/perk-9 click tapes and a minigame dumbbell. Three things it deliberately does
-  not claim:
-  - **Kakera colour is measured over clicks alone.** `$bku` payouts and `$dk` carry no
-    kakera type, so a colour share of the day's whole take would attribute nearly half of
-    it to nothing.
-  - **The perk-8 tape is an approximation and says so.** Nothing records which click
-    consumed a perk-8 slot; purple is excluded because it cannot spawn on a perk-8
-    character, and the day's first 40 non-purple reactions stand in. Logging a
-    `perk8_slot` flag on click events would make it exact.
-  - **Minigame rates are per *use*, over days that recorded their use counts.** Two
-    separate inflations live here. Sphere events reach back to July while
-    `data/minigame_log.json` starts in late August, so dividing one by the other
-    overstated `$oh` by 4.7x. And a board is not a use: `$ot 5` is one command that
-    spends five of the day's allowance and pays roughly five times a single use, so SP
-    *per board* is inflated by whatever multiplier the board was played at — live on
-    2026-09-03 that read `$ot` at 7,505 SP a board against a ~915 baseline. Rating per
-    use fixes both. A day enters the rate only when every board that day recorded its
-    `uses`; rows written before that field existed are excluded rather than counted as
-    one use each, which would be wrong for every batched command.
-    `mudae/minigame_stats.py` returns the window so the page never labels it "all-time".
-  - **Perk 8 and perk 9 refuse to generalise across accounts and servers.** Reported
-    2026-09-03: the page filtered to `all`/`all` by default, which is right for totals
-    and wrong for these two, because every (account, server) pairing has *its own* forty
-    perk-8 clicks and its own perk-9 spawns, each expiring separately at the UTC reset.
-    Laid on one tape, two accounts read as one account spending a budget nobody has —
-    invisible today only because testing runs on a single account and server. The page
-    now carries a **scope bar** (account × server, plus a `General` reset), the report
-    payload carries `scope.scoped`, and `_perk8_tape` / `_perk9_tape` return an empty
-    tape with `stats_index.TAPE_SCOPE_NOTE` unless *both* halves are pinned — half a
-    scope is not a scope, since a server hosts several accounts and an account plays
-    several servers. Everything else on the page still sums across everything, which is
-    what the general view is for. `gui/bridge.py` follows: the perk-9 cap and
-    `_daily_budget_status` now resolve their `$shop` and daily record from the **scope**
-    rather than from the Run target, so the page reads the account you picked instead of
-    the one that happens to be connected, and they abstain when the chosen server has no
-    single channel to read.
-- **GUI polish** — leftover layout / copy / empty-page work after the items above.
+- **Four stats views still copy filter chrome** — share filter state across Kakera/Spheres/Keys/Soulmates so “account: X” carries over between tabs.
+- ~~Stats payload rebuilt from scratch~~, ~~`uniqueSources()` O(n²)~~, ~~`filteredEntries()` walked the full log in QML~~ — all fixed by the daily cube + `App.statsQuery` paging. A `QAbstractListModel` can still replace JSON paging later.
+- ~~One EventLog + JSONL~~ — `data/events.jsonl`; old `data/*_log.json` arrays imported once, left on disk.
+- ~~Timezones~~, ~~reaction power max hardcoded `155`~~, ~~empty states~~ — done.
+- **Session row on Statistics** — one line per connect/disconnect with kakera + spheres + keys + claims (`gui/run_summary.py` already does a session haul on Run).
+- ~~**Daily report**~~ — `Statistics › Report`, a mosaic tuned to what each metric can honestly claim: kakera colour is measured over clicks only (payouts carry no type); the perk-8 tape is a labelled approximation (nothing records which click consumed a perk-8 slot); minigame rates are per-*use*, only over days that recorded use counts; perk 8/9 refuse to generalise across accounts/servers and require the scope bar.
+- **GUI polish** — leftover layout/copy/empty-page work.
 
 ---
 
 ## Later (not blocking)
 
-- **Split `gui/bridge.py`** — ~2.7k lines, 90+ slots. Logical groups already exist (run, config, stats, mudae settings, updates). Separate context properties once the stats payload is off the JSON string. Leave `macro/roll_cycle.py` alone; it is long because the domain is.
-- ~~Compile leftover parser regexes~~ — hot-path patterns hoisted to module constants in `mudae/parsers/`.
-- ~~**`$oq` opening move**~~ — Colblitz overlay `(1,1)` (0-based, index 6). Short-circuits on a blank board. Hunt is MIXED; leave the Bellman DP.
-- **Achievements** — soulmate / chaos-key / rainbow milestones. After the logs are one `EventLog`.
+- **Split `gui/bridge.py`** — ~2.7k lines, 90+ slots. Logical groups already exist (run, config, stats, mudae settings, updates). Leave `macro/roll_cycle.py` alone; it is long because the domain is.
+- ~~Compile leftover parser regexes~~ — done.
+- ~~**`$oq` opening move**~~ — Colblitz overlay `(1,1)`, short-circuits on a blank board. Hunt is MIXED; leave the Bellman DP.
+- **Achievements** — soulmate / chaos-key / rainbow milestones. The logs are one `EventLog` now, so this is open to start.
 
 ---
 
 ## Found in audit
 
-Pass over the running app after the rankings above. Items already listed earlier are not repeated.
+Pass over the running app after the rankings above.
 
-### Bugs
+### Bugs (all fixed)
 
-- ~~**ParseLab writes the live token on every keystroke**~~ — Debug no longer edits the token; Connect/Disconnect sync on load.
-- ~~**Hourly Start is allowed during a minigame**~~ — `startMacro` uses the same busy check as `$us` / minigame buttons, and `RollCycleEngine.start` re-checks on the loop thread (the GUI check runs on the Qt thread and then hands the start off, so a Start and a Play clicked in the same instant both passed).
-- ~~**`force_reconnect` clears `macro_active` and never puts it back**~~ — the gateway no longer owns the flag; `_clear_channel_state` leaves it alone (see importance item 6).
-- ~~**Hardcoded `lukazade234` display fallback**~~ — soulmate rows get `account_name` from `owner`; missing name shows `"Unknown"`. The duplicate GUI profile still named Default is leftover config, not a display hack.
-- ~~**`$us` alternated `$tu` → one roll → `$tu` while a bonus was pending**~~ — `_run_us_cycle` treated `rolls_left` as reachable at any time, but Mudae spends already-added `$us` rolls first. With `$tu` reading `1 (+6 $us)` the loop rolled one "leftover normal" roll, the roll came off the bonus, the next `$tu` still said `1`, and it rolled one more: **7 rolls behind 8 `$tu` polls** (session 2026-08-30 20:43). Those rolls also got the hourly kakera rules instead of the `$us` ones. Fixed by rolling the bonus batch first in both the steady-state and reset-margin paths; the leftover normal rolls follow once they are actually reachable.
-- ~~**Mudae's hourly key limit was invisible**~~ — past **2,200 keys/h** the card prints `❌ (You reached the limit of 2,200 keys per hour!)` instead of the key line. The roll still counts and can still be claimed, so nothing failed and nothing was logged — a `$us` drain kept spending the stack for no keys. Now parsed (`parse_key_limit`, the number is read not assumed), shown on the Run feed line, held on `AccountState.key_limit_hit` until the hourly reset, and optionally a **pause** via the `$us` rule `us_stop_on_key_limit` (default off) — it waits out the rest of the hour and resumes with the stack untouched, without needing keep draining, since the cap always lifts at the reset. **Assumption to re-check:** the key window is treated as sharing the roll pool's hourly boundary, so the rolls reset is what clears it.
-- ~~**`CLAIM_INTERVAL` is parsed and then ignored**~~ — pipeline classified “once per interval” rejections but `wait_for_claim` only matched `CLAIM` / `MARRIAGE`, so the reply sat unmatched for the full 8s and logged a plain “Claim timeout”, and nothing synced state — the next roll in the same batch clicked into the same wall again. It is the *same* slot `claim_available` / `claim_cooldown_minutes` already track (just surfaced through a different message than `$tu`'s), so `wait_for_claim` now matches `CLAIM_INTERVAL` too and `_try_claim` syncs it exactly the way `$tu` parsing does — the existing `claim_available is False` guards (`claim_best`, the `$rt`-bypass in `claim_record`) then take effect immediately.
-- ~~**Rolls without claim buttons were treated as unclaimable**~~ — `can_claim` was literally "has an enabled claim button", but buttons are optional: `$togglebutton` (server) and the user's own settings can switch them off, and an unclaimed roll then carries no components at all and is claimed by **reacting** to it with any emoji. On those servers the macro considered every roll unclaimable and claimed nothing, silently. The mode is now read off each roll rather than from `$settings` — an enabled claim button is button mode, no claim button at all is reaction mode, and a *disabled* claim button is button mode with the window shut (not a reason to react) — so it is right even when the server and the account disagree, which `$settings` alone cannot tell you. `mudae.buttons.claim_method_from_buttons` owns the rule, `parse_roll` exposes it as `claim_method`, and `PostRollHandler._send_claim` clicks or reacts; every claim rule and the whole post-claim path are untouched. Default react is `✅` (`CLAIM_REACTION_EMOJI`), and `ChannelMonitor.add_reaction` retries like `click_button` because a lost claim react loses the character.
-- ~~**A multiplied `$oh` banked one `$oc` use out of four**~~ — clicking a face-down cell grants a bonus `$oc` game, and an `$oh` played with a multiplier multiplies the grant with everything else: `$oh 4` earns four uses and Mudae writes them on one line, `<:spU:…> **+4 $oc**`. Both places that read it *counted the lines* (`parse_reward_clicks`, `classify_oh_click`), so play-all added exactly one and the other three were never played — silently, because a `spU` line is deliberately excluded from the sphere total and so has no other consumer to disagree. Confirmed live on 2026-09-01: an `$oh 4` logged `granted +1 $oc`, `$oc 3 → 4`. The number on the line is now read (`oc_grants_from_content` / `new_oc_grants` in `macro/sphere_game.py`, passed as `classify_oh_click(oc_grants=…)`), the click row in Statistics → Minigames shows the count rather than a bare `+$oc`, and play-all's existing `oc_uses += oc_bonus` needed no change.
-- ~~**Mudae under maintenance was read as a valid reply**~~ — during a reboot Mudae answers every command with `Command under maintenance!\n(For 3 minutes, reboot)`. `parse_mudae_message` pairs a reply with the command that was *sent* rather than with the message's own shape, so that text went to `parse_tu` and came back as an empty-but-valid `$tu` sheet: "0 rolls, reset passed" sent the hourly loop straight back to `$tu`, once every three seconds, for the whole outage (observed 2026-09-01 on a second machine). Recognised first now (`mudae/parsers/maintenance.py`, `MessageKind.MAINTENANCE`), and waited out on a ladder of **5 / 10 / 30 minutes** before stopping (`macro/maintenance.py`). Mudae's own "(For 3 minutes)" is logged but not obeyed — it keeps printing it long after. The watch lives on `DiscordActions`, which every Mudae message passes through, so an outage noticed on `$ohu` and then on a roll shares one ladder; `RollCycleEngine._maintenance_halt` is checked wherever the hourly and `$us` loops used to stop outright.
-- ~~**Unknown reaction power is treated as infinite**~~ — **judged not a bug.** `can_afford_reaction` returns true when `power_percent is None`, so paid kakera fire until Mudae denies after a skipped `$tu` or a partial restore. The denial (`KAKERA_REACT_DENIED`) is a fast, already-parsed message that re-anchors `power_percent` via `sync_reaction_power_from_denial`, so a wrong guess costs at most one click and self-corrects on the very next one — guessing "no power" instead would wrongly skip real, affordable clicks every session before its first `$tu`. `us_kakera_power_exhausted` mirrors the same call for the same reason (both documented now). Its `_minimum_kakera_cost` threshold assuming a chaos key is intentional too, confirmed: the toggle should only stop the account once even a chaos-key click (the cheapest a click can be) is unaffordable, using the account's real `$bonus.power_cost_per_kakera_button` when known, else the 30% default (15% under chaos) — not a plain-click assumption, which would trip the stop before power is actually exhausted. Tests renamed to separate the default-cost case from the `$bonus`-driven one so neither reads as the other.
-- ~~**`$oh` dark “turns into” / light “breaks down into” were dropped**~~ — Dark: `<:spD:…> turns into <:spP:…>` then `(Free) **+N**`. Light: `:spL: breaks down into :spB: + … => +156` (fragments, not a single `**+**` on `spL`). Dark/light stay paid; session log shows `spD → spP` / `spL → spB+…`. Hidden clicks log `hidden → spY`. Stats: `data/minigame_log.json` / Statistics → Minigames.
-- ~~**Roll-button dark clicks were logged as the colour they became**~~ — the same transform, one layer up: `parse_sphere_click` read `sphere_type` off the *payout* line, which for dark is the result (`:spD: turns into :spW:` then `:spW: … +2,072`). So the adaptive perk-9 “Clicked” row and the Statistics → Spheres log both claimed a rainbow was clicked, and the answer even depended on whitespace — the flattened single-line form happened to return `spD`, the real two-line message `spW`. `sphere_type` is now the source (`SPHERE_TRANSFORM_EMOJIS`) and `sphere_resolved` carries the payout (shown on hover in the log row). **Not backfilled:** rows written before this fix still name the outcome, and the raw text is not kept, so `estimate_sphere_colour_frequency` will over-count red/rainbow until enough new rows accumulate. It needs 500 samples (`MIN_FREQUENCY_SAMPLES`) and has 480 in total today, so it has never actually been live.
-- ~~**The perk-9 daily click budget expired unspent, and the static colour list was why**~~ — `budget_aware` promises to spend all 20 clicks, dropping its bar to 0 once `r ≤ c`. It ended days at 17/20 because **`passes_sphere_reaction` applied `types_allowed` before the budget gate**. The live list omits `spB` and `spT`, **83.7%** of all spawns, so five spheres in six were thrown away before the DP ever saw them and dropping the bar to 0 changed nothing. The logs settle it: on every day that ended with clicks in hand, every sphere arriving after the last click was a `filter` skip, not a `budget` skip — Aug 20 threw away **22 live spawns with five clicks unspent**, not one of which reached the threshold code. Fixed by making the bar the only gate in budget mode (the Presets colour list is greyed out to say so); the static path with the toggle off is untouched.
-- ~~**…and `spawns_left` never decayed, so the bar never reached 0**~~ — the second half of the same failure, which had to be fixed with it or nothing changed. `estimate_opportunities_left` returned `pool − rolled`: a ceiling on *distinct characters*, not a forecast of *spawns that will happen*. The tail of a pool is effectively unrollable, so it plateaued and never fell to `clicks_left` — Aug 29 23:02 read `rolled 127/154` → 27 spawns left → bar 105 with 4 clicks in hand and 58 minutes on the clock. The other arm, `rolls_per_hour × hours_left + rolls_left`, was a **unit error** counting each roll as a spawn (~50× too big), so it never bound. Now an urn forecast, `(pool − rolled) × (1 − e^{−h₀ · rolls_left / pool})`, plus a forced spend-down in the last hour that holds regardless of the estimate. **`h₀` is measured per account, never shipped**: this account fits 0.37, but an account with the same 154-character pool and a fifth of the reach sees ~23 spawns a day, and 0.37 would leave it as over-strict as the bug did (bar 51.6 vs a correct 20.0). Cold start keeps today's behaviour rather than a stranger's number. `$us` rolls are excluded from the learning — a drain can clear a large slice of the pool in half an hour, and charging its characters to ordinary rolls would roughly treble the rate. Replaying the seven complete logged days: **82 clicks expired unspent → 13**, with SP up on every one of them (`scripts/perk9_bakeoff.py --from-logs`).
-- ~~**The daily reset left `rolled_today` at yesterday's count, and `$ohu8` suppressed the `$ohu9` that would have fixed it**~~ — caught live on **2026-09-02 00:01 UTC**: the macro clicked `:spB:` on the first two rolls of the new day, `EV bar 0 (20 left)`. Two causes, both needed. **(1)** `rollover_perk9_if_needed` cleared every perk-9 day counter except `perk9_rolled_today`, so the new day started reading `148/154` — six characters still rollable against 20 clicks, which is exactly the `r ≤ c` condition that puts the bar on the floor. It now clears to `0` (`None` stays `None`: "never measured" is not "none rolled"). **(2)** `$ohu` / `$ohu8` share the perk-9 daily record for the click counter and the refill, and `macro/perk8_runtime.py` merges their reply into it — but they carry no `(Perk 9) Rolled today` line. The `$ohu8` at 00:00:10 therefore stamped `updated_at` to the new day, `should_query_ohu9_on_refill` saw a record that was fresh for the day, and **`$ohu9` was never sent at all**. `rolled_synced_at` now tracks when the roll line itself was last read, separately from `updated_at`, and both that check and `apply_record_to_state` key off it. Before this change the static colour list hid the bug, since blue was never in `types_allowed`. Also fixed alongside: the learned arrival rate was never actually accumulating (`hazard_history: []` on a fully-played day), because a measured stretch only closed at the *next* `$ohu9` — about one a day, and that one spans the reset and is discarded. `Perk9Runtime.checkpoint_hazard` now banks the stretch once an hourly cycle off the local count, which is exact until the budget runs out.
-- ~~**`$bonus` and `$shop` were stored once per channel, so two accounts on one channel overwrote each other**~~ — both sheets describe the **connected account** (`$shop` is its ouroperk sheet; `$bonus` mixes server settings with its perks), but `ChannelProfile` held them as flat dicts and `apply_parsed` took no `account_id` — while `daily_resets`, the very next field, was already account-keyed with a comment saying so. The live config has **three accounts sharing `Key Server 0 / mudae-w`** and two channels holding genuinely different shops (`perk9_level` 10 vs 5), so whichever fetched last won and `macro/sheet_caps.py::apply_sheet_caps` fed the **wrong account's** `power_max_percent` / `perk9_click_max` / `perk9_sphere_value_pct` into `AccountState` — exactly the values the perk-8 reserve and the perk-9 EV bar run on for the rest of the day. `sheet_caps`'s own docstring already promised "a previous account or server cannot leak into the next run", which it could not keep with one slot per channel. Now `channel.bonus_by_account` / `shop_by_account` keyed by account id (`gui/sheet_store.py`, mirroring `macro/daily_store.py`). A sheet saved before the split is read back **for the main account only** and flagged `inferred` — the treatment `mudae/account_context.py::resolve_log_account` already gives pre-account log rows — and the first real fetch replaces it and clears the blob so it cannot be inferred twice. Every other account reads empty, which is honest: we do not know their sheets. `$settings` stays flat, correctly, since it is the server's rule sheet.
-- ~~**A minigame played by hand in the channel printed its whole board into the Run feed, as a claim**~~ — `is_custom_claim` calls a message a claim when it carries two bold names that are not kakera/sphere lines, and an `$oc` / `$oq` / `$ot` grid is a wall of bold prose ("You can click **5** times…", "**1 red sphere** to find…"). Mudae *edits* the same grid message after every click, so one hand-played game was a dozen identical 350-character `claim` lines in the feed: **17 in one minute** on 2026-09-02 00:00 UTC, 191 across the logs, and only ever in `hourly` sessions — a game the macro starts itself resolves as the reply to its own `$oc` and never reaches the classifier. The same misreading let a stray board satisfy `MacroActions.wait_for_claim`, which matches any `CLAIM` / `MARRIAGE`. Grids are now recognised first (`mudae/parsers/minigame.py`, `MessageKind.MINIGAME_BOARD`): Mudae, ten or more sphere buttons, and the board prose — the game drivers already read boards off the snapshot, so nothing needed the cells parsed. Fixed with it: the feed no longer falls back to `parsed.summary` when a message has no channel text of its own, which was printing the macro's placeholder `Claim · ? → ?` for character-info embeds (classification reads embeds, `parse_claim` reads only `content`, so it classified a claim it could then not name).
-- ~~**…and so did every other Mudae message that happened to match a heuristic**~~ — the same hole, one layer up, reported on 2026-09-03: while the user typed commands by hand in the run channel, the feed filled with `$ou`'s upgrade panel ("Upgrade the perks of the selected character…", **28 lines in under two minutes**) and a `Syntax: $kakeracopy …` reply. Recognising boards fixed boards; it could not fix the premise, which is that **a message kind decided by content heuristics is not evidence a message is an event**. Which heuristic admitted these two is not recoverable — raw message text is not kept — but both candidates are trivially satisfied by their shape: `is_sphere_click_message` asks only for a sphere emoji beside an `(n/m)` fraction, and an upgrade panel is full of both, while `is_custom_claim` still calls any two bold runs a claim, which a `**Syntax**: … **[Premium command]**` reply satisfies. The kind allowlist in `mudae/live_feed.py` then mirrored them, and the guard meant to stop this ("a claim we could not name") was toothless, since `parse_claim` names *whatever* two bold runs it finds. The gate is now **attribution**: a follow-up is mirrored only when it names the connected account, via the `username_matches_own` the statistics logs already require before recording a row (moved to `mudae/account_context.py`, since four modules had their own copy). `_OWNER_FIELDS` names the field per kind — `claimed_by` for kakera / sphere / react-denied, `winner` for claims — so a kind cannot be added to the feed without saying how it is attributed. Mudae prose names nobody, which is exactly why it is now dropped. Two consequences worth knowing: **edits are never mirrored at all** (a real follow-up is a new message; an edit is a panel or a board re-rendering, which is why one panel printed itself once per click), and with **no account names known nothing but rolls is mirrored** — an unattributable line is left out rather than printed on the chance it is ours. Roll cards cannot be attributed this way at all — nobody is named on an unclaimed roll — so they are no longer mirrored either: `macro/roll_cycle.py` already logs each card it rolls (after a button refresh, so the reacts are complete), which made the mirror's copy either a duplicate of that or a roll the user made by hand while the macro sat idle. A card in the feed now means the macro rolled it. Minigames are unaffected by the edit rule: a board was never mirrored (it is `MINIGAME_BOARD`, not a feed kind), and the play-by-play comes from the game drivers writing to the activity log directly, not from the message mirror.
-
-- ~~**`is_connected` was permanently True after the first connect**~~ — `_connected` was set by `on_ready` and cleared only by an explicit `disconnect()`, with **no `on_disconnect` handler**, so the flag never went false on its own. Every `if not self.is_connected: reconnect` guard in the tree was dead code. Caught by an `$ot` board on 2026-08-30 that took **five minutes for 22 clicks**: the grid arrived, then the gateway delivered *nothing* — no edits and no reward message — while HTTP kept working, so every click waited the full `edit_timeout` (~14s) and recovered by fetch. Not rate limiting: the four boards immediately before it ran 23–26 clicks in 45s each. Fixes: `is_connected` now consults `on_disconnect` / `on_resumed` and `client.is_closed()`; `ensure_connected()` waits for discord.py's own resume before escalating to a full reconnect; the monitor tracks `seconds_since_last_event()`; and `$ot` reconnects once a board when two acks have been fetch-recovered **and** the gateway has been silent for 25s+ (a busy channel keeps delivering, so a slow edit does not trigger it). **Still open:** only `$ot` consumes the stall hook — `$oh`/`$oc`/`$oq` would sit through the same stall, and there is no global watchdog for idle periods, when a zombie socket is indistinguishable from a quiet channel.
-- ~~**Button clicks swallowed every error**~~ — `ChannelMonitor.click_button` was `except Exception: return False`: no retry, no reconnect, no message. Caught the first Extra Chance `$ot` board, which stopped with six certain ships (220 free SP) on the grid and only `click failed — stopping` in the log. The reward total gives the mechanism away — `+1188` logged against 1042 of visible clicks, a difference of exactly one `spY (+146)`, on a cell the solver had just called a certain yellow — so **the interaction landed and paid out and only the reply was lost**. Clicks now retry (`_CLICK_ATTEMPTS`), refetch the message between attempts, reconnect on a dropped gateway, and record the reason on `monitor.last_transport_error` so the **session log** names it — `_emit_status` alone only reaches the GUI status bar, which nothing keeps; `is_transient_discord_error` gained 429 / rate limit / timeout / 500, none of which it previously considered retryable.
-- ~~**Minigames auto-played whenever a use happened to be visible, not at the two moments they should**~~ — caught live on **2026-09-02 23:59:57 UTC**, where a lone `$oc` fired three seconds before the reset and the rest of the batch ran at `00:00:18`–`00:03:39`. The stray game was the symptom; the cause is that `RollCycleEngine._maybe_play_daily_minigames` is reached from the top of **every** hourly cycle *and* from **every** scheduled wake, and its docstring's "once per daily cycle" was never actually enforced — so play-all ran whenever anything was spendable. Uses accrue all day (a chaos capture grants `$oc`; `kakera_reactor.py`'s "stored minigame uses — not played" line only logs the grant), and that particular `$oc`, earned at 20:01, became visible again when the hourly rolls-refill wake — which lands on the same clock tick as the UTC reset once a day — ran `$ohu8`, whose reply refreshes the cached `oh`/`oc`/`oq`/`ot` totals (`perk8_runtime.py::_query_ohu8`). **Automatic play is now limited to the only two moments it is wanted: macro start and the UTC daily reset.** The engine tracks `_minigames_played_for_day` (a Mudae day, `None` at construction so start is the first firing point) and gates on it; the play-all result decides whether the day is written off, so an `ohu failed` or a "no decision" return (not connected, a game already running, an exception) leaves the day open to retry rather than losing every use to one blip. There is deliberately **no** hold-off before the reset: the daily allowance is use-it-or-lose-it (bonus uses from chaos/perk 10 carry over, the refreshing set does not), so a macro started late should spend as much as it can before midnight rather than wait. The Run page's on-demand buttons (`ignore_daily_skip=True`) are untouched — every other play is the user's to trigger.
+- ~~ParseLab wrote the live token on every keystroke~~ — Debug no longer edits the token.
+- ~~Hourly Start was allowed during a minigame~~ — the busy check is now re-verified on the loop thread, not just the Qt thread.
+- ~~`force_reconnect` cleared `macro_active` and never restored it~~ — the gateway no longer owns the flag.
+- ~~Hardcoded `lukazade234` display fallback~~ — soulmate rows get `account_name` from Mudae's `owner`.
+- ~~`$us` alternated `$tu` → one roll → `$tu` mid-bonus~~ — the bonus batch now rolls first in both paths (lost 7 rolls across 8 `$tu` polls on 2026-08-30).
+- ~~Mudae's 2,200 keys/h limit was invisible~~ — now parsed, shown on the feed, with an optional pause (`us_stop_on_key_limit`).
+- ~~`CLAIM_INTERVAL` was parsed and then ignored~~ — `wait_for_claim` now matches it and syncs `claim_available` immediately.
+- ~~Rolls without claim buttons were treated as unclaimable~~ — claim mode (button vs. react) is now read per-roll rather than from `$settings`, since the two can disagree.
+- ~~A multiplied `$oh` banked only 1 of 4 `$oc` uses~~ — the reward line's own count is read now, not the line count.
+- ~~Mudae maintenance replies were parsed as valid sheets~~ — recognised first (`MessageKind.MAINTENANCE`) and waited out on a 5/10/30-minute ladder.
+- ~~Unknown reaction power treated as infinite~~ — **judged correct as-is**: a wrong guess self-corrects on the very next denial and costs at most one click, while guessing "no power" would wrongly skip real, affordable clicks every session.
+- ~~`$oh` dark "turns into" / light "breaks down into" lines were dropped~~ — both parsed and logged now.
+- ~~Roll-button dark clicks were logged as their payout colour~~ — `sphere_type` now reads the transform, not the result. **Not backfilled:** rows written before this fix still over-count red/rainbow, and the 500-sample threshold for frequency estimation has never actually been reached.
+- ~~Perk-9 budget expired unspent because the static colour filter ran before the budget gate~~ — budget mode now ignores `types_allowed` entirely (greyed out in Presets to say so). One day threw away 22 live spawns with 5 clicks unspent.
+- ~~…and `spawns_left` never decayed~~ — replaced the "pool minus rolled" ceiling with a per-account urn-forecast hazard rate (`$us` rolls excluded from learning); 82 → 13 clicks expired unspent across 7 replayed days.
+- ~~Daily reset left `rolled_today` stale, and `$ohu8` suppressed the `$ohu9` re-query~~ — rollover now zeroes the counter; `rolled_synced_at` tracks the roll line separately from `$ohu8`'s reply timestamp. Caught live 2026-09-02 00:01 UTC.
+- ~~`$bonus`/`$shop` were stored once per channel, so two accounts on one channel overwrote each other~~ — now keyed by account id; a legacy blob is read for the main account only and flagged `inferred`.
+- ~~A hand-played minigame board printed itself into the feed as a claim~~ — grids are recognised first (`MessageKind.MINIGAME_BOARD`), ahead of the claim heuristic.
+- ~~…and so did other Mudae prose (upgrade panels, `$kakeracopy` syntax)~~ — the real fix: a message is mirrored only when it names the connected account; edits are never mirrored; roll cards are logged by the roller directly instead.
+- ~~`is_connected` stayed True forever~~ — no `on_disconnect` handler existed; now consults `on_resumed`/`client.is_closed()`, and `$ot` reconnects after a silent gateway stall.
+- ~~Button clicks swallowed every error~~ — clicks now retry, refetch, reconnect, and log the reason (429/rate-limit/timeout/500 now treated as transient).
+- ~~Minigames auto-played on every hourly cycle/wake instead of only at start and reset~~ — gated on a per-day flag; on-demand Run-page buttons unaffected.
 
 ### Robustness (not wrong today, fail overnight)
 
-- **`$oc` / `$oq` have no click retry** — `$oh` resends on ack timeout; the other two abort the batch. Play-all then stops the whole chain, so remaining `$oc`/`$oq` uses from `$ohu` are left unspent. The *transport* retry in `click_button` now covers all four, so this is only about the game loops: `$ot` refreshes the grid and skips a cell that keeps refusing, the others still `break` on the first refusal. Every click in `$oh`/`$oc`/`$oq` is paid, so skipping is not obviously right there and was left alone deliberately.
-- **Minigames do not wait out a maintenance window themselves** — the outage is *seen* there (the watch is on `DiscordActions`, so `$ohu` and grid timeouts arm it), but only the roll loops act on it: a play-all during a reboot burns its `$ohu` timeout, logs `ohu failed`, and returns, and the pause happens on the next `$tu`. Nothing is lost — minigame uses are not spent by a command Mudae refused — so this is cosmetic ordering, not a hole. Worth closing if maintenance ever lands mid-grid, where a half-played board is a real cost.
-- **`$us` slow-path add does not use the reconnect wrapper**; a single 503 fails the add. Reconnect retries once, then aborts.
-- **Perk-6 queue drain does not match parent character** — late spawns are serviced (good) but a stale “Akame spawned by POWER” can attach to the next `Rem` roll (bad for session records). The wait path already requires `parent_character`.
-- **`SphereReactor` is fire-and-forget** — HTTP click success is logged as a sphere; no wait for the `(used/max)` line. `$ohu` `N/15 buttons clicked` is persisted for the Run counter; the reactor does not skip at cap (Mudae stops spawning those buttons).
-- **Resume holes** — `macro_runtime` snapshot omits perk-8 click counts; claim cooldown restore subtracts wall-clock minutes instead of using the claim-reset instant; legacy flat `daily_resets` is dropped with no migration.
-- **Quit is fire-and-forget** — `shutdown()` persists and disconnects without waiting for the reader thread or an in-flight minigame.
+- **`$oc` / `$oq` have no click retry** — `$oh` resends on ack timeout; the other two abort the batch. Transport retry now covers all four; the game loops themselves still `break` on a refusal, deliberately, since every click there is paid.
+- **Minigames do not wait out a maintenance window themselves** — the outage is seen, but only the roll loops act on it. Cosmetic ordering today; worth closing if maintenance ever lands mid-grid.
+- **`$us` slow-path add does not use the reconnect wrapper** — a single 503 fails the add.
+- **Perk-6 queue drain does not match parent character** — a stale entry can attach to the next roll.
+- **`SphereReactor` is fire-and-forget** — no wait for the `(used/max)` line; `$ohu` count is persisted for the Run counter instead.
+- **Resume holes** — `macro_runtime` snapshot omits perk-8 click counts; claim cooldown restore uses wall-clock minutes instead of the claim-reset instant; legacy flat `daily_resets` has no migration.
+- **Quit is fire-and-forget** — `shutdown()` doesn't wait for the reader thread or an in-flight minigame.
 
 ### GUI (shells drifted)
 
-Classic Run (`RunView` + `MacroControlBar`) and Haul/Console/Boxed (`RunModel` + `*RunPage`) are two products:
+Classic Run and Haul/Console/Boxed (`RunModel` + `*RunPage`) are two products:
 
-- ~~`$us` stop-on-power / stop-after-N only on Classic.~~ Drain / schedule policy on the preset (Presets → `$us`); Run page is the start button only.
-- ~~Update banner only on Classic; tray text says “see the Run tab”.~~ Compact notice above every layout (`UpdateNotice` in `ShellSwitcher`); changelog + Update live on Settings. Tray points at Settings.
+- ~~`$us` stop-on-power / stop-after-N only on Classic~~ — drain/schedule policy moved to the preset.
+- ~~Update banner only on Classic~~ — compact notice on every layout now; changelog/Update live on Settings.
 - Session haul / last claim / perk 8·9 chips only on the new shells; Classic never reads `runSummaryJson`.
 - `RunModel.dkNextMinutes` and `TargetModel.warning` are computed and not shown.
 - Notification-standby banner only on Classic.
 - No confirm on delete account/server/preset, live `$settings` Apply, or legacy import.
 - Changing Run target while connected silently stops the macro.
-- Mudae “Apply to server” channel pickers do not follow the Run target, and
-  `applyMudaeSettingsPreset` still hard-requires the target channel to *be* the
-  connected Run target — so copying settings from channel A to B means
-  retargeting and reconnecting by hand. This is the one place left that demands
-  it: fetching stopped needing a connection when the scope bars got
-  `fetchForScope` and its temporary-connection routes (`gui/scope_fetch.py`),
-  and Apply is the same manoeuvre with a write on the end. It is deliberately
-  not done yet, because Apply also has no confirm/preview (below) and sending a
-  batch of live `$settings` edits to a server you are not watching is a worse
-  failure than a stale sheet.
+- Mudae "Apply to server" channel pickers don't follow the Run target, and still hard-require the target channel to *be* the connected Run target — deliberately not fixed yet, since Apply also has no confirm/preview and a batch of live edits to an unwatched server is a worse failure than a stale sheet.
 - Compact Run preset combo shows preset **ids**, not names.
-- Dead: `PhaseStepper.qml`, `ServerChannelSelectors.qml`, `App.mudaeSettingsCatalogJson`, `App.macroActivityLog` (plain-text duplicate).
+- Dead: `PhaseStepper.qml`, `ServerChannelSelectors.qml`, `App.mudaeSettingsCatalogJson`, `App.macroActivityLog`.
 
 ### Ideas that fit this app
 
 - **Shared `RunControls`** — one gating/loading implementation; Classic migrates onto `RunModel`.
-- ~~**Update banner in `Main.qml` / Settings**~~ — compact notice on all layouts; pull + restart on Settings.
+- ~~Update banner in `Main.qml` / Settings~~ — done.
 - **Confirm + command preview before live `$settings` Apply.**
-- **Tray: notify on wish/claim** (tray already exists; menu is Show + Quit only). Optional Connect / Start / Stop.
+- **Tray: notify on wish/claim** (menu is currently Show + Quit only).
 - **Claim-interval hold** — on `CLAIM_INTERVAL`, set cooldown from `next_interval_minutes` instead of timing out.
 - **Sphere daily-cap advisor** — parse `$ohu` button/megasphere lines; disable the sphere reactor when the roll-button cap is hit.
 - **`$oc`/`$oq` retry + play-all continues after one failed batch.**
-- **Stats CSV/JSON export** of the filtered rows (local file).
-- **Minigame resume checkpoint** — persist grid signature after each ack so a disconnect does not forfeit the `$ohu` use.
+- **Stats CSV/JSON export** of the filtered rows.
+- **Minigame resume checkpoint** — persist grid signature after each ack so a disconnect doesn't forfeit the `$ohu` use.
 - **ParseLab sandbox token** — debug connection isolated from the Accounts store.
-- **Custom claim-react emoji** — the react-to-claim path always uses `✅` (`CLAIM_REACTION_EMOJI`). Mudae accepts any emoji, so which one is purely cosmetic and nothing depends on it. A per-preset picker (and a per-server one, for servers with a house emoji) is **polish for the very end** — not close to a priority.
+- **Custom claim-react emoji** — cosmetic polish, low priority.
 
-Not bugs: `min_kakera` is labelled “instant trigger” in Presets and is *not* an end-of-batch floor — `claim_best` picking the highest remaining ka is the intended fallback.
+Not bugs: `min_kakera` is labelled "instant trigger" in Presets and is *not* an end-of-batch floor — `claim_best` picking the highest remaining ka is the intended fallback.
 
 ---
 
 ## Colblitz tools vs this app
 
-Compared [colblitz.com/mudae](https://colblitz.com/mudae/) and [`docs/archive/mudae-tools-dev-guide.md`](archive/mudae-tools-dev-guide.md) (Claude’s rebuild spec) against our solvers. Their site is a **browser helper + hosted Discord bot**. We already auto-play `$oh` / `$oc` / `$oq`. Do not rebuild their website or YOGRTBot. Steal algorithms that raise our SP; skip tools that need datasets or a second UI we would never keep current.
+Compared [colblitz.com/mudae](https://colblitz.com/mudae/) and [`docs/archive/mudae-tools-dev-guide.md`](archive/mudae-tools-dev-guide.md) against our solvers. Their site is a browser helper + hosted Discord bot; we already auto-play `$oh`/`$oc`/`$oq`/`$ot`. Do not rebuild their website or YOGRTBot. Steal algorithms that raise our SP; skip tools that need datasets or a second UI we would never keep current.
 
 Full section-by-section build notes: [`docs/archive/mudae-tools-dev-guide.md`](archive/mudae-tools-dev-guide.md). Index: [`docs/archive/README.md`](archive/README.md).
 
-The guide is a fair transcription of their published “How it works” pages. Several things it marks UNVERIFIED we already settled in code (dark `$oh` pays immediately; purple from dark shows on the **reward tracker**, not the grid). Fold any port into `macro/*_solver.py` — do not start a parallel `mudae-tools/` tree.
-
 ### Solvers — room to improve
 
-- **`$oq` — MIXED is live; leave it.** Hunt scores `α·P(purple) + β·Gini` (α=1 β=0.1). Opening is Colblitz overlay `(1,1)` (0-based, index 6). Mudae auto-reveals the 4th purple as a clickable red (or rainbow) once 3 are found — the live loop waits for that grid edit instead of probing hidden cells. When 2 purples are already found, hunt expectimax treats the third as a free click that unlocks the auto-red. Full replay (`scripts/oq_bakeoff.py`, all 12,650 worlds, our base SP): MIXED **95.6% red / 344.8 avg**, entropy **92.2% / 337.8**. Colblitz MIXED 95.4% / 342.7; their Bellman DP is 98.1% / 356.3. Remaining MIXED losses never find 3 purples. Do not chase hunt-wide expectimax / full DP unless we specifically want those ~11 SP. Boards log to `data/minigame_log.json` (Statistics → Minigames).
-  **Validated against 64 real logged boards:** every board has exactly 4 mines, every non-mine colour equals its adjacent-mine count (0 mismatches in 1,344 cells), every placement exists in the enumerated 12,650, and per-cell mine frequency is consistent with the uniform prior the solver assumes (χ²=16.7 vs 36.4 critical). The world model is exact — pinned by `tests/test_minigame_log_models.py`.
-  **Fixed while validating:** the replay always painted the auto-revealed 4th sphere red (150 SP), but **12.5% of them are rainbow** (500 SP, 7 of 56 logged). `avg_base_sp` therefore understated real SP by ~38/game — harmless for A/B (a shared constant offset) but wrong as an absolute. `score_oq_policy` now also reports `avg_base_sp_rainbow_adjusted` (MIXED: 344.1 raw → **385.9 adjusted**, against 360.2 avg in live logs). `oq_solver` still values that cell at a flat 150 internally; correcting it to the true ~194 EV was measured **decision-neutral** (win rate identical, −0.11 SP over 2,530 worlds), so it was left alone.
-
-- ~~**`$oh` DP**~~ **— done, and it confirms the static skip rather than replacing it.** `macro/oh_solver.py` backward-induces `(clicks left, blue visible, teal visible)` exactly (not Colblitz's positional-count DP — position is irrelevant here, confirmed below, so a *counts* DP over `(clicks left, blue, teal)` is already exact, no `dark`/`top flats` dimensions needed: every colour above teal always outpays a face-down click before its unveil bonus is even counted, so it is a dominant take with no comparison to solve). **Never click a revealed blue/teal was suspected wrong at 1–2 clicks left** (a teal at 20, or a blue's 3-cell unveil, "can beat a face-down") — the DP says otherwise: a face-down click wins at every clicks-left level checked, 1 through 10, because it carries the same shot at blue/teal (and the same resulting unveil) *plus* a shot at everything above them. Cross-checked against an independently-written Monte Carlo rollout of the same decisions (agrees within noise, `tests/test_oh_solver.py`) and against the 94 recoverable real boards (`scripts/oh_bakeoff.py --from-log docs/minigames_to_use.jsonl`, `policy="dp"`): **0 boards change.** The one real gap it found was a genuine bug, now fixed: the old heuristic returned `None` (forfeiting the click) once no face-down remained even with a revealed blue/teal and budget both still there.
-  The blocker was "log colour / value of each `$oh` reveal until the reveal table is stable". **Done** — 96 logged boards (2,317 revealed cells) reproduce the published spawn table to within ~1.7 points on every colour, and the rare tiers land almost exactly (white 0.04%, red 0.22%, purple 3.93%). The table and its `$oc`-spawn residual are in [`MUDAE_LOGIC.md`](MUDAE_LOGIC.md) and pinned by `tests/test_minigame_log_models.py`.
-  **Harness shipped** (`macro/oh_replay.py`, `scripts/oh_bakeoff.py`): simulator + replay of real logged boards with paired t-stats, so a policy change can finally be scored. Replay gives 156.5 SP vs 153.4 live. The unveil mechanic is now measured, not assumed — blue→3, teal→1, targets **uniformly random not positional** (26.8% adjacent vs 24.0% by chance), which is what licenses a *counts* DP.
-  **Fixed:** `$oh` ranked revealed spheres by the ordinal `SPHERE_VALUE_RANK`, which puts dark (5) below orange (7) although dark pays ~104 vs 90. Now ordered by real SP via an `$oh`-local `_OH_CLICK_VALUE` (the shared rank is untouched). Measured +0.04 SP on 94 boards, 1 board changed — strictly correct, not significant.
-  **Do not price `$oc` spawns into the policy.** Clicking one grants a whole `$oc` game (~314 SP) but the cell is invisible even once unveiled, so it cannot be targeted; valued at 314 the search degenerates to "never claim a revealed sphere". `OC_GRANT_VALUE` defaults to 0 and the bakeoff prints both valuations.
-
-- **`$oc` — done (medium), and the priors are now measured.** They weight each of the 24 reds equally, then do a 5-click Bellman DP over colour outcomes (max total SP, not “find red”). We already treat candidate reds as equally likely and still do **not** enumerate full boards — geometric filters from [mudaehelper](https://mudaehelper.pages.dev) (`macro/oc_solver.py`). **The "generator is inconsistent for some reds" caveat did not reproduce:** across 100 fully-revealed logged boards there are zero rule violations, the true red always survives the constraints, and every board is exactly 1/2/3/4 red/orange/yellow/green. The constraint layer is trustworthy; treat that caveat as retired.
-  This item also asked to "fit `P(colour at cell | red)` from logged full boards", and that is now done — see the region table in [`MUDAE_LOGIC.md`](MUDAE_LOGIC.md) (ortho 63% orange / 22% green / 15% teal, EV 67.6 SP; diagonal 64/36, EV 42.4; row-col-only 68/32, EV 30.2; outside 97% blue, EV 11.0). Two surprises: **greens do sit on orthogonally adjacent cells** (so the orange/green regions genuinely overlap), and the **centre is an ordinary cell** (yellow 23%, green 16%, orange 8%) that the solver currently never clicks.
-  Hunt is still 1-ply information gain + opening `(4,2)`; collect scores by true remaining need per region (`_region_click_ev`). Measured worth on real boards: **+1.25 SP/board, t = 1.41, not significant** (~200 boards needed). Their exact DP is still not obviously better than our constraints, and with the priors now measured the remaining gap is small — do not chase it without a far larger log. Do not guess the generator; replay it instead (`--from-log`).
-
-- ~~**`$ot` — hard, already on the daily-loop list.**~~ **Solver and game loop done; promoted to auto-play.** Battleship on a 5×5: ships are free, 4 blue clicks. Colblitz enumerate placements with a bitmask DFS then run a two-phase policy, Phase 1 using a **learned** scorer they do not publish. Rare-ship SP is 76 / 104 / 150 / 500 (Light / Dark / Red / Rainbow), not a flat ~90 — confirmed, it is just `SPHERE_BASE_SP` plus the `$oh` light/dark means.
-  **We do not enumerate at all.** `Number of different colors: N` gives the fleet (`N − 4` length-2 ships) before the first click, and a configuration is one of just **5,520** legal (teal, green, yellow) triples plus a set of disjoint dominoes. The dominoes are *counted* by a memoised DP, and per-cell marginals come from the identity "configurations leaving `c` empty = packings of the free region without `c`". Exact — it reproduces a brute-force DFS on all four fleet sizes — at **0.28s cold, ~0.002s once three cells are known**, in plain Python.
-  **Colblitz's "Extra Chance" turned out to be the whole game, and they explain it badly.** A blue ends the board only when it is the 4th-or-later **and** ≥5 ship cells have been clicked; below that it is granted, repeatably, so a perfect game is 8 Extra Chances. That inverts Phase 2: while the phase is live, clicking a `P(blue)=0` cell is a *mistake*, because the cell stays free afterwards and the ship hit does not come back. Ten logged games confirmed it by splitting exactly on the predicate — see the Wave 4 entry. Shipped as a two-phase policy: hunt blues (`ev + 600·P(blue)`, 6–7 colours only) while the board cannot end, then the old harvest-and-probe. **+168.9 SP (t = 3.72) on 27 real boards, 100.2% of ceiling.**
-  **Phase 1 (post-Extra-Chance) is where the measurement bit.** The obvious rule — probe by highest EV — is the *worst* of the family: over 200 generated boards it loses to every blue-avoiding variant under **both** generators. `risk` scores `ev(c) − λ·P(blue at c)`, which spans the family (λ=0 is greedy, λ→∞ is "safest cell"). Shipped at **λ=60**. The blue bonus is the same expression with the sign flipped, which is why one function serves both.
-  **The numbers, and the disagreement.** On the 7 real boards greedy looks best (1043 SP vs 1026 at λ=60) — but nothing there is significant and one board dominates each comparison. At 200 generated boards, `uniform` plateaus from λ=60 (+30.6 SP, nothing in the sweep significant) while `sequential` climbs monotonically to λ=1000 (+86.3 SP, t=4.92). Direction is robust, magnitude is a property of the prior. The real boards break the tie downward: **at λ≥90 one logged board collapses 667 → 40 SP**, because the policy spends all four blues on the four safest-looking cells and never commits to a ship. λ=60 keeps the `uniform` plateau, stays significant under `sequential` (+33.8, t=2.08), is best on the two hand-played boards (826 vs 798.5 for greedy, against 597.5 by hand), and stays on the committing side of that cliff.
-  **Measured dead end: one-ply lookahead.** Scoring a probe by what it *unlocks* (`Σ P(outcome) × [SP + harvest]`) scored **696 vs 1043** on the known boards. Not a bug — the harvest term is a *stock* (SP eventually collectable) added to a *flow* (SP from this click), so it double-counts value the policy would have reached anyway and chases certainty over payout. Doing it properly needs a rollout to the end of the game, not one ply. Tried a second time in the one spot where the objection should *not* apply — `hunt`'s endgame, reached only with the budget gone and nothing certain, so there is no stock left for a blue to destroy — and it still lost: **968.1 vs 971.1 SP on the 16 real boards, −18.7 (t = 1.31) over 60 generated ones**, for seconds a board. It is kept in `PROBE_POLICIES` so the result is reproducible; do not re-derive it. Same shape as the reverted `$oc` hunt lookahead.
-  ~~**Promoted out of manual-only**~~ — `$ot` is in `PLAYABLE_MINIGAMES`; play-all and after-refill auto-play now spend it like `$oh` / `$oc` / `$oq`. **Still open:** ~50 real boards would settle λ properly. `OT_RARE_WEIGHTS` should be re-derived as the rare-slot count grows past its current 26 — it was wrong by an order of magnitude on rainbow when it was borrowed from `$oh`, so do not assume it is right now.
+- **`$oq`** — MIXED is live, leave it: hunt scores `α·P(purple) + β·Gini`, opening at Colblitz's `(1,1)`. Full replay over all 12,650 worlds: MIXED 95.6%/344.8 vs Colblitz's published 95.4%/342.7 (their Bellman DP: 98.1%/356.3 — not worth chasing for ~11 SP). World model validated exact against 64 real logged boards, pinned by tests. Fixed while validating: the auto-revealed 4th sphere is 12.5% rainbow, not always red (`avg_base_sp_rainbow_adjusted` reports the corrected figure); left the solver's flat internal valuation alone since correcting it was decision-neutral.
+- ~~`$oh` DP~~ — done, and it **confirms** the shipped heuristic rather than beating it: a face-down click dominates a revealed blue/teal at every clicks-left level 1–10 (cross-checked by Monte Carlo and against 94 real boards — 0 boards change). Reveal table validated against 96 logged boards. Fixed one real bug: the old heuristic forfeited a click it should have taken. **Do not price `$oc` grants into the policy** — valuing the ~314 SP grant degenerates the search to "never claim a revealed sphere".
+- **`$oc`** — done (medium); priors measured from 100 real fully-revealed boards (region table in `MUDAE_LOGIC.md`); the "generator is inconsistent" caveat did not reproduce and is retired. Hunt is 1-ply info-gain + `(4,2)` opening; collect scores by true remaining need per region. +1.25 SP/board (t=1.41, not significant, ~200 boards needed) — do not chase further without a much larger log.
+- ~~`$ot`~~ — solver + game loop done, promoted to auto-play. We don't enumerate placements: fleet size comes from the message text, and a memoised DP counts the ~5,520 legal configurations directly (0.28s cold, ~0.002s warm). **Extra Chance is the whole game** — a blue only ends the board past the 4th-or-later blue with ≥5 ship cells clicked; below that it's free and repeatable. Two-phase policy (hunt blues while the board can't end, then harvest-and-probe with `risk = ev − λ·P(blue)`, λ=60) measures **+168.9 SP (t=3.72), 100.2% of ceiling, 7/27 real boards cleared outright**. Measured dead end: one-ply lookahead scoring a probe by what it unlocks loses in every tested setting — a stock/flow double-count, not a bug; do not re-derive. **Still open:** ~50 more real boards would pin λ properly; `OT_RARE_WEIGHTS` should be re-derived as the rare-slot sample grows past 26.
 
 ### Calculators — new features, not solver ports
 
-- ~~**Perk 9 click/skip DP**~~ — [p9calc](https://colblitz.com/mudae/p9calc)'s `EV = (base × (1 + double) + flat) × (1 + SP9×0.10)` and `V(spawns left, clicks left)` are implemented in `macro/perk9_threshold.py` and gate `passes_sphere_reaction` when the preset's **budget_aware** toggle is on (off = the old static `types_allowed`). Verified against Colblitz's published EV column to ±0.04 on all nine colours; their base SP for dark (104.5) and light (75.9) fill the gap in `SPHERE_BASE_SP`. Spawn rates and values are editable per colour in Presets since the sample is still being re-measured; `estimate_sphere_colour_frequency` shows our own logged mix beside them as advisory only. Against one static filter tuned for a 120-spawn day the DP is +121% at 30 spawns, +47% at 60, +6% at 120, +28% at 250 (`scripts/perk9_bakeoff.py --tuned-for 120`). A standalone “how many OP9 chars to skip teal” page is still optional.
-
-- ~~**`$bw` / key EV**~~ — shipped as `macro/bw_calc.py` + `Advisor › $bw` and `Advisor › Key EV`. [bwcalc](https://colblitz.com/mudae/bwcalc)'s published tier tables, spawn-weight model, `$persrare` rerolls and 2,200/hour key cap are all implemented, and the tables are confirmed against the live `$bonus` at two different `$bw` values. No paste step was needed in the end: every input is a sheet the app already fetches, except the base pool, which is a user field, and `$persrare` N, which was one until `$ov` parsed. Their warning holds — **absolute** keys/hr are community guesses, the *peak* is what to trust — so the page says the peak is flat and names the base pool as what moves it. `$bw` is never auto-sent; the page prints the command.
-  ~~Still open on this line: derive the base pool from game mode.~~ Both remaining inputs now come from sheets — the base pool from `$limroul`, `$persrare` from `$ov`. Slash commands are modelled but not applied — the macro rolls with `$`; if slash rolling ships, the +10% bonus and the 1,440/hour cap become live in one branch.
-
-- **Disablelist optimizer — skip for now.** [dlcalc](https://colblitz.com/mudae/dlcalc) is set-cover + pool caps. The ILP is a day; the **bundle↔character dump** is the real product and goes stale. Keep the one-click `$dl`/`$adl`/`$wl` switch. Revisit only if we ingest a refreshable dump ([MudaeDB](https://github.com/LilJamJam/MudaeDB) / [DL-Builds](https://github.com/PRCSakura/Mudae-DL-Builds)).
-
-- **Sphere upgrade planner (`spcalc`) — skip.** [spcalc](https://colblitz.com/mudae/spcalc) is the heaviest tool (OP9/OP5/OP8/OP10/SP2/SP5/SP10 income + discounted upgrade order). `$shop` is parsed; `$mmsz=z!` is not. Users can keep using the site. If we ever want it, it is a multi-day transcription, not a macro feature.
+- ~~Perk 9 click/skip DP~~ — `macro/perk9_threshold.py`, verified to ±0.04 SP against Colblitz's published EV column. +121%/+47%/+6%/+28% SP at 30/60/120/250 spawns vs a static filter tuned for 120.
+- ~~`$bw` / key EV~~ — `macro/bw_calc.py` + Advisor pages. Tier tables confirmed against the live `$bonus`. Base pool now comes from `$limroul`, `$persrare` from `$ov` — no guessed inputs left. `$bw` is never auto-sent. Slash commands are modelled but not applied (the macro rolls with `$`).
+- **Disablelist optimizer — skip for now.** The ILP is a day's work; the bundle↔character dump is the real product and goes stale. Revisit only with a refreshable dump ([MudaeDB](https://github.com/LilJamJam/MudaeDB) / [DL-Builds](https://github.com/PRCSakura/Mudae-DL-Builds)).
+- **Sphere upgrade planner (spcalc) — skip.** Heaviest of their tools; `$mmsz=z!` isn't parsed. Multi-day transcription if ever wanted.
 
 ### Skip entirely
 
-- **YOGRTBot live solver** — a bot you invite so a browser overlay updates on message edit. We already parse the 5×5 from component rows and click. A recommend-only Discord bot is a different product (and a different ToS surface).
-- **klcalc** — they unlisted it from the index (2026-08-20). Ignore.
-- **Heatmaps / click-history / harvest explainer** — web-solver chrome. Our log line (`format_solver_stats`) is enough.
+- **YOGRTBot live solver** — a different product and ToS surface; we already parse and click the 5×5 directly.
+- **klcalc** — unlisted from Colblitz's own index. Ignore.
+- **Heatmaps / click-history / harvest explainer** — web-solver chrome; our log line is enough.
 - **Their hosted stats tables** — games *their* bot saw, not ours.
 
-Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5). Perk 9 and `$bw` are both done, and both did exactly this — read stored `$bonus` fields rather than becoming parser projects.
-
-Public Python references if a port stalls: [Svessinn/Mudae](https://github.com/Svessinn/Mudae) (all four games + sims), [GAP22/oq-solver](https://github.com/GAP22/oq-solver), [mudae-sphere-solver](https://github.com/ShrimpandGGrits/mudae-sphere-solver). Colblitz itself is server-side — no client JS to read.
+Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5) — done. Public Python references if a port ever stalls: [Svessinn/Mudae](https://github.com/Svessinn/Mudae), [GAP22/oq-solver](https://github.com/GAP22/oq-solver), [mudae-sphere-solver](https://github.com/ShrimpandGGrits/mudae-sphere-solver).
 
 ---
 
 ## Quiet shell (2026-09-07)
 
-- ~~**Quiet design**~~ — `gui/shells/Quiet*.qml` + the `flatPanels` skin token.
-  The restyle reaches every page through `components/PanelCard.qml` rather than
-  a parallel set of views, so Report keeps all ten tiles, Presets keeps its list
-  and its five sections, and Debug keeps its two panes. Mockup:
-  `docs/mockups/quiet-tabs.html`.
-- ~~**Registering a shell touched three places and needed four**~~ — Settings
-  lists designs from `gui/skins.js` while `_UI_LAYOUTS` in `gui/bridge.py`
-  decides which may be stored, so Quiet appeared in the picker and selecting it
-  did nothing, silently. `tests/test_appearance.py` now reads `skins.js`,
-  `palettes.js`, `ShellSwitcher.qml`, `ui_preview.py` and the bridge and fails
-  when they drift.
-- ~~**`$settings` / `$bonus` shown in two places**~~ — the duplicate parsed
-  panels are off Servers; Mudae is the one place the sheets are read.
-- **Still open on Quiet:** the Mudae `$settings` editor (drift / preset / diff /
-  dry run / apply) is unmounted and wants a deliberate home — it changes a live
-  server, unlike everything else on that page. `views/MudaeSettingsView.qml` and
-  its whole pipeline are intact. The perk-9 sphere row on the Quiet Run page has
-  not been seen with live data; the previews all run disconnected.
+- ~~**Quiet design**~~ — `gui/shells/Quiet*.qml` + the `flatPanels` skin token, reaching every page through `components/PanelCard.qml`. Mockup: `docs/mockups/quiet-tabs.html`.
+- ~~**Registering a shell touched three places and needed four**~~ — `tests/test_appearance.py` now fails if `skins.js`, `palettes.js`, `ShellSwitcher.qml`, `ui_preview.py`, and the bridge drift apart.
+- ~~**`$settings` / `$bonus` shown in two places**~~ — the duplicate panels are off Servers; Mudae is the one place the sheets are read.
+- **Still open on Quiet:** the Mudae `$settings` editor (drift/preset/diff/dry-run/apply) is unmounted and wants a deliberate home — it changes a live server, unlike everything else on that page. The perk-9 sphere row on the Run page hasn't been seen with live data; previews all run disconnected.
+
+## `$rt` claim path (2026-09-07)
+
+- ~~**Every `$rt` waited 12s for a reply Mudae never sends, then cancelled the
+  claim**~~ — `$rt` is confirmed by a **tick reaction on the command message and
+  nothing else** (confirmed by the account's owner). The macro waited for a
+  reply message afterwards, so the wait could only ever time out, and a wished
+  character plus a scarce daily reset were lost together. The reply waiter
+  (`wait_for_rt_use` / `is_rt_use_parse_result`) is deleted; the tick is the
+  confirmation, followed by a 1s settle (so the claim does not land in the same
+  instant as the reset) and then the claim, with the existing 1/3/5s retry
+  ladder behind it — a claim window is ~45s, so the up-front wait stays small
+  and only a real failure pays for a longer one. A **lost tick** — the
+  only remaining failure — falls through to a `$tu` check that asks whether the
+  slot actually opened, rather than writing the reset off.
 
 ## Perk-8 stale count (2026-09-07)
 
-- ~~**A wrong perk-8 count wedged the reactor for a night**~~ — `38/40` stored
-  against Mudae's `40/40`; the re-query gate only fires on exhaustion or a
-  passed refill, so nothing could correct it for ~21 hours. Fixed two ways:
-  the hoard now opens when the power bar is pinned (`perk8_power.bar_is_pinned`),
-  and `macro/perk8_recheck.py` re-sends `$ohu8` on Mudae's own last-click line,
-  on two hours without a perk-8 character, or on ten minutes of pinned power.
-- ~~**Run showed 21 rolls against a real pool of 83**~~ — `macroRollsMax` read
-  `channel.bonus`, the pre-split blob that `apply_parsed` clears once a sheet is
-  filed per account. Now goes through `account_sheet`.
-- **Not diagnosed:** *why* the count drifted by two. Two perk-8 clicks were not
-  counted — mis-attributed, or made outside the macro. The fallbacks make it
-  survivable rather than impossible; `data/events.jsonl` would say which if it
-  recurs. Deliberately skipped: a plain time-based re-query (an `$ohu8` every
-  hour regardless), to keep the command rare.
+- ~~**A wrong perk-8 count wedged the reactor for a night**~~ — `38/40` stored against Mudae's `40/40`. Fixed two ways: the hoard opens when the power bar is pinned, and `macro/perk8_recheck.py` re-sends `$ohu8` on Mudae's own last-click line, two hours without a perk-8 character, or ten minutes of pinned power.
+- ~~**Run showed 21 rolls against a real pool of 83**~~ — `macroRollsMax` now goes through `account_sheet` instead of the pre-split channel blob.
+- **Not diagnosed:** *why* the count drifted by two. Deliberately skipped: a plain time-based `$ohu8` re-query regardless of signal, to keep the command rare.

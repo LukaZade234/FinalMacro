@@ -199,6 +199,32 @@ then claimed the batch's highest-kakera character instead. Two faults, both in
   reservation is cleared when a claim lands and at the start of each roll
   session, so it can never hold back a later batch.
 
+**`$rt` is confirmed by a tick reaction and nothing else.** Mudae reacts to the
+`$rt` command message with a tick, and sends **no reply message at all** — no
+"claim timer has been reset" line, nothing. The tick is the whole answer.
+
+Reported 2026-09-07: a wish rolled, the macro sent `$rt`, Mudae ticked it, and
+the claim was then cancelled with *"no Mudae response within 12s"* — losing the
+wish and the reset together. The macro was waiting for a reply that was never
+coming, and no amount of waiting or retrying could have helped. The flow is now:
+send `$rt` → wait for the tick → pause `_RT_SETTLE_AFTER_TICK_SEC` → claim.
+
+The pause is **1s** — enough that the claim does not land in the same instant as
+the reset, which Mudae can answer as though the reset had not happened, and no
+more than that. It is paid on every `$rt`, including the ones that were going to
+work, out of a claim window only ~45s wide; when a claim *does* fail, the
+escalating retry ladder (`_CLAIM_RETRY_PAUSES_SEC`, 1s → 3s → 5s) is what spends
+the time, and only then. `_RT_ROUND_TRIP_FLOOR_SEC` is derived from this pause
+plus the pre-send one, so lengthening either also raises the bar for spending a
+reset on a roll whose claim timer is nearly up.
+
+**A lost tick is not a failed reset.** A reaction is a gateway event and can go
+missing like any other. Since it is the only evidence Mudae offers, a missing
+tick falls through to `_confirm_rt_with_tu`, which sends `$tu` and reads whether
+the claim slot actually opened. Writing the reset off instead would lose the
+claim *and* leave a possibly-spent reset recorded as still available for the
+rest of the day.
+
 **"Once per interval" rejection.** If the claim slot's real state has drifted
 from what the last `$tu` reported (e.g. connecting mid-window), a claim button
 click can come back rejected: *"For this server, you can claim once per
