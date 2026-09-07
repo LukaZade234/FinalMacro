@@ -45,6 +45,14 @@ class AccountState:
     rt_available: bool | None = None
     rt_next_minutes: int | None = None
     rt_reset_at: str = ""
+    # Character an ``$rt`` was spent on to open the *currently open* claim slot,
+    # blank when the open slot is an ordinary one. ``$rt`` is bought for one
+    # character; if that claim then falls through (sniped, window closed), the
+    # slot it bought must not be quietly handed to the end-of-batch picker —
+    # see ``macro.post_roll.PostRollHandler.claim_best``. Cleared when a claim
+    # actually lands and at the start of each roll session, so it can never
+    # block claiming beyond the batch it belongs to.
+    rt_claim_slot_for: str = ""
     phase: MacroPhase = MacroPhase.IDLE
     own_usernames: list[str] = field(default_factory=list)
     own_user_ids: list[int] = field(default_factory=list)
@@ -115,6 +123,7 @@ class AccountState:
             "claim_cooldown_at": self.claim_cooldown_at,
             "claim_expire_sec": self.claim_expire_sec,
             "rt_available": self.rt_available,
+            "rt_claim_slot_for": self.rt_claim_slot_for,
             "rt_next_minutes": self.rt_next_minutes,
             "rt_reset_at": self.rt_reset_at,
             "phase": self.phase.value,

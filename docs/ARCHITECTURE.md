@@ -98,7 +98,7 @@ Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `a
 | `roll_context.py` | Per-account bag of config, state, actions, monitor |
 | `config.py` | `MacroConfig` + claim / kakera / sphere / `$us` rule blocks |
 | `rule_eval.py` | Pure decisions (claim / kakera / sphere) from parsed fields |
-| `post_roll.py` / `kakera_reactor.py` / `sphere_reactor.py` | Apply those decisions. `post_roll` claims by clicking the button, or by reacting when the roll has none (buttons off for the server or account) |
+| `post_roll.py` / `kakera_reactor.py` / `sphere_reactor.py` | Apply those decisions. `post_roll` claims by clicking the button, or by reacting when the roll has none (buttons off for the server or account), retrying up to `_CLAIM_ATTEMPTS` while a re-read of the roll says the character is still there — a silent attempt may well have landed, so it is resolved by reading rather than by clicking again. Everything knowable is checked **before** `$rt` is spent, and a slot `$rt` did buy is reserved for the character it was bought for (`AccountState.rt_claim_slot_for`) so a failed wish claim cannot hand it to the end-of-batch picker — see the `$rt` note in `MUDAE_LOGIC.md` |
 | `chaos_followup.py` | Extra hourly rolls + discounted chaos-kakera power cost |
 | `claim_window.py` | Final-hour test (claim reset == rolls reset) |
 | `rt_manager.py` / `dk_manager.py` / `reaction_power.py` | `$rt`, `$dk`, power bar |

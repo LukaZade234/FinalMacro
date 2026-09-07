@@ -146,6 +146,59 @@ Already-claimed characters, profile embeds, and rolls whose claim button Mudae
 has disabled are skipped. A roll with **no** button is not skipped — that is the
 reaction case above.
 
+**A claim is retried while the character is demonstrably still there.**
+`_try_claim` used to make exactly one attempt: a failed click returned, and a
+reply that did not arrive within 8s logged "Claim timeout" and returned. Neither
+sets `claim_available = False`, so the slot stayed open and the end-of-batch
+picker spent it — which is how a wish could be paid for with `$rt` and then not
+claimed. A wish is claimed a second or two after it spawns, so silence there is a
+lost click or a lost reply, not a closed window.
+
+Silence is now resolved by **re-reading the roll** rather than by clicking again
+blindly — the same lesson as the paid `$ot` click whose reply went missing:
+
+| Re-read says | Action |
+|---|---|
+| we own it | the click landed and only the reply was lost — count it, spend the slot |
+| someone else owns it | gone; stop |
+| button gone, or timer run out | stop |
+| still claimable | click again, up to `_CLAIM_ATTEMPTS` |
+
+Retries back off — **1s, 3s, then 5s** (`_CLAIM_RETRY_PAUSES_SEC`, which also
+sets the attempt count at four). Whatever swallowed the first attempt is likelier
+to have cleared after 3s than after 1s, and backing off beats hammering an
+endpoint that is already refusing. The **first** attempt is never delayed: a wish
+is claimed the instant it spawns, which is why the roll loop interrupts for it at
+all. The ladder cannot overrun the claim window because the re-read between
+attempts aborts as soon as the timer is gone.
+
+A `CLAIM_INTERVAL` reply is *not* retried: the server refused, so a second click
+hits the same wall. `_refresh_record_fields` is best-effort — a refetch that
+fails or returns something unparseable leaves the record alone and is logged,
+because a claim must never die on a bad re-read.
+
+**A slot bought with `$rt` belongs to the character it was bought for.**
+Reported 2026-09-07: a wish series rolled, the macro spent `$rt` for it, and
+then claimed the batch's highest-kakera character instead. Two faults, both in
+`macro/post_roll.py`:
+
+- `claim_record` checked `claimed` / `can_claim` / the claim timer **after**
+  `_ensure_claim_slot` had already sent `$rt`, so a roll that was already gone
+  cost a reset to discover. Those checks now run first, and a reset is refused
+  outright when less than `_RT_ROUND_TRIP_FLOOR_SEC` of the claim timer is left,
+  because the button will be dead before `$rt` returns. The post-`$rt` re-check
+  stays — the roll can be sniped during the round trip, which is the case the
+  guard below exists for.
+- When the wish claim then failed, `claim_record` returned `False`, so
+  `claimed_via_interrupt` stayed false and `claim_best` ran at the end of the
+  batch — finding an open slot (the one `$rt` had just bought) and spending it
+  on the highest-kakera roll. `AccountState.rt_claim_slot_for` now records who
+  the reset was bought for; `claim_best` refuses to spend a reserved slot and
+  says so. The slot is not wasted: it keeps until a claim uses it, so the **next
+  wish that hour rides it** instead of finding no slot and no `$rt`. The
+  reservation is cleared when a claim lands and at the start of each roll
+  session, so it can never hold back a later batch.
+
 **"Once per interval" rejection.** If the claim slot's real state has drifted
 from what the last `$tu` reported (e.g. connecting mid-window), a claim button
 click can come back rejected: *"For this server, you can claim once per

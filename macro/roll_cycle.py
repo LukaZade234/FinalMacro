@@ -832,6 +832,10 @@ class RollCycleEngine:
                     # Fresh record list per hourly batch: claim-best runs inside the
                     # segment, and keeping every hour's records would grow forever
                     # on multi-day runs.
+                    # A slot bought by ``$rt`` is reserved only within the
+                    # batch it was bought in; a later session's end-of-batch
+                    # claim is free to spend an ordinary open slot.
+                    self._state.rt_claim_slot_for = ""
                     session_records: list[RollRecord] = []
                     done, claimed, roll_index = (
                         await self._roll_hourly_normal_segment(
@@ -1598,6 +1602,9 @@ class RollCycleEngine:
             margin = max(0, self._config.us_reset_margin_minutes)
             add_delay = self._config.us_add_delay()
             read_before_add_delay = self._config.us_read_before_add_delay()
+            # A slot bought by ``$rt`` is reserved only within the batch it
+            # was bought in; a later session's end-of-batch claim is free.
+            self._state.rt_claim_slot_for = ""
             session_records: list[RollRecord] = []
             claimed_any = False
             roll_index = 0

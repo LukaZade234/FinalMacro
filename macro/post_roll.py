@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from mudae.account_context import username_matches_own
 from mudae.buttons import claim_method_from_buttons, is_claim_button
 from mudae.constants import CLAIM_REACTION_EMOJI
 from mudae.types import MessageKind
@@ -23,6 +24,34 @@ _RT_RESPONSE_TIMEOUT_SEC = 12.0
 _RT_PAUSE_BEFORE_SEC = 1.0
 _RT_TICK_TIMEOUT_SEC = 8.0
 _RT_SETTLE_AFTER_TICK_SEC = 1.0
+
+# A claim that got no reply is not a claim that failed — the click may have
+# landed and only the confirmation been lost, which is exactly how a paid ``$ot``
+# click went missing before ``ChannelMonitor.click_button`` learned to retry. So
+# a silent attempt is resolved by **re-reading the roll**, and only retried when
+# that says the character is genuinely still there.
+#
+# The pause before each retry, escalating: whatever swallowed the first attempt
+# (a rate limit, a gateway hiccup) is more likely to have cleared after 3s than
+# after 1s, and backing off beats hammering a Discord endpoint that is already
+# refusing. The **first** attempt is never delayed — a wish is claimed the
+# instant it spawns, which is the whole point of interrupting the roll loop.
+# Attempt count follows this ladder, and the loop aborts early anyway as soon as
+# a re-read says the claim window has closed, so the tail rungs cost nothing on
+# a roll that is already gone.
+_CLAIM_RETRY_PAUSES_SEC = (1.0, 3.0, 5.0)
+_CLAIM_ATTEMPTS = len(_CLAIM_RETRY_PAUSES_SEC) + 1
+_CLAIM_REPLY_TIMEOUT_SEC = 8.0
+
+# Shortest an ``$rt`` detour can take: the pause before sending, the settle
+# after Mudae's tick, and a tick and a reply that both arrive at once. Used only
+# to refuse a spend that *cannot* pay off — a roll with less than this left on
+# its claim timer will have a dead button by the time ``$rt`` returns, so
+# sending it burns a reset for nothing. Deliberately optimistic: the cost of
+# being wrong here is a lost claim, while the cost of being wrong the other way
+# is only a wasted ``$rt``, and the timer is normally 45s against a roll that is
+# a second or two old.
+_RT_ROUND_TRIP_FLOOR_SEC = 5.0
 
 
 @dataclass
@@ -108,6 +137,19 @@ class PostRollHandler:
             return max(1, int(self._state.claim_expire_sec))
         return max(1, self._config.claim_expire_sec)
 
+    def _rt_can_still_pay_off(self, record: RollRecord, expire: int) -> bool:
+        """Whether enough of the claim timer is left to survive an ``$rt``.
+
+        ``$rt`` is a scarce daily reset, and the claim button dies ``settimer``
+        seconds after the roll whatever we do. Spending one on a roll that will
+        already be dead when the round trip finishes is a guaranteed loss, so it
+        is refused rather than attempted.
+        """
+        if expire <= 0 or record.rolled_at <= 0:
+            return True
+        left = expire - (time.monotonic() - record.rolled_at)
+        return left >= _RT_ROUND_TRIP_FLOOR_SEC
+
     async def claim_record(
         self,
         record: RollRecord,
@@ -121,15 +163,12 @@ class PostRollHandler:
         if not (rules.enabled or rules.claim_on_wish_ping):
             self._log(f"{prefix}character claim off — skipped")
             return False
-        needed_rt = allow_rt and self._state.claim_available is False
-        if not await self._ensure_claim_slot(prefix, allow_rt=allow_rt):
-            self._log(f"{prefix}claim on cooldown — skipped")
-            return False
-        # $rt can take several seconds (tick + settle + response waits); refresh
-        # the roll's fields so a stale "can_claim"/"claimed" snapshot from before
-        # $rt doesn't cause a wrong skip or a click on an already-claimed roll.
-        if needed_rt:
-            await self._refresh_record_fields(record)
+
+        # Everything knowable *before* spending anything is checked first. These
+        # same three ran only after ``$rt`` had already been sent, so a roll that
+        # was already claimed, already un-clickable, or already past its timer
+        # cost a reset to discover.
+        expire = self._claim_expire_sec()
         if record.fields.get("claimed"):
             owner = record.fields.get("owner") or "someone else"
             self._log(f"{prefix}already claimed by {owner} — skipped")
@@ -137,10 +176,37 @@ class PostRollHandler:
         if not record.fields.get("can_claim"):
             self._log(f"{prefix}not claimable — skipped")
             return False
-        expire = self._claim_expire_sec()
         if not is_within_claim_timer(record, expire):
             self._log(f"{prefix}claim timer expired (>{expire}s) — skipped")
             return False
+
+        needed_rt = allow_rt and self._state.claim_available is False
+        if needed_rt and not self._rt_can_still_pay_off(record, expire):
+            self._log(
+                f"{prefix}claim timer has under {_RT_ROUND_TRIP_FLOOR_SEC:g}s left — "
+                "not spending $rt on a claim that would expire mid-round-trip"
+            )
+            return False
+        if not await self._ensure_claim_slot(
+            prefix, allow_rt=allow_rt, character=record.character_name or ""
+        ):
+            self._log(f"{prefix}claim on cooldown — skipped")
+            return False
+        # $rt can take several seconds (tick + settle + response waits); refresh
+        # the roll's fields so a stale "can_claim"/"claimed" snapshot from before
+        # $rt doesn't cause a wrong skip or a click on an already-claimed roll.
+        if needed_rt:
+            await self._refresh_record_fields(record)
+            if record.fields.get("claimed"):
+                owner = record.fields.get("owner") or "someone else"
+                self._log(f"{prefix}already claimed by {owner} — skipped")
+                return False
+            if not record.fields.get("can_claim"):
+                self._log(f"{prefix}not claimable — skipped")
+                return False
+            if not is_within_claim_timer(record, expire):
+                self._log(f"{prefix}claim timer expired (>{expire}s) — skipped")
+                return False
         await self._try_claim(record)
         return True
 
@@ -152,12 +218,20 @@ class PostRollHandler:
         claimed the character, or Mudae may have disabled the button once its
         own claim timer elapsed.
         """
-        fresh = await self._actions.fetch_message_snapshot(record.message_id)
-        if fresh is None:
-            return
         from mudae.parsers.pipeline import parse_mudae_message
 
-        parsed = parse_mudae_message(fresh)
+        try:
+            fresh = await self._actions.fetch_message_snapshot(record.message_id)
+        except Exception as exc:  # noqa: BLE001 - a refetch must not kill a claim
+            self._log(f"Could not re-read the roll: {exc}")
+            return
+        if fresh is None:
+            return
+        try:
+            parsed = parse_mudae_message(fresh)
+        except Exception as exc:  # noqa: BLE001 - same: best-effort refresh only
+            self._log(f"Could not parse the re-read roll: {exc}")
+            return
         if parsed.fields.get("character_name") is None:
             return
         record.fields = dict(parsed.fields)
@@ -182,6 +256,18 @@ class PostRollHandler:
             return
         if self._state.claim_available is False:
             self._log(f"{len(records)} roll(s) this session; claim on cooldown")
+            return
+        # The open slot was bought with ``$rt`` for one specific character and
+        # that claim did not land. Spending it on whoever happens to be worth
+        # the most kakera this batch is not what the reset was for, and it also
+        # leaves the *next* wish this hour with no slot and no ``$rt``. Leaving
+        # it open costs nothing: it keeps until a claim uses it.
+        if self._state.rt_claim_slot_for:
+            self._log(
+                f"{len(records)} roll(s) this session; the open claim slot came "
+                f"from $rt spent on {self._state.rt_claim_slot_for} — keeping it "
+                "for a wish rather than claiming the best of this batch"
+            )
             return
 
         expire = self._claim_expire_sec()
@@ -235,7 +321,9 @@ class PostRollHandler:
         )
         await self._try_claim(best)
 
-    async def _ensure_claim_slot(self, prefix: str, *, allow_rt: bool = False) -> bool:
+    async def _ensure_claim_slot(
+        self, prefix: str, *, allow_rt: bool = False, character: str = ""
+    ) -> bool:
         if self._state.claim_available is not False:
             return True
         if not allow_rt:
@@ -243,9 +331,11 @@ class PostRollHandler:
         rules = self._config.character_claim
         if not rules.auto_use_rt or not has_rt_available(self._state):
             return False
-        return await self._try_use_rt(reason=prefix.rstrip(": "))
+        return await self._try_use_rt(
+            reason=prefix.rstrip(": "), character=character
+        )
 
-    async def _try_use_rt(self, *, reason: str = "") -> bool:
+    async def _try_use_rt(self, *, reason: str = "", character: str = "") -> bool:
         rules = self._config.character_claim
         if not rules.auto_use_rt or not has_rt_available(self._state):
             if rules.auto_use_rt:
@@ -287,6 +377,9 @@ class PostRollHandler:
             self._log("$rt: response did not open a claim slot — claim cancelled")
             return False
 
+        # Remember who the reset was bought for. If this claim then falls
+        # through, ``claim_best`` must not spend the slot on someone else.
+        self._state.rt_claim_slot_for = character or "a wish"
         self._log("$rt OK — claim slot available")
         return True
 
@@ -335,7 +428,45 @@ class PostRollHandler:
             self._log(f"Claim click failed for {name}")
         return clicked
 
+    def _owned_by_us(self, record: RollRecord) -> bool:
+        """Whether a re-read roll now says *we* own it."""
+        if not record.fields.get("claimed"):
+            return False
+        return username_matches_own(
+            record.fields.get("owner"), self._state.own_usernames
+        )
+
+    async def _claim_landed_silently(self, record: RollRecord) -> bool | None:
+        """Re-read the roll after a silent attempt.
+
+        ``True`` the claim landed and only the reply was lost, ``False`` it is
+        gone for good, ``None`` it is still there to try again.
+        """
+        await self._refresh_record_fields(record)
+        name = record.character_name or "?"
+        if self._owned_by_us(record):
+            self._log(f"Claim confirmed on {name} by re-reading the roll")
+            return True
+        if record.fields.get("claimed"):
+            owner = record.fields.get("owner") or "someone else"
+            self._log(f"{name} was claimed by {owner} — nothing to retry")
+            return False
+        if not record.fields.get("can_claim"):
+            self._log(f"Claim window closed on {name} — not retrying")
+            return False
+        if not is_within_claim_timer(record, self._claim_expire_sec()):
+            self._log(f"Claim timer ran out on {name} — not retrying")
+            return False
+        return None
+
     async def _try_claim(self, record: RollRecord) -> None:
+        """Claim one roll, retrying while the character is demonstrably still there.
+
+        A wish is claimed within a second or two of spawning, so a claim that
+        does not land is a lost click or a lost reply rather than an expired
+        window — and giving up on the first silence left the slot open for the
+        end-of-batch picker to spend on someone else.
+        """
         method = self._claim_method(record)
         if not method:
             if record.fields.get("claimed"):
@@ -350,12 +481,44 @@ class PostRollHandler:
                     "(claim button disabled)"
                 )
             return
-        if not await self._send_claim(record, method):
-            return
-        parsed = await self._actions.wait_for_claim(timeout=8.0)
-        if parsed is None:
-            self._log(f"Claim timeout for {record.character_name or '?'}")
-            return
+
+        name = record.character_name or "?"
+        for attempt in range(1, _CLAIM_ATTEMPTS + 1):
+            if attempt > 1:
+                pause = _CLAIM_RETRY_PAUSES_SEC[attempt - 2]
+                self._log(
+                    f"Retrying claim on {name} in {pause:g}s "
+                    f"({attempt}/{_CLAIM_ATTEMPTS})"
+                )
+                await asyncio.sleep(pause)
+
+            sent = await self._send_claim(record, method)
+            parsed = (
+                await self._actions.wait_for_claim(timeout=_CLAIM_REPLY_TIMEOUT_SEC)
+                if sent
+                else None
+            )
+            if parsed is not None:
+                await self._handle_claim_reply(record, parsed)
+                return
+
+            if sent:
+                self._log(f"Claim timeout for {name} — checking whether it landed")
+            landed = await self._claim_landed_silently(record)
+            if landed is True:
+                # The click was paid for; treat the slot as spent so nothing
+                # else in this batch tries to claim on top of it.
+                self._state.claim_available = False
+                self._state.rt_claim_slot_for = ""
+                return
+            if landed is False:
+                return
+            # Still claimable: the button was re-read, so its ids are current.
+            method = self._claim_method(record) or method
+
+        self._log(f"Gave up claiming {name} after {_CLAIM_ATTEMPTS} attempts")
+
+    async def _handle_claim_reply(self, record: RollRecord, parsed: Any) -> None:
         if parsed.kind == MessageKind.CLAIM_INTERVAL:
             # This *is* the same claim slot tracked by `claim_available` /
             # `claim_cooldown_minutes` (normally refreshed from `$tu`) — the
@@ -366,6 +529,7 @@ class PostRollHandler:
             # into the same wall on the next roll in this batch.
             minutes = parsed.fields.get("next_interval_minutes")
             self._state.claim_available = False
+            self._state.rt_claim_slot_for = ""
             self._state.set_claim_cooldown(minutes)
             wait_note = f" — next in {minutes}m" if minutes is not None else ""
             self._log(
@@ -378,5 +542,6 @@ class PostRollHandler:
         # The claim slot is now spent — stop further claim attempts this session
         # (next $tu refreshes the real cooldown).
         self._state.claim_available = False
+        self._state.rt_claim_slot_for = ""
         record.fields["claimed"] = True
         self._log(f"Claimed {character} ({winner})")

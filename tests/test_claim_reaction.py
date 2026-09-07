@@ -179,16 +179,36 @@ def test_a_failed_reaction_does_not_count_as_a_claim():
     actions = AsyncMock()
     actions.add_reaction = AsyncMock(return_value=False)
     actions.wait_for_claim = AsyncMock(return_value=_claim_reply())
+    # Nothing to re-read, so the retry loop cannot confirm the reaction landed.
+    actions.fetch_message_snapshot = AsyncMock(return_value=None)
 
     handler, state, logs = _handler(actions)
     record = _react_record()
 
     asyncio.run(handler.claim_record(record, reason="test"))
 
+    # A send that never left is not waited on — there is no reply coming.
     actions.wait_for_claim.assert_not_awaited()
     assert record.fields.get("claimed") is not True
     assert state.claim_available is not False
     assert any("reaction failed" in line.lower() for line in logs)
+
+
+def test_a_failed_reaction_is_retried_while_the_roll_is_still_there():
+    """A lost react is a transport blip, not a lost character."""
+    actions = AsyncMock()
+    actions.add_reaction = AsyncMock(side_effect=[False, True])
+    actions.wait_for_claim = AsyncMock(return_value=_claim_reply())
+    actions.fetch_message_snapshot = AsyncMock(return_value=None)
+
+    handler, state, logs = _handler(actions)
+    record = _react_record()
+
+    asyncio.run(handler.claim_record(record, reason="test"))
+
+    assert actions.add_reaction.await_count == 2
+    assert state.claim_available is False
+    assert any("Retrying claim" in line for line in logs)
 
 
 def test_button_rolls_are_still_clicked_not_reacted_to():
