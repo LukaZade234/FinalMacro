@@ -50,6 +50,7 @@ Item {
                 case "haul": return haulShell
                 case "console": return consoleShell
                 case "boxed": return boxedShell
+                case "quiet": return quietShell
                 default: return classicShell
                 }
             }
@@ -78,6 +79,13 @@ Item {
             Component {
                 id: boxedShell
                 BoxedShell {
+                    currentPage: switcher.currentPage
+                    onNavigate: function(index) { switcher.currentPage = index }
+                }
+            }
+            Component {
+                id: quietShell
+                QuietShell {
                     currentPage: switcher.currentPage
                     onNavigate: function(index) { switcher.currentPage = index }
                 }

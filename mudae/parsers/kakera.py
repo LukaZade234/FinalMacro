@@ -82,11 +82,35 @@ def _parse_claim_tail(content: str) -> tuple[str | None, int | None]:
     return None, None
 
 
+# Mudae's announcement on the **last** perk-8 click of the day: the perk stops
+# halving the power cost and starts doubling kakera instead. Anchored on the
+# ``($op 8)`` tag together with "for today" — the tag alone also appears on the
+# ordinary ``+30`` perk-8 bonus, and the sentence between them is full of custom
+# emoji that do not survive as text.
+_PERK8_FINAL_RE = re.compile(
+    r"\(\s*\$op\s*8\s*\).*?\bfor today\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def is_perk8_final_click(content: str) -> bool:
+    """True when this kakera claim says perk 8's daily clicks are now spent.
+
+    Treated as a *reason to re-check*, never as the count itself: the macro
+    answers it by sending ``$ohu8`` and believing Mudae, because a message that
+    the parser half-recognises is a bad thing to overwrite a budget with.
+    """
+    return bool(content) and _PERK8_FINAL_RE.search(content) is not None
+
+
 def parse_kakera_claim(content: str) -> ParseResult:
     warnings: list[str] = []
     fields: dict[str, Any] = {}
 
     fields["earn_method"] = "kakera_click"
+
+    if is_perk8_final_click(content):
+        fields["perk8_final_click"] = True
 
     kakera_type = _parse_source_kakera_type(content)
     if kakera_type:

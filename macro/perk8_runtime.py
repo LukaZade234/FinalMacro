@@ -86,13 +86,16 @@ def opportunistic_decision(
     *,
     pending: bool,
     commands_blocked: bool,
+    recheck: bool = False,
 ) -> Perk8Action:
     """Whether a mid-session check should re-query, use the cache, or defer.
 
     ``pending`` carries a refresh that an earlier check could not perform because
-    the gateway was down.
+    the gateway was down. ``recheck`` is `macro/perk8_recheck.py` saying the
+    count looks wrong — the record's own gates only fire on exhaustion or a
+    passed refill, neither of which a merely *stale* count ever trips.
     """
-    if not (pending or should_query_ohu8_on_refill(record)):
+    if not (pending or recheck or should_query_ohu8_on_refill(record)):
         return Perk8Action.USE_CACHED
     if commands_blocked:
         return Perk8Action.DEFER
@@ -342,6 +345,8 @@ class Perk8Runtime:
         await ctx.sleep(OHU8_SETTLE_SEC)
         parsed = await ctx.actions.wait_for_ohu8(timeout=self._response_timeout)
         if parsed is None:
+            # The flags stay set: nothing was learned, so the next poll should
+            # try again rather than sit on the same wrong count.
             ctx.log("$ohu8 timeout — using preset budget rules")
             ctx.state.perk8_priority_mode = Perk8PriorityMode.ACTIVE.value
             if self._on_idle:
@@ -349,6 +354,9 @@ class Perk8Runtime:
             ctx.notify()
             return
 
+        from macro.perk8_recheck import clear_recheck_flags
+
+        clear_recheck_flags(ctx.state)
         record, mode = update_record_from_ohu8(record, parsed.fields)
         refresh_exhausted_if_refill_passed(record)
         daily = save_perk8_record(daily, record)
@@ -378,17 +386,48 @@ class Perk8Runtime:
             self._on_idle()
         ctx.notify()
 
+    def observe_power(self) -> bool:
+        """Sample whether the bar is pinned, and keep the "since" clock honest.
+
+        Called from the same poll that decides on a re-query, so the elapsed
+        time it produces is measured on the loop that acts on it.
+        """
+        from macro.perk8_power import hoarding_wastes_power
+        from macro.perk8_recheck import note_power_level
+
+        rules = self._ctx.config.kakera_rules_for_roll(us_roll=False)
+        pinned = hoarding_wastes_power(self._ctx.state, rules)
+        note_power_level(self._ctx.state, pinned=pinned)
+        return pinned
+
+    def recheck_reason(self, *, power_pinned: bool | None = None):
+        """Why the stored count looks wrong, if it does."""
+        from macro.perk8_power import remaining_perk8_clicks
+        from macro.perk8_recheck import perk8_recheck_reason
+
+        state = self._ctx.state
+        pinned = self.observe_power() if power_pinned is None else power_pinned
+        return perk8_recheck_reason(
+            state,
+            remaining=remaining_perk8_clicks(state),
+            power_pinned=pinned,
+        )
+
     async def maybe_refresh(self) -> Perk8Action:
-        """Re-query ``$ohu8`` on refill or a deferred refresh."""
+        """Re-query ``$ohu8`` on refill, a deferred refresh, or a bad-looking count."""
         if not self.budget_mode:
             return Perk8Action.DISABLED
 
         _daily, record = self._load_refreshed()
+        reason = self.recheck_reason()
         action = opportunistic_decision(
             record,
             pending=self._pending,
             commands_blocked=self._ctx.commands_blocked,
+            recheck=reason is not None,
         )
+        if reason is not None and action is Perk8Action.QUERY:
+            self._ctx.log(f"$ohu8 re-check: {reason.detail}")
 
         if action is Perk8Action.USE_CACHED:
             self.apply_mode(apply_cached_perk8(record), record)

@@ -342,6 +342,47 @@ def window_sec_from_rules(rules: Any) -> float:
     return hours * 3600.0
 
 
+def bar_is_pinned(snap: PowerSnapshot, *, normal_cost: float) -> bool:
+    """True when the power bar is within one paid click of its cap.
+
+    Regen stops accruing at the cap, so a bar this full is **losing** power
+    every minute it is not spent. That makes it the one condition under which
+    hoarding perk-8 slots is worse than spending one: the hoard is no longer
+    free, and the thing it is saving for may never arrive.
+
+    Reported 2026-09-07: a stale ``$ohu8`` left the macro believing two perk-8
+    clicks remained when Mudae had none. `rule_eval` skips every paid non-perk-8
+    roll while saving, and the default bypass colour (purple) costs no power, so
+    nothing drained the bar for the ~21 hours until the next refill — power sat
+    at the cap and two ``$dk`` went unspent.
+    """
+    cost = max(0.0, float(normal_cost))
+    if cost <= 0:
+        return False
+    return float(snap.power) >= float(snap.max_power) - cost
+
+
+def hoarding_wastes_power(
+    state: Any,
+    rules: Any,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """True when saving perk-8 slots is costing more power than it protects.
+
+    The saver is right to hoard while the bar has room: a perk-8 click is half
+    price, so a slot spent on an ordinary roll is a slot wasted. It stops being
+    right once the bar is full, because then the wait itself has a price.
+    """
+    if not power_save_enabled(rules):
+        return False
+    stamp = now or utc_now()
+    snap = snapshot_from_state(state, now=stamp)
+    if getattr(state, "power_percent", None) is None:
+        return False
+    return bar_is_pinned(snap, normal_cost=snap.normal_cost)
+
+
 def remaining_perk8_clicks(state: Any) -> int:
     mode = str(getattr(state, "perk8_priority_mode", "") or "")
     if mode == "done":

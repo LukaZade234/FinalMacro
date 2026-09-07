@@ -61,10 +61,22 @@ Rectangle {
 
     implicitHeight: bar.implicitHeight + Theme.cardPadding * 2
     Layout.fillWidth: true
-    color: Theme.surface
-    border.width: Theme.borderWidth
+    color: Theme.panelFill
+    border.width: Theme.panelBorder
     border.color: Theme.line
-    radius: Theme.radiusMd
+    radius: Theme.panelRadius
+
+    // A flat design rules the scope off *below* rather than boxing it: the bar
+    // is the page's heading, and a rule under a heading is what the rest of the
+    // design does.
+    Rectangle {
+        visible: Theme.flatPanels
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 1
+        color: Theme.line
+    }
 
     function indexOfId(list, wanted) {
         for (var i = 0; i < (list || []).length; i++) {

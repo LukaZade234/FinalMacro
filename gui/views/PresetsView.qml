@@ -22,7 +22,7 @@ Item {
     property int activeSection: 0
 
     readonly property var sectionLabels: [
-        "Rolling", "Claims", "Reactions", "$us", "Expert"
+        "Rolling", "Claims", "Kakera", "Spheres", "$us", "Expert"
     ]
 
     readonly property var kakeraOptions: [
@@ -492,137 +492,135 @@ Item {
                     }
                 }
 
-                // ---- Reactions ----
+                // ---- Kakera ----
                 ScrollablePage {
-                    id: reactionsPage
+                    id: kakeraReactionPage
 
-                    GridLayout {
+                    RuleBlockCard {
                         Layout.fillWidth: true
-                        columns: reactionsPage.contentWidth >= 900 ? 2 : 1
-                        columnSpacing: 12
-                        rowSpacing: 12
+                        title: "Kakera reaction"
+                        subtitle: (rules.kakera_reaction && rules.kakera_reaction.enabled)
+                            ? "Click kakera buttons on rolls that pass these filters."
+                            : "Kakera buttons will not be clicked."
+                        enabled_: rules.kakera_reaction ? rules.kakera_reaction.enabled : false
+                        onEnabledToggled: function(value) { patch("kakera_reaction", "enabled", value) }
 
-                        RuleBlockCard {
+                        ColorChipPicker {
                             Layout.fillWidth: true
-                            title: "Kakera reaction"
-                            subtitle: (rules.kakera_reaction && rules.kakera_reaction.enabled)
-                                ? "Click kakera buttons on rolls that pass these filters."
-                                : "Kakera buttons will not be clicked."
-                            enabled_: rules.kakera_reaction ? rules.kakera_reaction.enabled : false
-                            onEnabledToggled: function(value) { patch("kakera_reaction", "enabled", value) }
-
-                            ColorChipPicker {
-                                Layout.fillWidth: true
-                                title: "Kakera colors (none = any)"
-                                options: kakeraOptions
-                                selected: rules.kakera_reaction ? (rules.kakera_reaction.types_allowed || []) : []
-                                onSelectionChanged: function(ids) {
-                                    patch("kakera_reaction", "types_allowed", ids)
-                                }
-                            }
-
-                            ThemedCheckBox {
-                                Layout.fillWidth: true
-                                text: "Use $dk when reaction power runs out"
-                                checked: rules.kakera_reaction ? !!rules.kakera_reaction.auto_use_dk : false
-                                onToggled: patch("kakera_reaction", "auto_use_dk", checked)
-                            }
-
-                            ThemedCheckBox {
-                                Layout.fillWidth: true
-                                text: "Require chaos key"
-                                checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_chaos_key : false
-                                onToggled: patch("kakera_reaction", "require_chaos_key", checked)
-                            }
-
-                            ColorChipPicker {
-                                Layout.fillWidth: true
-                                visible: rules.kakera_reaction && !!rules.kakera_reaction.require_chaos_key
-                                title: "Ignore chaos key requirement for"
-                                options: kakeraOptions
-                                selected: rules.kakera_reaction
-                                    ? (rules.kakera_reaction.require_chaos_key_bypass_types || ["kakeraP"])
-                                    : ["kakeraP"]
-                                onSelectionChanged: function(ids) {
-                                    patch("kakera_reaction", "require_chaos_key_bypass_types", ids)
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Label {
-                                    text: "Advanced kakera options"
-                                    color: Theme.fgSecondary
-                                    font.pixelSize: 11
-                                    Layout.fillWidth: true
-                                }
-
-                                ThemedSwitch {
-                                    checked: presetsRoot.showAdvancedKakera
-                                    onToggled: presetsRoot.showAdvancedKakera = checked
-                                }
-                            }
-
-                            KakeraAdvancedPanel {
-                                Layout.fillWidth: true
-                                visible: presetsRoot.showAdvancedKakera
-                                rules: presetsRoot.rules
-                                kakeraOptions: presetsRoot.kakeraOptions
-                                onPatch: function(block, key, value) {
-                                    presetsRoot.patch(block, key, value)
-                                }
-                                onPatchLowPower: function(key, value) {
-                                    presetsRoot.patchLowPower(key, value)
-                                }
-                                onSetLowPowerEnabled: function(on) {
-                                    presetsRoot.setLowPowerEnabled(on)
-                                }
+                            title: "Kakera colors (none = any)"
+                            options: kakeraOptions
+                            selected: rules.kakera_reaction ? (rules.kakera_reaction.types_allowed || []) : []
+                            onSelectionChanged: function(ids) {
+                                patch("kakera_reaction", "types_allowed", ids)
                             }
                         }
 
-                        RuleBlockCard {
+                        ThemedCheckBox {
                             Layout.fillWidth: true
-                            title: "Sphere reaction"
-                            subtitle: (rules.sphere_reaction && rules.sphere_reaction.enabled)
-                                ? "Click sphere buttons matching the filter."
-                                : "Sphere buttons will not be clicked."
-                            enabled_: rules.sphere_reaction ? rules.sphere_reaction.enabled : false
-                            onEnabledToggled: function(value) { patch("sphere_reaction", "enabled", value) }
+                            text: "Use $dk when reaction power runs out"
+                            checked: rules.kakera_reaction ? !!rules.kakera_reaction.auto_use_dk : false
+                            onToggled: patch("kakera_reaction", "auto_use_dk", checked)
+                        }
 
-                            // Budget mode picks colours from the EV bar instead,
-                            // so the list is inert — greyed rather than hidden,
-                            // so turning budget mode off restores a visible one.
-                            ColorChipPicker {
-                                Layout.fillWidth: true
-                                title: "Sphere colors (none = any)"
-                                options: sphereOptions
-                                enabled: !(rules.sphere_reaction && rules.sphere_reaction.budget_aware)
-                                opacity: enabled ? 1.0 : 0.45
-                                selected: rules.sphere_reaction ? (rules.sphere_reaction.types_allowed || []) : []
-                                onSelectionChanged: function(ids) {
-                                    patch("sphere_reaction", "types_allowed", ids)
-                                }
+                        ThemedCheckBox {
+                            Layout.fillWidth: true
+                            text: "Require chaos key"
+                            checked: rules.kakera_reaction ? !!rules.kakera_reaction.require_chaos_key : false
+                            onToggled: patch("kakera_reaction", "require_chaos_key", checked)
+                        }
+
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            visible: rules.kakera_reaction && !!rules.kakera_reaction.require_chaos_key
+                            title: "Ignore chaos key requirement for"
+                            options: kakeraOptions
+                            selected: rules.kakera_reaction
+                                ? (rules.kakera_reaction.require_chaos_key_bypass_types || ["kakeraP"])
+                                : ["kakeraP"]
+                            onSelectionChanged: function(ids) {
+                                patch("kakera_reaction", "require_chaos_key_bypass_types", ids)
                             }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
 
                             Label {
+                                text: "Advanced kakera options"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
                                 Layout.fillWidth: true
-                                visible: !!(rules.sphere_reaction && rules.sphere_reaction.budget_aware)
-                                text: "The EV bar picks colours in budget mode — this list is ignored."
-                                color: Theme.fgMuted
-                                font.pixelSize: 10
-                                wrapMode: Text.WordWrap
                             }
 
-                            Perk9BudgetPanel {
-                                Layout.fillWidth: true
-                                Layout.topMargin: 6
-                                rules: presetsRoot.rules.sphere_reaction || null
-                                presetId: presetsRoot.editingPresetId
-                                onFieldChanged: function(key, value) {
-                                    presetsRoot.patch("sphere_reaction", key, value)
-                                }
+                            ThemedSwitch {
+                                checked: presetsRoot.showAdvancedKakera
+                                onToggled: presetsRoot.showAdvancedKakera = checked
+                            }
+                        }
+
+                        KakeraAdvancedPanel {
+                            Layout.fillWidth: true
+                            visible: presetsRoot.showAdvancedKakera
+                            rules: presetsRoot.rules
+                            kakeraOptions: presetsRoot.kakeraOptions
+                            onPatch: function(block, key, value) {
+                                presetsRoot.patch(block, key, value)
+                            }
+                            onPatchLowPower: function(key, value) {
+                                presetsRoot.patchLowPower(key, value)
+                            }
+                            onSetLowPowerEnabled: function(on) {
+                                presetsRoot.setLowPowerEnabled(on)
+                            }
+                        }
+                    }
+                }
+
+                // ---- Spheres ----
+                ScrollablePage {
+                    id: sphereReactionPage
+
+                    RuleBlockCard {
+                        Layout.fillWidth: true
+                        title: "Sphere reaction"
+                        subtitle: (rules.sphere_reaction && rules.sphere_reaction.enabled)
+                            ? "Click sphere buttons matching the filter."
+                            : "Sphere buttons will not be clicked."
+                        enabled_: rules.sphere_reaction ? rules.sphere_reaction.enabled : false
+                        onEnabledToggled: function(value) { patch("sphere_reaction", "enabled", value) }
+
+                        // Budget mode picks colours from the EV bar instead,
+                        // so the list is inert — greyed rather than hidden,
+                        // so turning budget mode off restores a visible one.
+                        ColorChipPicker {
+                            Layout.fillWidth: true
+                            title: "Sphere colors (none = any)"
+                            options: sphereOptions
+                            enabled: !(rules.sphere_reaction && rules.sphere_reaction.budget_aware)
+                            opacity: enabled ? 1.0 : 0.45
+                            selected: rules.sphere_reaction ? (rules.sphere_reaction.types_allowed || []) : []
+                            onSelectionChanged: function(ids) {
+                                patch("sphere_reaction", "types_allowed", ids)
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            visible: !!(rules.sphere_reaction && rules.sphere_reaction.budget_aware)
+                            text: "The EV bar picks colours in budget mode — this list is ignored."
+                            color: Theme.fgMuted
+                            font.pixelSize: 10
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Perk9BudgetPanel {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 6
+                            rules: presetsRoot.rules.sphere_reaction || null
+                            presetId: presetsRoot.editingPresetId
+                            onFieldChanged: function(key, value) {
+                                presetsRoot.patch("sphere_reaction", key, value)
                             }
                         }
                     }

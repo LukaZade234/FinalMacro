@@ -272,27 +272,43 @@ Item {
                             { id: "account", label: "By account" },
                             { id: "server", label: "By server" }
                         ]
-                        delegate: Rectangle {
+                        delegate: Item {
                             required property var modelData
+                            readonly property bool on: !chartServerFocus && chartMode === modelData.id
 
                             implicitHeight: 28
-                            implicitWidth: chipLabel.implicitWidth + 18
-                            radius: 14
-                            color: !chartServerFocus && chartMode === modelData.id
-                                   ? Theme.accentPrimary : Theme.bgDark
-                            border.color: !chartServerFocus && chartMode === modelData.id
-                                          ? Theme.accentPrimary : Theme.border
-                            border.width: 1
+                            implicitWidth: chipLabel.implicitWidth + (Theme.flatPanels ? 6 : 18)
+
+                            Rectangle {
+                                visible: !Theme.flatPanels
+                                anchors.fill: parent
+                                radius: 14
+                                color: parent.on ? Theme.accentPrimary : Theme.bgDark
+                                border.color: parent.on ? Theme.accentPrimary : Theme.border
+                                border.width: 1
+                            }
+
+                            // Quiet marks the active mode with an accent
+                            // underline instead of a filled pill, the same
+                            // mark every other selector in this design uses.
+                            Rectangle {
+                                visible: Theme.flatPanels && parent.on
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: 1
+                                color: Theme.accent
+                            }
 
                             Label {
                                 id: chipLabel
                                 anchors.centerIn: parent
                                 text: modelData.label
-                                color: !chartServerFocus && chartMode === modelData.id
-                                       ? Theme.bgDark : Theme.fgSecondary
+                                color: Theme.flatPanels
+                                       ? (parent.on ? Theme.fg : Theme.mute)
+                                       : (parent.on ? Theme.bgDark : Theme.fgSecondary)
                                 font.pixelSize: 11
-                                font.weight: !chartServerFocus && chartMode === modelData.id
-                                             ? Font.DemiBold : Font.Normal
+                                font.weight: parent.on ? Font.DemiBold : Font.Normal
                             }
 
                             MouseArea {

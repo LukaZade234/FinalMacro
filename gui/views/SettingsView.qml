@@ -271,7 +271,7 @@ Item {
 
                 Label {
                     Layout.fillWidth: true
-                    text: "• Accounts — Discord tokens and enabled channels\n• Servers — channel IDs and Mudae $settings / $bonus\n• Presets — roll and claim behavior\n• Run — pick account + channel + preset, then Connect"
+                    text: "• Accounts — Discord tokens and enabled channels\n• Servers — channel IDs\n• Mudae — the parsed $settings / $ov / $bonus sheets\n• Presets — roll and claim behavior\n• Run — pick account + channel + preset, then Connect"
                     color: Theme.fgSecondary
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap

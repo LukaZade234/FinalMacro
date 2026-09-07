@@ -167,7 +167,8 @@ without disturbing a live run.
   another account's sheet under the Run target's.
 - ~~**One `MudaeSheetPanel`**~~ — replaced three copy-pasted display panels and
   reads `Theme` sizes instead of hardcoded pixels.
-- ~~**Mudae hub**~~ — `$settings` (with drift + copy, moved out of Servers) /
+- ~~**Mudae hub**~~ — `$settings` (the parsed sheet only; the drift + copy
+  editor is unmounted, see `ARCHITECTURE.md`) /
   `$ov` (the player's own settings) / `$bonus`. Grouped by what a sheet *is*:
   `$settings` and `$ov` are configurable and copyable between servers, `$bonus`
   is what they and the account's perks add up to.
@@ -441,3 +442,43 @@ The guide is a fair transcription of their published “How it works” pages. S
 Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` in wave 5). Perk 9 and `$bw` are both done, and both did exactly this — read stored `$bonus` fields rather than becoming parser projects.
 
 Public Python references if a port stalls: [Svessinn/Mudae](https://github.com/Svessinn/Mudae) (all four games + sims), [GAP22/oq-solver](https://github.com/GAP22/oq-solver), [mudae-sphere-solver](https://github.com/ShrimpandGGrits/mudae-sphere-solver). Colblitz itself is server-side — no client JS to read.
+
+---
+
+## Quiet shell (2026-09-07)
+
+- ~~**Quiet design**~~ — `gui/shells/Quiet*.qml` + the `flatPanels` skin token.
+  The restyle reaches every page through `components/PanelCard.qml` rather than
+  a parallel set of views, so Report keeps all ten tiles, Presets keeps its list
+  and its five sections, and Debug keeps its two panes. Mockup:
+  `docs/mockups/quiet-tabs.html`.
+- ~~**Registering a shell touched three places and needed four**~~ — Settings
+  lists designs from `gui/skins.js` while `_UI_LAYOUTS` in `gui/bridge.py`
+  decides which may be stored, so Quiet appeared in the picker and selecting it
+  did nothing, silently. `tests/test_appearance.py` now reads `skins.js`,
+  `palettes.js`, `ShellSwitcher.qml`, `ui_preview.py` and the bridge and fails
+  when they drift.
+- ~~**`$settings` / `$bonus` shown in two places**~~ — the duplicate parsed
+  panels are off Servers; Mudae is the one place the sheets are read.
+- **Still open on Quiet:** the Mudae `$settings` editor (drift / preset / diff /
+  dry run / apply) is unmounted and wants a deliberate home — it changes a live
+  server, unlike everything else on that page. `views/MudaeSettingsView.qml` and
+  its whole pipeline are intact. The perk-9 sphere row on the Quiet Run page has
+  not been seen with live data; the previews all run disconnected.
+
+## Perk-8 stale count (2026-09-07)
+
+- ~~**A wrong perk-8 count wedged the reactor for a night**~~ — `38/40` stored
+  against Mudae's `40/40`; the re-query gate only fires on exhaustion or a
+  passed refill, so nothing could correct it for ~21 hours. Fixed two ways:
+  the hoard now opens when the power bar is pinned (`perk8_power.bar_is_pinned`),
+  and `macro/perk8_recheck.py` re-sends `$ohu8` on Mudae's own last-click line,
+  on two hours without a perk-8 character, or on ten minutes of pinned power.
+- ~~**Run showed 21 rolls against a real pool of 83**~~ — `macroRollsMax` read
+  `channel.bonus`, the pre-split blob that `apply_parsed` clears once a sheet is
+  filed per account. Now goes through `account_sheet`.
+- **Not diagnosed:** *why* the count drifted by two. Two perk-8 clicks were not
+  counted — mis-attributed, or made outside the macro. The fallbacks make it
+  survivable rather than impossible; `data/events.jsonl` would say which if it
+  recurs. Deliberately skipped: a plain time-based re-query (an `$ohu8` every
+  hour regardless), to keep the command rare.

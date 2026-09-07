@@ -26,6 +26,7 @@ from macro.perk8_power import (
     power_save_enabled,
     remaining_perk8_clicks,
     seconds_until_midnight,
+    hoarding_wastes_power,
     should_spend_paid_non_perk8,
     snapshot_from_state,
     window_sec_from_rules,
@@ -321,6 +322,14 @@ def passes_kakera_reaction(
 
     # While clicks remain, skip non-perk-8 rolls except bypass types (purple by
     # default). Once the daily quota is used, fall through to equal clicking.
+    #
+    # The exception is a **pinned bar**. Hoarding a slot is free only while the
+    # bar still has room to fill; at the cap the wait costs regen every minute,
+    # and if the belief that slots remain is wrong nothing will ever spend it.
+    # So a full bar hands the decision to `_filter_perk8_power_reserve` below,
+    # which reserves exactly what the remaining perk-8 clicks need and no more.
+    if saving and not fields.get("perk_8") and hoarding_wastes_power(state, rules, now=now):
+        saving = False
     if saving and not fields.get("perk_8"):
         bypass = perk8_budget_bypass_types(rules)
         bypass_selected = [b for b in selected if _kakera_emoji(b) in bypass]

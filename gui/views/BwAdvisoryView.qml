@@ -185,14 +185,24 @@ Item {
             Layout.fillWidth: true
             implicitHeight: 46
             // Matches `components/PanelCard.qml` so it sits level with every
-            // other panel on the page in all four shells.
-            color: Theme.bgMedium
-            border.width: 1
+            // other panel on the page in every shell — including the flat one,
+            // where a panel is a rule rather than a box.
+            color: Theme.flatPanels ? "transparent" : Theme.bgMedium
+            border.width: Theme.flatPanels ? 0 : 1
             border.color: Theme.border
-            radius: Theme.radiusLg
+            radius: Theme.flatPanels ? 0 : Theme.radiusLg
 
             Rectangle {
-                visible: Theme.doubleBorder
+                visible: Theme.flatPanels
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: Theme.line
+            }
+
+            Rectangle {
+                visible: Theme.doubleBorder && !Theme.flatPanels
                 anchors.fill: parent
                 anchors.margins: 2
                 radius: Theme.radiusLg
@@ -351,6 +361,7 @@ Item {
 
                 delegate: Rectangle {
                     required property var modelData
+                    required property int index
 
                     readonly property bool pending: modelData.bw === null
                     readonly property bool onIt: !pending
@@ -364,15 +375,29 @@ Item {
                     // is 3px in Boxed, and against panels that rule themselves at
                     // 1px these read as a heavier, misaligned box. Only the border
                     // *colour* carries the card's identity.
-                    color: Theme.bgMedium
-                    radius: Theme.radiusLg
-                    border.width: 1
+                    color: Theme.flatPanels ? "transparent" : Theme.bgMedium
+                    radius: Theme.flatPanels ? 0 : Theme.radiusLg
+                    border.width: Theme.flatPanels ? 0 : 1
                     border.color: pending ? Theme.border : modelData.accent
+
+                    // Flat designs separate the three with a vertical rule and
+                    // let the *number* carry each one's colour, since there is
+                    // no box left to tint.
+                    Rectangle {
+                        visible: Theme.flatPanels && parent.index > 0
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.topMargin: 2
+                        anchors.bottomMargin: 2
+                        width: 1
+                        color: Theme.line
+                    }
 
                     // Boxed rules its panels twice; a single stroke here would
                     // sit a rule short of everything around it.
                     Rectangle {
-                        visible: Theme.doubleBorder
+                        visible: Theme.doubleBorder && !Theme.flatPanels
                         anchors.fill: parent
                         anchors.margins: 2
                         radius: Theme.radiusLg

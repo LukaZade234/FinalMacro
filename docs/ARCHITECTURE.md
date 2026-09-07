@@ -61,7 +61,7 @@ FinalMacro/
 | `settings.py` | Load/save `data/settings.json` |
 | `import_legacy.py` | Import old MudaeBot `Account_info.json` / `presets.json` |
 | `fonts.py` | Register Space Grotesk + IBM Plex Mono before QML loads |
-| `shells/` | Classic / Haul / Console / Boxed chrome + per-design Run pages |
+| `shells/` | Classic / Haul / Console / Boxed / Quiet chrome + per-design Run pages |
 | `views/` | Shared pages (Settings, Accounts, Servers, Presets, Mudae, stats, …) |
 | `views/AdvisorView.qml` | **Advisor hub** — `$bw` / Key EV / Wishlist / Lists / Formatter. Every sub-page states its evidence, and abstains rather than asserting where the data does not support an answer. `MudaeListsView` is still an empty `Item`; the rest are built |
 | `views/BwAdvisoryView.qml` | **Advisor › `$bw`** — the rolls-against-wish-spawns sweep from `macro/bw_calc.py`. Ordered by what the page is for: the character picker and the **three optimal `$bw`** (whole wishlist / starwishes / selected character) lead, the sweep table sits beside its curve, and the inputs and evidence — both set once — sit at the bottom. The old headline tiles are reduced to one muted strip beside the picker, since they are context for the peaks rather than answers. Fetch buttons are in the body rather than the scope bar, because it reads four sheets and the bar has one slot. It never sends `$bw` |
@@ -71,6 +71,7 @@ FinalMacro/
 | `views/AppWishlistView.qml` | **Advisor › Wishlist** — the app-only character/series list the macro claims from, with the Global-vs-per-pair toggle. Two `components/WishlistSection.qml` columns; a match claims via the wish-ping path (`macro/wishlist.py`, `gui/wishlist_store.py`) |
 | `views/SpheresHubView.qml` | **Spheres hub** — Stock & shop / Upgrades / Characters. Current state and decisions; sphere *history* stays on Statistics › Spheres |
 | `views/MudaeOvView.qml` | **Mudae › `$ov`** — the player's sheet beside a `$limroul` card, because `$ov`'s own last bullet is the pointer to it. Both are read-only and neither is ever sent unprompted |
+| `views/MudaeSettingsSheetView.qml` | **Mudae › `$settings`** — the parsed sheet and nothing else, shown the way `$ov` and `$bonus` are. The drift / preset / diff / dry-run / apply machinery is `views/MudaeSettingsView.qml`, **no longer mounted anywhere**: its pipeline (`macro/settings_apply.py`, `mudae/settings_commands.py` and their tests) is intact and the page returns by mounting it here. Editing a server's settings sends commands that change the live server, which wants a deliberate return rather than riding beside the read-only view |
 | `views/MudaeView.qml` | **Mudae hub** — `ScopeBar` + pills over a `Loader`, same shape as `StatisticsView`. Sub-pages `MudaeSettingsSheetView` (`$settings` + drift + copy), `MudaeOvView` (`$ov`, the player's own settings), `MudaeBonusView` |
 | `components/ScopeBar.qml` | Account + channel picker that starts on the Run target then detaches, so a page can read account B while account A rolls. Unlike `ServerChannelSelectors` it never moves the Run target. `fetchCommand` puts that page's fetch button on the right of the bar |
 | `components/ScopeFetchButton.qml` | The fetch button in the scope bar. Never disabled for being disconnected — it takes the temporary route — only for the macro being busy, and it names which |
@@ -108,6 +109,7 @@ Statistics, Debug, Settings. (`Utilities` was absorbed into Advisor.) Boxed's `a
 | `us_stop.py` | `$us` drain policy and stop / pause options (roll cap, reaction power, Mudae's hourly key limit, local schedule) |
 | `us_schedule.py` | Local-time window for automatic `$us` (separate from Roll `$us`) |
 | `perk8_daily.py` / `perk8_runtime.py` | Daily perk-8 budget |
+| `perk8_recheck.py` | Three reasons to distrust the stored perk-8 count and re-send `$ohu8`: Mudae's own `($op 8) … for today` last-click line, two hours with no perk-8 character, or a power bar pinned at its cap for ten minutes. All three are reasons to **ask** — Mudae's number wins. The count is also made survivable when wrong: `perk8_power.bar_is_pinned` stops the hoard once the bar is full, since hoarding is only free while there is room to fill. See the `$ohu8` note in `MUDAE_LOGIC.md` |
 | `perk9_daily.py` | Daily perk-9 click counter; the per-account spawn rate learned from ordinary rolling (`$us` excluded), kept per day over a trailing 2 weeks |
 | `advisor.py` | Assembles `$bonus` / `$settings` / `$shop` / `$wl` / `$ov` / `$limroul` into the `$bw` sweep — `$ov` supplying `$persrare` and `$limroul` the base pool, the two inputs the page otherwise takes as typed numbers — reports per-sheet readiness so a page can offer the missing fetch, and prices keys (chaos only — it discounts reaction power; claim keys report their rate and abstain on value) |
 | `bw_calc.py` | The `$bw` sweep itself, pure and sheet-free: the published tier tables, the spawn-weight model, the `$persrare` correction, the 2,200/hour key cap, and the guards that abstain when `$bonus` and the tiers disagree. `derive_perk1_pct` re-derives a `$wl` row's `+N%` as a staleness check |
@@ -277,7 +279,7 @@ turning the folder's filesystem watcher on helps.
 
 Two independent axes, both persisted on `AppBridge`:
 
-- **Layout** (`ui_layout`): `classic` / `haul` / `console` / `boxed` —
+- **Layout** (`ui_layout`): `classic` / `haul` / `console` / `boxed` / `quiet` —
   which `gui/shells/*Shell.qml` to load. Shape tokens (radius, font,
   density) come from `gui/skins.js`.
 - **Palette** (`ui_palette`): colour set from `gui/palettes.js`. Switching
@@ -286,12 +288,45 @@ Two independent axes, both persisted on `AppBridge`:
 `Theme` is a QML singleton. `Main.qml` binds it to `App` because singletons
 cannot see context properties.
 
+### Quiet, and `flatPanels`
+
+Quiet is the one design whose personality is not just measurements: it has **no
+cards**. A panel is a hairline rule under a small tracked label, with the content
+sitting on the window.
+
+That could have meant a parallel set of views, and deliberately does not. The
+skin sets one token, `flatPanels`, and the shared widgets read it:
+
+| Widget | Boxed designs | `flatPanels` |
+|--------|---------------|--------------|
+| `components/PanelCard.qml` | filled, bordered, rounded card with a heading | top rule + mono micro-label, no fill |
+| `components/PresetSectionTab.qml` | pill, filled when active | accent underline when active |
+| `views/DailyReportView.qml` `Tile` | same card, per report tile | top rule per tile — **every chart kept** |
+| `views/StatisticsView.qml` hub chips | filled pill | accent underline |
+| `views/BwAdvisoryView.qml` peak cards | tinted border per card | vertical rules; the *number* carries the colour |
+
+So every page the app already has inherits the restyle untouched: Report keeps
+all ten tiles and every chart, Presets keeps its list and its five sections,
+Debug keeps its two panes. Adding a page needs no Quiet-specific work.
+
+`shells/Quiet*.qml` are the pieces the Run page needs that no other design wants:
+`QuietTarget` (label over value, hairline underline), `QuietAction`,
+`QuietGroupLabel`, `QuietSection`, `QuietMeter`.
+
 **Design reference:** archived static mock
 [`docs/archive/finalmacro-gallery-v3.html`](archive/finalmacro-gallery-v3.html)
-(four Run layouts and palette swatches). Shipped tokens live in
-`gui/palettes.js` and `gui/skins.js`. For a new shell, compare the mock,
-then add `gui/shells/<Name>Shell.qml` + Run page and register the layout id
-in `skins.js` / Settings. Offscreen PNG previews: `scripts/ui_preview.py`.
+(four Run layouts and palette swatches), and
+[`docs/mockups/quiet-tabs.html`](mockups/quiet-tabs.html) for Quiet across every
+tab. Shipped tokens live in `gui/palettes.js` and `gui/skins.js`. For a new
+shell, compare the mock, then add `gui/shells/<Name>Shell.qml` + Run page and
+register the layout id in **four** places: `gui/skins.js` (`order` +
+the skin), `gui/shells/ShellSwitcher.qml`, `scripts/ui_preview.py`'s
+`--layout` choices, and `_UI_LAYOUTS` / `_LAYOUT_PALETTE` in `gui/bridge.py`.
+Settings lists designs from the QML side while the bridge decides which may be
+*stored*, so missing that last one means the design appears in the picker and
+selecting it does nothing, silently — which is what shipped with Quiet.
+`tests/test_appearance.py` reads all four and fails when they drift.
+Offscreen PNG previews: `scripts/ui_preview.py`.
 
 **Solver / calculator reference:** archived
 [`docs/archive/mudae-tools-dev-guide.md`](archive/mudae-tools-dev-guide.md)

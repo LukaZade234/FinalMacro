@@ -219,3 +219,38 @@ def test_write_sheet_without_an_account_changes_nothing():
 def test_read_sheet_ignores_malformed_entries():
     assert read_sheet({MAIN: "nonsense"}, account_id=MAIN).fields == {}
     assert read_sheet({MAIN: {"no_fields": 1}}, account_id=MAIN).fields == {}
+
+
+def test_rolls_max_reads_the_per_account_bonus_not_the_legacy_blob():
+    """Reported 2026-09-07: Run showed the server's 21 against a real pool of 83.
+
+    `AppBridge.macroRollsMax` read `channel.bonus` — the pre-split blob, which
+    `apply_parsed` *clears* the moment a sheet is filed per account. So an
+    account that had fetched `$bonus` still fell through to `$settings.setrolls`.
+    """
+    from macro.sheet_caps import rolls_max_from_sheets
+
+    store = ServerProfileStore()
+    sid = store.add_server("Key Server 0")
+    store.add_channel(sid, "mudae-w", "999")
+    store.apply_parsed(
+        999,
+        kind="settings",
+        fields={"setrolls": 21},
+        summary="$settings",
+    )
+    store.apply_parsed(
+        999,
+        kind="bonus",
+        fields={"rolls_per_hour": {"base": 21, "bonus": 121, "net": 83}},
+        summary="$bonus",
+        account_id=MAIN,
+    )
+    channel = store.find_channel_by_discord_id(999)[1]
+
+    # The legacy blob is empty by design once a per-account sheet exists…
+    assert channel.bonus == {}
+    assert rolls_max_from_sheets(channel.bonus, channel.settings) == 21
+    # …so the pool has to come through `account_sheet`.
+    bonus = store.account_sheet(channel, "bonus", account_id=MAIN).fields
+    assert rolls_max_from_sheets(bonus, channel.settings) == 83

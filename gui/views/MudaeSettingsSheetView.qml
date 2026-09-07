@@ -5,13 +5,18 @@ import gui 1.0
 import "../components"
 
 /*
-    Mudae › $settings — the server's rule sheet, plus the drift and copy tools
-    that act on it.
+    Mudae › $settings — the server's rule sheet, read.
 
-    Drift and copy live here rather than on a shared overview because they only
-    ever touch `$settings`: the preset editor, the diff, the dry run and the
-    apply pipeline are all one feature, and it is the sheet they compare against.
-    `MudaeSettingsView` is that machinery, moved from a sub-tab of Servers.
+    Shown the same way `$ov` and `$bonus` are: the parsed sheet and nothing
+    else. The drift / preset / diff / dry-run / apply machinery that used to
+    share this page is `views/MudaeSettingsView.qml`, which is no longer
+    mounted anywhere — it is kept rather than deleted because the pipeline
+    behind it (`macro/settings_apply.py`, `mudae/settings_commands.py` and
+    their tests) is intact and the page can be put back by mounting it here.
+
+    Editing a server's settings means sending commands that change the live
+    server, which is a heavier thing than reading a sheet and wants its own
+    deliberate return rather than riding along beside the read-only view.
 */
 Item {
     id: root
@@ -19,30 +24,17 @@ Item {
 
     property string channelProfileId: ""
 
-    RowLayout {
+    PanelCard {
         anchors.fill: parent
-        spacing: Theme.gap
+        title: "$settings (parsed)"
+        titleSize: Theme.sizeMedium
+        fillContentVertically: true
 
-        PanelCard {
-            Layout.preferredWidth: 340
-            Layout.minimumWidth: 260
-            Layout.maximumWidth: 420
-            Layout.fillHeight: true
-            title: "$settings (parsed)"
-            titleSize: Theme.sizeMedium
-            fillContentVertically: true
-
-            MudaeSheetPanel {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                sheetKind: "settings"
-                channelProfileId: root.channelProfileId
-            }
-        }
-
-        MudaeSettingsView {
+        MudaeSheetPanel {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            sheetKind: "settings"
+            channelProfileId: root.channelProfileId
         }
     }
 }

@@ -43,24 +43,37 @@ Item {
                     required property var modelData
                     required property int index
 
+                    readonly property bool current: statsRoot.sectionIndex === index
+
                     implicitHeight: 30
-                    implicitWidth: chipLabel.implicitWidth + 20
-                    radius: 15
-                    color: statsRoot.sectionIndex === index
-                           ? Theme.accentPrimary : Theme.bgDark
-                    border.color: statsRoot.sectionIndex === index
-                                  ? Theme.accentPrimary : Theme.border
-                    border.width: 1
+                    implicitWidth: chipLabel.implicitWidth + (Theme.flatPanels ? 4 : 20)
+                    // Quiet marks the open section with an underline instead of
+                    // a filled pill, the same mark its nav uses.
+                    radius: Theme.flatPanels ? 0 : 15
+                    color: Theme.flatPanels ? "transparent"
+                         : (current ? Theme.accentPrimary : Theme.bgDark)
+                    border.color: Theme.flatPanels ? "transparent"
+                                : (current ? Theme.accentPrimary : Theme.border)
+                    border.width: Theme.flatPanels ? 0 : 1
+
+                    Rectangle {
+                        visible: Theme.flatPanels && parent.current
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        height: 1
+                        color: Theme.accent
+                    }
 
                     Label {
                         id: chipLabel
                         anchors.centerIn: parent
                         text: modelData.label
-                        color: statsRoot.sectionIndex === index
-                               ? Theme.bgDark : Theme.fgSecondary
+                        color: Theme.flatPanels
+                               ? (parent.current ? Theme.fg : Theme.mute)
+                               : (parent.current ? Theme.bgDark : Theme.fgSecondary)
                         font.pixelSize: 11
-                        font.weight: statsRoot.sectionIndex === index
-                                     ? Font.DemiBold : Font.Normal
+                        font.weight: parent.current ? Font.DemiBold : Font.Normal
                     }
 
                     MouseArea {

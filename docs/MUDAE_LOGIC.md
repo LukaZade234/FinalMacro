@@ -1216,6 +1216,56 @@ than wait for it.
 
 
 
+### When the perk-8 count goes stale
+
+The macro's perk-8 tally is a **belief**: `$ohu8` sets it, and after that only
+the macro's own clicks move it. `macro/rule_eval.py` then *spends* that belief —
+while it says clicks remain, every paid non-perk-8 roll is skipped so the slots
+are saved for perk-8 characters, which are half price.
+
+Reported 2026-09-07, with this stored record:
+
+```
+last_clicked: 38 / 40   clicks_exhausted: false
+refill_at: 2026-09-08T00:00Z    updated_at: 2026-09-07T03:01Z
+```
+
+Mudae was at 40/40. Two clicks the macro never counted left it holding slots
+that no longer existed. `should_query_ohu8_on_refill` re-asks only on
+**exhaustion** or a **passed refill** — neither of which a merely wrong count
+trips — so it could not learn otherwise for the ~21 hours until midnight. The
+default bypass colour (purple) costs no power, so nothing drained the bar: power
+pinned at its cap, two `$dk` went unspent, and no paid kakera was clicked all
+night. At 20%/hour regen and ~15% a chaos-key click that is roughly 1.3 clicks
+an hour thrown away, plus the ~10 clicks' worth standing in a full bar.
+
+**The fix is in two halves, and the first matters more.**
+
+*Fail open.* Hoarding a slot is free only while the bar has room to fill. At the
+cap the wait costs regen every minute, and if the belief is wrong nothing will
+ever spend it — so a **pinned bar** (within one paid click of the cap) hands the
+decision to `_filter_perk8_power_reserve`, which reserves exactly what the
+remaining perk-8 clicks need and no more. `macro/perk8_power.bar_is_pinned`.
+This makes the failure survivable whatever caused it.
+
+*Ask again.* `macro/perk8_recheck.py` names three things a wrong belief looks
+like from inside the macro. Each is a reason to **ask**, never an answer — they
+all end in one `$ohu8` and Mudae's number wins:
+
+| Reason | Fires when |
+|---|---|
+| `final_notice` | Mudae printed `($op 8) … for today` on a kakera claim — its own announcement that the day's last perk-8 click just happened. Checked even at a believed zero, since confirming is how the flag clears |
+| `perk8_silence` | No perk-8 character seen for **2 hours** while clicks are still believed left |
+| `power_pinned` | The bar has been at its cap for **10 minutes** while clicks are still believed left |
+
+The last two are skipped at a believed zero: that is the safe direction to be
+wrong in, because it spends rather than hoards.
+
+**`($op 8)` alone is not the announcement** — that tag rides along on every
+perk-8 bonus line. `mudae.parsers.kakera.is_perk8_final_click` anchors on the
+tag *together with* "for today", because the sentence between them is custom
+emoji that does not survive as text.
+
 ## Perk 9 (daily sphere-button budget)
 
 Perk 9 adds **sphere react buttons** on characters you have rolled today.

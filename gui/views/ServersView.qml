@@ -236,8 +236,11 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 250
-            Layout.maximumHeight: 280
+            // Capped at 280 while the parsed `$settings` / `$bonus` panels sat
+            // below and needed the rest of the page. They are on Mudae now, so
+            // the server and channel lists take the whole height — which is
+            // what they wanted all along, being lists that grow.
+            Layout.fillHeight: true
             Layout.minimumHeight: 200
             spacing: 12
 
@@ -455,45 +458,9 @@ Item {
             }
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.minimumHeight: 280
-            spacing: 12
-
-            PanelCard {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: 220
-                title: "$settings (parsed)"
-                titleSize: 13
-                fillContentVertically: true
-
-                MudaeSheetPanel {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    sheetKind: "settings"
-                    channelProfileId: serversRoot.currentChannelProfileId()
-                }
-            }
-
-            PanelCard {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.minimumWidth: 220
-                title: "$bonus (parsed)"
-                titleSize: 13
-                fillContentVertically: true
-
-                MudaeSheetPanel {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    sheetKind: "bonus"
-                    channelProfileId: serversRoot.currentChannelProfileId()
-                }
-            }
-
-        }
+        // The parsed `$settings` and `$bonus` panels that used to sit here are on
+        // **Mudae** now, one sub-tab each, beside `$ov`. Two places showing the
+        // same sheet meant two places to look at when one was stale.
     }
 
     Component.onCompleted: {

@@ -1,0 +1,1073 @@
+<title>Quiet — Every Tab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   FinalMacro — "D · Quiet" as a RESTYLE, not a re-architecture.
+
+   v2. The first pass forced a hero number onto every page and rebuilt pages
+   that were already right. Quiet is about cutting clutter and letting what
+   matters carry — it is not a mandate for a focal point per tab.
+
+   What that means in practice:
+     - Only Run has a dominant number. It always did; it earns one.
+     - Every other page keeps the structure it has in the app today. The only
+       thing that changes is the chrome: a filled, bordered, rounded card
+       becomes a hairline rule and a mono label.
+     - Report keeps all ten of its tiles and every chart. The boxes go, the
+       content does not.
+     - Presets keeps its list and its Add / Duplicate / Remove / Wizard.
+     - Debug stays the two-pane ParseLab it already is.
+
+   The restyle rules:
+     - No filled card. `border-top: 1px var(--line)` is the separator.
+     - Mono uppercase micro-label above or beside every value.
+     - Secondary text drops to --mute rather than getting its own box.
+     - Colour is information: accent = what you set, good = ready,
+       warn = a caveat, bad = a stop. Kakera colours are data, so they are
+       Mudae's own and do not follow the palette.
+
+   Palettes are lifted verbatim from gui/palettes.js.
+   ========================================================================== */
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+[data-p="kakera"]{--bg:#0d0d13;--surface:#15151e;--raise:#1c1c28;--line:#272736;--fg:#e8e8f4;--dim:#7b7b92;--mute:#565669;--accent:#e8479e;--accent2:#8b6cf0;--good:#3ed6b8;--warn:#f2a83c;--bad:#ff5c6c}
+[data-p="tokyonight"]{--bg:#1a1b26;--surface:#24283b;--raise:#414868;--line:#414868;--fg:#c0caf5;--dim:#a9b1d6;--mute:#6b7394;--accent:#7aa2f7;--accent2:#bb9af7;--good:#9ece6a;--warn:#e0af68;--bad:#f7768e}
+[data-p="ember"]{--bg:#100e0c;--surface:#171412;--raise:#211c18;--line:#2a2521;--fg:#efe6d8;--dim:#9d8f7d;--mute:#6b6055;--accent:#e8a33d;--accent2:#c9743a;--good:#8fc46a;--warn:#e0b155;--bad:#e5624f}
+[data-p="phosphor"]{--bg:#050a06;--surface:#0a1109;--raise:#0f1a0e;--line:#1c2e1a;--fg:#c8f5c0;--dim:#6ea868;--mute:#43683f;--accent:#3ef07a;--accent2:#8ae86a;--good:#3ef07a;--warn:#e3d24a;--bad:#ff6b5e}
+[data-p="ice"]{--bg:#0c1016;--surface:#131923;--raise:#1a2230;--line:#26303f;--fg:#e2e9f2;--dim:#8697ab;--mute:#5b6879;--accent:#4ec3e0;--accent2:#7d9ff0;--good:#5bd6a4;--warn:#e3b567;--bad:#f0768b}
+[data-p="bone"]{--bg:#e9ebee;--surface:#f8f9fa;--raise:#dfe3e8;--line:#ccd2d9;--fg:#161b21;--dim:#57616c;--mute:#87919c;--accent:#c2185b;--accent2:#5b3fc4;--good:#0d8a68;--warn:#9a6510;--bad:#c1352f}
+
+body{background:#08080a;color:#8b8b98;font-family:'Space Grotesk',system-ui,-apple-system,sans-serif;padding:22px 16px 70px;-webkit-font-smoothing:antialiased}
+.head{max-width:1240px;margin:0 auto 18px}
+.head h1{font-size:15px;font-weight:600;color:#e6e6f0;letter-spacing:-.01em}
+.head p{font-size:12.5px;margin-top:6px;line-height:1.6;max-width:74ch}
+.head p b{color:#c9c9d8;font-weight:600}
+.ctl{max-width:1240px;margin:0 auto 16px;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end}
+.grp{display:flex;flex-direction:column;gap:7px}
+.grp .lb{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#585866}
+.grp .opts{display:flex;gap:6px;flex-wrap:wrap}
+.grp button{font:inherit;font-size:11.5px;font-weight:600;background:#141419;color:#8b8b98;border:1px solid #26262f;border-radius:999px;padding:7px 13px;cursor:pointer;transition:.16s;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.grp button:hover{color:#d5d5e2;border-color:#3a3a47}
+.grp button[aria-pressed="true"]{background:#eaeaf2;color:#0b0b0e;border-color:#eaeaf2}
+.grp button:focus-visible{outline:2px solid #7f6cf0;outline-offset:2px}
+.sw{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.22);flex:none}
+.note{max-width:1240px;margin:0 auto 16px;font-size:12px;line-height:1.65;border-left:2px solid #2c2c36;padding-left:13px}
+.note b{color:#d5d5e2;font-weight:600}
+
+.win{max-width:1240px;margin:0 auto;min-height:820px;border-radius:12px;background:var(--bg);color:var(--fg);
+     box-shadow:0 30px 70px -20px rgba(0,0,0,.85);padding:26px 38px 34px;display:flex;flex-direction:column;overflow:hidden}
+
+.nav{display:flex;align-items:baseline;gap:19px;font-size:12.5px;color:var(--mute);flex:none;flex-wrap:wrap}
+.nav .lg{font-size:12.5px;font-weight:600;color:var(--fg);margin-right:4px;letter-spacing:-.01em}
+.nav a{color:var(--mute);text-decoration:none;cursor:pointer;transition:.14s;padding-bottom:2px;border-bottom:1px solid transparent}
+.nav a:hover{color:var(--dim)}
+.nav a.sel{color:var(--fg);font-weight:600;border-bottom-color:var(--accent)}
+.nav .rt{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--good);display:flex;align-items:center;gap:7px}
+.nav .rt i{width:5px;height:5px;border-radius:50%;background:var(--good);flex:none;animation:pz 2.2s infinite}
+@keyframes pz{0%,100%{opacity:1}50%{opacity:.28}}
+
+/* scope / target row */
+.targets{display:flex;align-items:flex-end;gap:34px;padding:20px 0 16px;flex:none;flex-wrap:wrap}
+.tg{cursor:pointer;min-width:0}
+.tg span{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.tg b{display:block;font-size:15px;font-weight:500;margin-top:6px;border-bottom:1px solid var(--line);padding-bottom:5px;color:var(--fg);white-space:nowrap}
+.tg b::after{content:" ▾";color:var(--mute);font-size:11px}
+.tg.p b{color:var(--accent);border-bottom-color:color-mix(in srgb,var(--accent) 50%,transparent)}
+.tg.flat b::after{content:""}
+.tg.act{margin-left:auto}
+
+/* Run only: the dominant number */
+.nums{display:flex;align-items:flex-end;gap:38px;padding:0 0 18px;border-bottom:1px solid var(--line);flex:none;flex-wrap:wrap}
+.nums .n{font-family:'IBM Plex Mono',monospace;font-size:54px;font-weight:500;line-height:.85;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+.nums .n em{font-style:normal;font-size:18px;color:var(--mute)}
+.nums .nl{font-size:11.5px;color:var(--mute);margin-top:9px}
+.nums .f{display:flex;gap:32px;padding-bottom:4px;flex-wrap:wrap}
+.nums .f div span{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.nums .f div b{display:block;font-size:16px;font-weight:500;margin-top:6px;font-variant-numeric:tabular-nums}
+.nums .f div b.gd{color:var(--good)}
+.nums .st{margin-left:auto;align-self:flex-end;font-size:12.5px;color:var(--dim);display:flex;align-items:center;gap:9px;padding-bottom:4px}
+.nums .st i{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:pz 2.2s infinite;flex:none}
+
+/* action rows */
+.acts{display:flex;align-items:center;gap:9px;padding:14px 0;flex:none;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.acts button{font:inherit;font-size:12.5px;font-weight:500;background:none;border:1px solid var(--line);color:var(--dim);border-radius:7px;padding:9px 15px;cursor:pointer;transition:.15s}
+.acts button:hover{color:var(--fg);border-color:var(--mute)}
+.acts button.stop{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent);font-weight:600}
+.acts button.go{color:var(--bg);background:var(--good);border-color:var(--good);font-weight:600}
+.acts button.gh{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.acts button.sm{font-size:11.5px;padding:6px 12px}
+.acts .lbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);padding:0 4px 0 10px}
+.acts .sp{margin-left:auto}
+.acts.q{border-bottom:none;padding:10px 0 0}
+
+/* hub sub-tabs */
+.pills{display:flex;gap:20px;padding:14px 0 0;font-size:12.5px;flex:none;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--line)}
+.pills a{color:var(--mute);text-decoration:none;cursor:pointer;padding-bottom:9px;border-bottom:1px solid transparent;margin-bottom:-1px;transition:.14s}
+.pills a:hover{color:var(--dim)}
+.pills a.sel{color:var(--fg);font-weight:600;border-bottom-color:var(--accent)}
+.pills .hint{margin-left:auto;font-size:11px;color:var(--mute);padding-bottom:9px}
+
+.body{display:flex;gap:40px;padding-top:18px;flex:1;min-height:0;align-items:flex-start}
+.main{flex:1;min-width:0}
+.sidecol{width:240px;flex:none;display:flex;flex-direction:column;gap:22px}
+.sc{border-top:1px solid var(--line);padding-top:12px}
+.sc:first-child{border-top:none;padding-top:0}
+.sc .h{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sc .h .on{margin-left:auto;color:var(--good);letter-spacing:.1em}
+.sc .h .off{margin-left:auto;color:var(--mute);letter-spacing:.1em}
+.sc .cname{font-size:15px;font-weight:500;color:var(--fg)}
+.sc .cser{font-size:11.5px;color:var(--mute);margin-top:3px}
+.sc .cmeta{display:flex;align-items:baseline;gap:10px;padding-top:8px;margin-top:8px}
+.sc .cmeta b{font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--accent)}
+.sc .cmeta .tm{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--mute);margin-left:auto}
+.sc .kanum{font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:500;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.sc .kanum small{font-size:12px;color:var(--mute);font-weight:400}
+.sc .haul3{display:flex;gap:18px;margin-top:12px}
+.sc .haul3 div{font-size:10.5px;color:var(--mute)}
+.sc .haul3 b{display:block;font-family:'IBM Plex Mono',monospace;font-size:15px;color:var(--fg);font-weight:500;margin-top:3px}
+.pk{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:12px;color:var(--dim);margin-bottom:7px}
+.pk b{font-family:'IBM Plex Mono',monospace;font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pk b.ac{color:var(--accent)}
+.pk b.gd{color:var(--good)}
+.pk b.wn{color:var(--warn)}
+.bar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin:2px 0 10px}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
+.bar.g i{background:var(--good)}
+.bar.w i{background:var(--warn)}
+
+/* the condensed smart-function strips */
+.smart{font-size:11.5px;color:var(--dim);line-height:1.7}
+.smart .lead{color:var(--fg)}
+.smart .thr{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:12.5px}
+.smart .nxt{color:var(--mute);font-size:11px}
+.sphdots{display:flex;gap:4px;margin:7px 0 2px;flex-wrap:wrap}
+.sphdots i{width:11px;height:11px;border-radius:50%;flex:none;display:block}
+.sphdots i.off{opacity:.22}
+
+.feed{font-size:12.5px;line-height:2.1}
+.feed .r{display:flex;gap:20px;color:var(--dim)}
+.feed .r .t{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute);width:56px;flex:none}
+.feed .r .m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed .r .m b{color:var(--fg);font-weight:500}
+.feed .r.q{color:var(--mute)}
+.feed .r.hit .m b{color:var(--accent)}
+.feed .r.win .m b{color:var(--good)}
+.feed .r.err .m{color:var(--bad)}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);
+   font-weight:400;text-align:left;padding:0 14px 9px 0;border-bottom:1px solid var(--line)}
+th.r,td.r{text-align:right;padding-right:0}
+td{padding:8px 14px 8px 0;color:var(--dim);border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+td b{color:var(--fg);font-weight:500}
+td.mono,th.mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+tr.on td{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+tr.on td b,tr.on td.mono{color:var(--accent)}
+tr.pick td{cursor:pointer}
+tr.pick:hover td{background:color-mix(in srgb,var(--fg) 4%,transparent)}
+.tbwrap{overflow-x:auto}
+
+.rows .rw{display:flex;align-items:baseline;gap:14px;padding:8px 0;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.rows .rw .k{flex:1;font-size:12.5px;color:var(--dim);min-width:0}
+.rows .rw .cmd{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--accent2)}
+.rows .rw .v{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--fg);text-align:right;white-space:nowrap}
+.rows .rw .v.off{color:var(--mute)}
+.grouplbl{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:20px 0 8px}
+.grouplbl:first-child{margin-top:0}
+.grouplbl.n{color:var(--mute)}
+
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;
+      text-transform:uppercase;color:var(--good);border:1px solid color-mix(in srgb,var(--good) 40%,transparent);
+      border-radius:999px;padding:3px 9px}
+.chip.w{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.chip.m{color:var(--mute);border-color:var(--line)}
+.chip.a{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.tiny{font-size:11px;color:var(--mute);line-height:1.65}
+.tiny b{color:var(--dim);font-weight:500}
+.note-l{font-size:11.5px;color:var(--mute);line-height:1.7;border-left:1px solid var(--line);padding-left:12px;margin-top:16px}
+.note-l b{color:var(--dim);font-weight:500}
+.kv{display:flex;gap:32px;flex-wrap:wrap;margin-bottom:16px}
+.kv div span{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.kv div b{display:block;font-size:15px;font-weight:500;margin-top:6px;font-variant-numeric:tabular-nums}
+.kv div b.ac{color:var(--accent)}
+.kv div b.gd{color:var(--good)}
+
+/* toggle rows for settings / presets — a rule, not a switch widget */
+.tog{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent);font-size:12.5px}
+.tog .k{flex:1;color:var(--dim);min-width:0}
+.tog .k em{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:3px;line-height:1.55}
+.tog .s{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--good);white-space:nowrap}
+.tog .s.off{color:var(--mute)}
+.tog .in{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--fg);border-bottom:1px solid var(--line);padding:2px 0;min-width:64px;text-align:right}
+
+/* Advisor optima */
+.optima{display:flex;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:18px;flex-wrap:wrap}
+.opt{flex:1;min-width:150px;padding:0 22px;border-left:1px solid var(--line)}
+.opt:first-child{padding-left:0;border-left:none}
+.opt .ol{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.opt .ov{display:flex;align-items:baseline;gap:10px;margin-top:8px}
+.opt .ov b{font-family:'IBM Plex Mono',monospace;font-size:36px;font-weight:500;line-height:.85;letter-spacing:-.05em}
+.opt .ov em{font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--dim)}
+.opt .od{font-size:11px;color:var(--mute);margin-top:9px;line-height:1.6}
+.opt.a .ov b{color:var(--good)}
+.opt.b .ov b{color:var(--warn)}
+.opt.c .ov b{color:var(--accent2)}
+
+/* ---- REPORT: the tile, de-boxed. Same content, hairline instead of card --- */
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:0 34px}
+.tile{grid-column:span 12;border-top:1px solid var(--line);padding:14px 0 18px;min-width:0}
+.tile.s3{grid-column:span 3}.tile.s4{grid-column:span 4}.tile.s5{grid-column:span 5}
+.tile.s6{grid-column:span 6}.tile.s7{grid-column:span 7}.tile.s8{grid-column:span 8}
+.tile.first{border-top:none;padding-top:0}
+.tile .th{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
+.tile .th .t{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg)}
+.tile .th .s{font-size:10.5px;color:var(--mute);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .th .tot{font-family:'IBM Plex Mono',monospace;font-size:19px;font-weight:500;color:var(--fg);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.tile .th .tu{font-size:10px;color:var(--mute)}
+.kpi{display:flex;gap:30px;flex-wrap:wrap}
+.kpi div{min-width:88px}
+.kpi span{display:block;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.kpi b{display:block;font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:500;margin-top:6px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.kpi i{display:block;font-style:normal;font-size:10.5px;margin-top:4px}
+.kpi i.up{color:var(--good)}.kpi i.dn{color:var(--bad)}.kpi i.na{color:var(--mute)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:var(--mute);margin-top:9px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:8px;height:8px;border-radius:2px;flex:none}
+.tape{display:flex;gap:2px;flex-wrap:wrap;margin-bottom:4px}
+.tape i{width:9px;height:14px;border-radius:2px;flex:none;display:block}
+.dumb{display:flex;align-items:center;gap:12px;padding:7px 0;font-size:12px;border-bottom:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.dumb .nm{width:44px;font-family:'IBM Plex Mono',monospace;color:var(--fg)}
+.dumb .tr{flex:1;height:12px;position:relative;min-width:60px}
+.dumb .tr .ln{position:absolute;top:5px;height:2px;background:var(--line);border-radius:2px}
+.dumb .tr .a,.dumb .tr .b{position:absolute;top:1px;width:10px;height:10px;border-radius:50%}
+.dumb .tr .a{background:var(--mute)}
+.dumb .tr .b{background:var(--accent)}
+.dumb .vv{font-family:'IBM Plex Mono',monospace;color:var(--fg);width:56px;text-align:right;font-variant-numeric:tabular-nums}
+
+.page{display:none}
+.page.on{display:flex;flex-direction:column;flex:1;min-height:0}
+
+@media (max-width:980px){
+  .win{padding:20px 18px 26px}
+  .body{flex-direction:column;gap:26px}
+  .sidecol{width:100%;flex-direction:row;flex-wrap:wrap;gap:24px}
+  .sidecol .sc{flex:1;min-width:190px;border-top:1px solid var(--line);padding-top:12px}
+  .tile.s3,.tile.s4,.tile.s5,.tile.s6,.tile.s7,.tile.s8{grid-column:span 12}
+}
+</style>
+
+<div class="head">
+  <h1>FinalMacro — “Quiet”, across every tab <span style="color:#585866;font-weight:400">· v2</span></h1>
+  <p>Layout <b>D · Quiet</b> applied as a restyle. Only <b>Run</b> carries a dominant number — every other page keeps the structure it has in the app today and just loses its card chrome for a hairline and a mono label. <b>Report</b> keeps all ten tiles and every chart. <b>Presets</b> keeps its list and its Add / Duplicate / Remove. <b>Debug</b> stays the two-pane ParseLab. New on Run: the <b>perk 8 smart saver</b> and <b>adaptive perk 9</b> strips, cut to what you would actually act on.</p>
+</div>
+
+<div class="ctl">
+  <div class="grp"><div class="lb">Page</div>
+    <div class="opts" id="tabs">
+      <button data-t="run" aria-pressed="true">Run</button><button data-t="accounts">Accounts</button><button data-t="servers">Servers</button><button data-t="presets">Presets</button><button data-t="mudae">Mudae</button><button data-t="spheres">Spheres</button><button data-t="advisor">Advisor</button><button data-t="stats">Statistics · Report</button><button data-t="debug">Debug</button><button data-t="settings">Settings</button>
+    </div>
+  </div>
+  <div class="grp"><div class="lb">Palette</div>
+    <div class="opts" id="pals">
+      <button data-c="kakera" aria-pressed="true"><i class="sw" style="background:#e8479e"></i>Kakera</button>
+      <button data-c="tokyonight"><i class="sw" style="background:#7aa2f7"></i>Tokyo Night</button>
+      <button data-c="ember"><i class="sw" style="background:#e8a33d"></i>Ember</button>
+      <button data-c="phosphor"><i class="sw" style="background:#3ef07a"></i>Phosphor</button>
+      <button data-c="ice"><i class="sw" style="background:#4ec3e0"></i>Ice</button>
+      <button data-c="bone"><i class="sw" style="background:#c2185b"></i>Bone · light</button>
+    </div>
+  </div>
+</div>
+
+<div class="note" id="note"></div>
+
+<div class="win" id="win" data-p="kakera">
+
+  <div class="nav">
+    <span class="lg">FinalMacro</span>
+    <a data-t="run" class="sel">Run</a><a data-t="accounts">Accounts</a><a data-t="servers">Servers</a><a data-t="presets">Presets</a><a data-t="mudae">Mudae</a><a data-t="spheres">Spheres</a><a data-t="advisor">Advisor</a><a data-t="stats">Statistics</a><a data-t="debug">Debug</a><a data-t="settings">Settings</a>
+    <span class="rt"><i></i>connected 2h 14m</span>
+  </div>
+
+  <!-- ================================ RUN ================================ -->
+  <section class="page on" data-page="run">
+    <div class="targets">
+      <div class="tg"><span>Account</span><b>lukazade234</b></div>
+      <div class="tg"><span>Channel</span><b>Key Server 0 · #mudae-w</b></div>
+      <div class="tg p"><span>Preset</span><b>Main — claim SR+</b></div>
+    </div>
+    <div class="nums">
+      <div>
+        <div class="n">14<em> / 21</em></div>
+        <div class="nl">rolls this hour · refills in 47m · 40 held for $bk</div>
+      </div>
+      <div class="f">
+        <div><span>Claim</span><b class="gd">Ready</b></div>
+        <div><span>Power</span><b>68%</b></div>
+        <div><span>Perk 8</span><b>12 / 40</b></div>
+        <div><span>Perk 9</span><b>7 / 15</b></div>
+      </div>
+      <div class="st"><i></i>Rolling — 7 of 10, next 2.4s</div>
+    </div>
+    <div class="acts">
+      <button class="stop">Stop</button><button>Disconnect</button>
+      <button class="go">Start hourly</button><button>Roll $us</button>
+      <span class="lbl">Checks</span><button>$tu</button><button>$us</button>
+      <span class="lbl">Minigames</span><button>$oh</button><button>$oc</button><button>$oq</button><button>$ot</button><button class="gh">Play all</button>
+    </div>
+    <div class="body">
+      <div class="main feed">
+        <div class="r"><span class="t">22:14:02</span><span class="m">Sent <b>$wa</b> ×10 — interval 1.8s ±0.4</span></div>
+        <div class="r q"><span class="t">22:14:07</span><span class="m">Makima — 1,411 ka, under threshold</span></div>
+        <div class="r hit"><span class="t">22:14:11</span><span class="m">Reacted <b>purple kakera</b> — +312 ka</span></div>
+        <div class="r q"><span class="t">22:14:14</span><span class="m">Ryuk — 640 ka, under threshold</span></div>
+        <div class="r"><span class="t">22:14:17</span><span class="m">Wish rolled and pinged you — stop rolling, claim now</span></div>
+        <div class="r"><span class="t">22:14:18</span><span class="m">$rt: sent $rt — claim slot available</span></div>
+        <div class="r q"><span class="t">22:14:26</span><span class="m">Claim timeout for Yor Forger — checking whether it landed</span></div>
+        <div class="r q"><span class="t">22:14:27</span><span class="m">Retrying claim on Yor Forger in 1s (2/4)</span></div>
+        <div class="r win"><span class="t">22:14:29</span><span class="m">Claimed <b>Yor Forger</b> — 2,180 ka</span></div>
+        <div class="r q"><span class="t">22:14:35</span><span class="m">Perk 8 reserve: holding normal clicks — 28 left before midnight</span></div>
+        <div class="r hit"><span class="t">22:14:38</span><span class="m">Reacted <b>rainbow kakera</b> — +540 ka (perk 8)</span></div>
+        <div class="r err"><span class="t">22:14:44</span><span class="m">Reaction failed — message deleted</span></div>
+        <div class="r hit"><span class="t">22:14:51</span><span class="m">Clicked <b>spY</b> on a roll — +146 SP (perk 9)</span></div>
+        <div class="r q"><span class="t">22:14:58</span><span class="m">Perk 9: skipped spB, under 146 SP threshold</span></div>
+        <div class="r"><span class="t">22:15:02</span><span class="m">Checked <b>$tu</b> — 14 rolls, reset in 47m</span></div>
+        <div class="r q"><span class="t">22:15:03</span><span class="m">Sleeping until next roll window</span></div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Last claim</div>
+          <div class="cname">Yor Forger</div><div class="cser">Spy × Family</div>
+          <div class="cmeta"><b>2,180 ka</b><span class="tm">22:14:29</span></div>
+        </div>
+
+        <div class="sc">
+          <div class="h">Smart saver <span class="on">on</span></div>
+          <div class="pk">Perk 8 today<b class="ac">12 / 40</b></div>
+          <div class="bar"><i style="width:30%"></i></div>
+          <div class="smart">
+            <span class="lead">Holding normal clicks</span> · can spend <b style="font-family:'IBM Plex Mono',monospace;color:var(--fg);font-weight:500">38%</b> of the bar
+            <div class="nxt">28 perk-8 clicks left before they expire at 00:00 UTC. $dk held.</div>
+          </div>
+        </div>
+
+        <div class="sc">
+          <div class="h">Adaptive perk 9 <span class="on">on</span></div>
+          <div class="pk">Clicks today<b class="ac">7 / 15</b></div>
+          <div class="bar"><i style="width:47%"></i></div>
+          <div class="smart">
+            Taking <span class="thr">≥ 146 SP</span> · 34 spawns left
+            <div class="sphdots">
+              <i style="background:#e4c04a" title="spY — taken"></i>
+              <i style="background:#e8e8f4" title="spW — taken"></i>
+              <i style="background:#e05c5c" title="spR — taken"></i>
+              <i style="background:#a06ce0" title="spU — taken"></i>
+              <i class="off" style="background:#4a9de4" title="spB — below threshold"></i>
+              <i class="off" style="background:#3ec7b0" title="spT — below threshold"></i>
+              <i class="off" style="background:#6fbf5a" title="spG — below threshold"></i>
+            </div>
+            <div class="nxt">Opens up at 12 spawns left. Learned rate 0.19/roll.</div>
+          </div>
+        </div>
+
+        <div class="sc">
+          <div class="h">This session</div>
+          <div class="kanum">18,420 <small>ka</small></div>
+          <div class="haul3"><div>Claims<b>6</b></div><div>Spheres<b>24</b></div><div>Keys<b>3</b></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= ACCOUNTS ============================== -->
+  <section class="page" data-page="accounts">
+    <div class="acts">
+      <button class="go">Add account</button><button>Paste token</button><button>Rename</button>
+      <span class="lbl">Selected</span><button>Daily channel</button>
+      <span class="sp"></span><button class="stop">Remove</button>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="tbwrap"><table>
+          <tr><th>Account</th><th>Token</th><th class="r mono">Channels</th><th>$p / $daily channel</th><th class="r mono">$daily</th><th class="r mono">$p</th><th class="r mono">$dk</th></tr>
+          <tr class="on pick"><td><b>lukazade234</b></td><td><span class="chip">valid</span></td><td class="r mono">4</td><td>Key Server 0 · #mudae-w</td><td class="r mono" style="color:var(--good)">ready</td><td class="r mono">3h 12m</td><td class="r mono">6h 17m</td></tr>
+          <tr class="pick"><td><b>lukazade_alt</b></td><td><span class="chip">valid</span></td><td class="r mono">2</td><td>Kakera Kingdom · #rolls</td><td class="r mono">11h 04m</td><td class="r mono">44m</td><td class="r mono">2h 30m</td></tr>
+          <tr class="pick"><td><b>spare</b></td><td><span class="chip w">unchecked</span></td><td class="r mono">0</td><td><span style="color:var(--mute)">not set</span></td><td class="r mono" style="color:var(--mute)">—</td><td class="r mono" style="color:var(--mute)">—</td><td class="r mono" style="color:var(--mute)">—</td></tr>
+        </table></div>
+
+        <div class="note-l">Runtime is still <b>one Discord connection</b> — several accounts can be configured and one runs at a time. Concurrent multi-account is Phase D.</div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Token</div>
+          <div class="tiny">Held in <b>data/settings.json</b>, never logged and never shown again after saving. Debug has no token field of its own — it borrows the Run target's.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Dailies</div>
+          <div class="tiny">One designated channel per account. Sent when ready and always <b>before rolls</b>; several accounts go one after another, never at once.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Sheets stored</div>
+          <div class="pk">$settings<b>2</b></div>
+          <div class="pk">$bonus<b>1</b></div>
+          <div class="pk">$shop<b>1</b></div>
+          <div class="pk">$ov · $limroul<b>1</b></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== SERVERS ============================== -->
+  <section class="page" data-page="servers">
+    <div class="acts">
+      <button class="go">Add server</button><button>Add channel</button><button>Rename</button>
+      <span class="lbl">Sheet</span><button>Copy $settings</button><button>Save as preset</button>
+      <span class="sp"></span><button class="stop">Remove channel</button>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="tbwrap"><table>
+          <tr><th>Server · channel</th><th>Discord id</th><th class="r mono">Rolls/hr</th><th class="r mono">Claim</th><th class="r mono">Mode</th><th class="r">Sheets</th></tr>
+          <tr class="on pick"><td><b>Key Server 0</b> · #mudae-w</td><td class="mono">1473101131554095226</td><td class="r mono">21</td><td class="r mono">60m</td><td class="r mono">2</td><td class="r"><span class="chip">4 of 4</span></td></tr>
+          <tr class="pick"><td><b>Key Server 0</b> · #mudae-2</td><td class="mono">1473101131554095990</td><td class="r mono">21</td><td class="r mono">60m</td><td class="r mono">2</td><td class="r"><span class="chip w">1 of 4</span></td></tr>
+          <tr class="pick"><td><b>Kakera Kingdom</b> · #rolls</td><td class="mono">1288440172033884170</td><td class="r mono">8</td><td class="r mono">180m</td><td class="r mono">1</td><td class="r"><span class="chip w">2 of 4</span></td></tr>
+          <tr class="pick"><td><b>Anigame</b> · 🎫│anigame-mudae</td><td class="mono">1002913044171284490</td><td class="r mono" style="color:var(--mute)">—</td><td class="r mono" style="color:var(--mute)">—</td><td class="r mono" style="color:var(--mute)">—</td><td class="r"><span class="chip m">none</span></td></tr>
+        </table></div>
+        <div class="grouplbl">Key Server 0 · #mudae-w — $settings</div>
+        <div class="rows">
+          <div class="rw"><span class="k">Rolls per hour</span><span class="cmd">$setrolls</span><span class="v">21</span></div>
+          <div class="rw"><span class="k">Claim reset</span><span class="cmd">$setclaim</span><span class="v">every 60 min.</span></div>
+          <div class="rw"><span class="k">Claim reaction expires</span><span class="cmd">$settimer</span><span class="v">45 sec.</span></div>
+          <div class="rw"><span class="k">Game mode</span><span class="cmd">$gamemode</span><span class="v">2</span></div>
+          <div class="rw"><span class="k">Pool limits</span><span class="cmd">$servlimroul</span><span class="v">7,000 / 7,000 / 5,000 / 5,000</span></div>
+          <div class="rw"><span class="k">Slash commands</span><span class="cmd">$toggleslash</span><span class="v">enabled</span></div>
+        </div>
+        <div class="note-l">A channel is a <b>(server, channel)</b> pair and every sheet belongs to one. <b>$settings</b> is the server's and reads the same for anyone; <b>$bonus</b>, <b>$shop</b>, <b>$ov</b> and <b>$limroul</b> belong to the connected account and are stored per account on the channel.</div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Sheets here</div>
+          <div class="pk">$settings<b class="gd">09-05 01:16</b></div>
+          <div class="pk">$bonus<b class="gd">09-05 01:16</b></div>
+          <div class="pk">$shop<b class="gd">09-04 20:10</b></div>
+          <div class="pk">$ov<b class="gd">09-05 19:45</b></div>
+          <div class="pk">$limroul<b class="gd">09-05 21:17</b></div>
+        </div>
+        <div class="sc">
+          <div class="h">Wired into decisions</div>
+          <div class="tiny"><b>kakera_max_power</b> and <b>perk9_click_max</b> are applied from this channel's sheets. Claim / kakera / roll behaviour still is not — the roll itself is read instead.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== PRESETS ============================== -->
+  <section class="page" data-page="presets">
+    <div class="targets">
+      <div class="tg p"><span>Preset</span><b>Main — claim SR+</b></div>
+      <div class="tg flat"><span>Bound to</span><b>lukazade234 · #mudae-w</b></div>
+    </div>
+    <div class="acts">
+      <button class="go">Add</button><button>Duplicate</button><button>Rename</button><button>Wizard</button>
+      <span class="sp"></span><button class="stop">Remove</button>
+    </div>
+    <div class="pills">
+      <a class="sel">Rolling</a><a>Claims</a><a>Reactions</a><a>$us</a><a>Expert</a>
+      <span class="hint">autosaves · set the active preset on Run → Run target</span>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="grouplbl">Commands</div>
+        <div class="tog"><span class="k">Prefix</span><span class="in">$</span></div>
+        <div class="tog"><span class="k">Roll command</span><span class="in">$wa</span></div>
+        <div class="tog"><span class="k">Delay between rolls</span><span class="in">1.8 s</span></div>
+        <div class="tog"><span class="k">Humanize delays<em>Random extra wait between rolls, so the session is less metronomic.</em></span><span class="s">on</span></div>
+        <div class="tog"><span class="k">Extra jitter</span><span class="in">0.4 s</span></div>
+
+        <div class="grouplbl">Session</div>
+        <div class="tog"><span class="k">Disconnect between hourly sessions<em>So phone notifications keep working while the macro waits.</em></span><span class="s">on</span></div>
+        <div class="tog"><span class="k">Remember $tu state between sessions<em>Skips $tu on start and restores rolls, timers and power with passive regen. Saved per account and channel.</em></span><span class="s">on</span></div>
+
+        <div class="note-l">A preset is bound to a <b>(account, channel)</b> target, so the same server can be rolled differently by two accounts. Nothing here touches Mudae — <b>$settings</b> is applied from the Mudae page, deliberately separately.</div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Presets</div>
+          <div class="pk" style="color:var(--accent)">Main — claim SR+<b class="ac">●</b></div>
+          <div class="pk">Night — kakera only<b></b></div>
+          <div class="pk">Alt — wishes only<b></b></div>
+          <div class="pk">$us drain<b></b></div>
+        </div>
+        <div class="sc">
+          <div class="h">This preset spends</div>
+          <div class="pk">Rolls/hr<b>83 net</b></div>
+          <div class="pk">Perk 8<b>40 clicks</b></div>
+          <div class="pk">Perk 9<b>15 clicks</b></div>
+          <div class="pk">$us<b>window 23–07</b></div>
+        </div>
+        <div class="sc">
+          <div class="h">Not from $settings</div>
+          <div class="tiny">Claim mechanics are read from the <b>roll itself</b>, not the parsed sheet — the server and the account can disagree, and only the roll shows the combination that is live.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================== MUDAE =============================== -->
+  <section class="page" data-page="mudae">
+    <div class="targets">
+      <div class="tg"><span>Account</span><b>lukazade234</b></div>
+      <div class="tg"><span>Server</span><b>Key Server 0 · #mudae-w</b></div>
+      <div class="tg flat act"><span>&nbsp;</span><b style="border:none;padding:0"><button style="font:inherit;font-size:12.5px;font-weight:500;background:none;border:1px solid var(--line);color:var(--dim);border-radius:7px;padding:8px 15px;cursor:pointer">Fetch $ov</button></b></div>
+    </div>
+    <div class="pills">
+      <a>$settings</a><a class="sel">$ov</a><a>$bonus</a>
+      <span class="hint">read 2026-09-05 19:45 UTC · server rules · personal settings · totals</span>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="grouplbl">Account</div>
+        <div class="rows">
+          <div class="rw"><span class="k">Player Premium</span><span class="v">2</span></div>
+        </div>
+        <div class="grouplbl">Spawns</div>
+        <div class="rows">
+          <div class="rw"><span class="k">Rarity for owned characters</span><span class="cmd">$persrare</span><span class="v">none</span></div>
+        </div>
+        <div class="grouplbl">Wishes and notifications</div>
+        <div class="rows">
+          <div class="rw"><span class="k">Private wishes</span><span class="cmd">$wishdm</span><span class="v">n n n</span></div>
+          <div class="rw"><span class="k">Kakera badge notifications</span><span class="cmd">$kakeradm</span><span class="v">enabled</span></div>
+          <div class="rw"><span class="k">Emoji for disabled characters</span><span class="cmd">$hideinfodisable</span><span class="v">enabled</span></div>
+          <div class="rw"><span class="k">Others may move pages</span><span class="cmd">$togglemovepage</span><span class="v">enabled</span></div>
+          <div class="rw"><span class="k">Letters on kakera / sphere buttons</span><span class="cmd">$toggleletters</span><span class="v off">disabled</span></div>
+          <div class="rw"><span class="k">Mudapins from kakeraloots</span><span class="cmd">$disablepins</span><span class="v off">disabled</span></div>
+        </div>
+        <div class="grouplbl">Roll display</div>
+        <div class="rows">
+          <div class="rw"><span class="k">Roll footer</span><span class="cmd">$setfooter</span><span class="v">enabled</span></div>
+          <div class="rw"><span class="k">Random images</span><span class="cmd">$rdmimg</span><span class="v off">disabled</span></div>
+          <div class="rw"><span class="k">GIFs and WebP</span><span class="cmd">$rdmimg</span><span class="v">enabled</span></div>
+          <div class="rw"><span class="k">Custom images</span><span class="cmd">$rdmimg</span><span class="v">enabled</span></div>
+          <div class="rw"><span class="k">Image links</span><span class="cmd">$imglink</span><span class="v off">disabled</span></div>
+          <div class="rw"><span class="k">Buttons under rolls</span><span class="cmd">$perstogglebutton</span><span class="v">depend on $togglebutton</span></div>
+          <div class="rw"><span class="k">Rolls-left message</span><span class="cmd">$rollsleft</span><span class="v">below the image</span></div>
+          <div class="rw"><span class="k">Keys shown on rolls</span><span class="cmd">$displaykeys</span><span class="v off">disabled</span></div>
+          <div class="rw"><span class="k">Character pool limits</span><span class="cmd">$limroul</span><span class="v">see $limroul</span></div>
+        </div>
+        <div class="note-l">Three lines share <b>($rdmimg)</b>, which is why a field here is identified by its printed label and not by the command in its suffix the way <b>$settings</b> can be.</div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Pool limits · $limroul</div>
+          <div class="pk">$wa anime waifus<b>2,000</b></div>
+          <div class="pk">$ha anime husbandos<b>2,000</b></div>
+          <div class="pk">$wg game waifus<b>2,000</b></div>
+          <div class="pk">$hg game husbandos<b>2,000</b></div>
+          <div class="tiny" style="margin-top:9px">All four agree, so Advisor › $bw takes the base pool from here without asking which roulette you roll.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Where these reach</div>
+          <div class="tiny"><b>$persrare</b> → the $bw sweep's N. It is a multiplier whose lowest setting is 1, which Mudae prints as “none”.<br><br><b>$limroul</b> → the $bw sweep's base pool, the one input that decides which $bw wins.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Read-only</div>
+          <div class="tiny">Neither sheet is ever sent on its own. The Fetch button is the only thing that asks for it.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== SPHERES ============================== -->
+  <section class="page" data-page="spheres">
+    <div class="targets">
+      <div class="tg"><span>Account</span><b>lukazade234</b></div>
+      <div class="tg"><span>Server</span><b>Key Server 0 · #mudae-w</b></div>
+      <div class="tg flat act"><span>&nbsp;</span><b style="border:none;padding:0"><button style="font:inherit;font-size:12.5px;font-weight:500;background:none;border:1px solid var(--line);color:var(--dim);border-radius:7px;padding:8px 15px;cursor:pointer">Fetch $shop</button></b></div>
+    </div>
+    <div class="pills">
+      <a class="sel">Stock &amp; shop</a><a>Upgrades</a><a>Characters</a>
+      <span class="hint">$shop read 2026-09-04 20:10 UTC</span>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="kv">
+          <div><span>$ohu stock</span><b>55,613</b></div>
+          <div><span>$shop balance</span><b>55,613</b></div>
+          <div><span>Read apart by</span><b>3h 06m</b></div>
+          <div><span>Perk 9 clicks</span><b class="ac">10 + 5</b></div>
+          <div><span>Perk 9 SP</span><b>+50%</b></div>
+        </div>
+        <div class="grouplbl">Ouroperks</div>
+        <div class="tbwrap"><table>
+          <tr><th>Perk</th><th class="r mono">Level</th><th class="r mono">Next</th><th class="r mono">Cost</th><th class="r">Value</th></tr>
+          <tr class="on"><td><b>OP9</b> clicks / SP</td><td class="r mono">5</td><td class="r mono">6</td><td class="r mono">24,000</td><td class="r"><span class="chip a">priced</span></td></tr>
+          <tr><td><b>OP1</b> spawn share</td><td class="r mono">MAX</td><td class="r mono" style="color:var(--mute)">—</td><td class="r mono" style="color:var(--mute)">—</td><td class="r"><span class="chip m">abstains</span></td></tr>
+          <tr><td><b>OP2</b> megasphere rewards</td><td class="r mono">2</td><td class="r mono">3</td><td class="r mono">12,000</td><td class="r"><span class="chip m">abstains</span></td></tr>
+          <tr><td><b>OP5</b> +$ot chance</td><td class="r mono">MAX</td><td class="r mono" style="color:var(--mute)">—</td><td class="r mono" style="color:var(--mute)">—</td><td class="r"><span class="chip m">abstains</span></td></tr>
+          <tr><td><b>OP10</b> first $oh $ot</td><td class="r mono">0</td><td class="r mono">1</td><td class="r mono">4,000</td><td class="r"><span class="chip m">abstains</span></td></tr>
+        </table></div>
+        <div class="note-l">Cost is <b>(level + 1) × 4,000</b>, derived from the sheet's “increased by +4,000 per level” — Mudae never prints the figure for a specific level, so the column says it is derived. Only <b>perk 9</b> is priced: its value % is measured from logged sphere clicks and its extra click modelled through the perk-9 DP.</div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Two readings</div>
+          <div class="tiny">$ohu prints a stock line and $shop prints its own balance, <b>read at different moments</b>. Nothing establishes they are different pools, so they stay two readings rather than a liquid/invested split.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Perk 9 today</div>
+          <div class="pk">Clicked<b class="ac">7 / 15</b></div>
+          <div class="bar"><i style="width:47%"></i></div>
+          <div class="pk">Spawns left<b>~34</b></div>
+          <div class="pk">Threshold<b>≥ 146 SP</b></div>
+        </div>
+        <div class="sc">
+          <div class="h">Invest</div>
+          <div class="tiny">Blocked: no kakera balance, and the invest command's syntax and reply are undocumented.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== ADVISOR ============================== -->
+  <section class="page" data-page="advisor">
+    <div class="targets">
+      <div class="tg"><span>Account</span><b>lukazade234</b></div>
+      <div class="tg"><span>Server</span><b>Key Server 0 · #mudae-w</b></div>
+      <div class="tg p"><span>Character</span><b>Lucy</b></div>
+    </div>
+    <div class="pills">
+      <a class="sel">$bw</a><a>Key EV</a><a>Wishlist</a><a>Lists</a><a>Formatter</a>
+      <span class="hint">every answer shows its evidence</span>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="optima" style="margin-top:16px">
+          <div class="opt a">
+            <div class="ol">Optimal $bw · whole wishlist</div>
+            <div class="ov"><b>19</b><em>51.173 keys/hr</em></div>
+            <div class="od">27.60 wishlist spawns/hr · 33.3% of net rolls<br><span style="color:var(--good)">✓ you are on it</span></div>
+          </div>
+          <div class="opt b">
+            <div class="ol">Optimal $bw · starwishes</div>
+            <div class="ov"><b>15</b><em>12.310 keys/hr</em></div>
+            <div class="od">5.89 starwish spawns/hr · 6.8% of net rolls<br>−4 from your $bw</div>
+          </div>
+          <div class="opt c">
+            <div class="ol">Optimal $bw · Lucy</div>
+            <div class="ov"><b>15</b><em>0.779 keys/hr</em></div>
+            <div class="od">spawns 1 in 233 rolls · starwish, perk 1 +313%<br>−4 from your $bw</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:240px">
+            <div class="grouplbl">EV keys/hr vs $bw</div>
+            <div class="tbwrap"><table>
+              <tr><th class="mono">$bw</th><th class="r mono">rolls/hr</th><th class="r mono">wl/hr</th><th class="r mono">wl keys</th><th class="r mono">sel keys</th></tr>
+              <tr><td class="mono">17</td><td class="r mono">85</td><td class="r mono">27.575</td><td class="r mono">51.133</td><td class="r mono">0.777</td></tr>
+              <tr><td class="mono">18</td><td class="r mono">84</td><td class="r mono">27.594</td><td class="r mono">51.164</td><td class="r mono">0.775</td></tr>
+              <tr class="on"><td class="mono"><b>19</b></td><td class="r mono">83</td><td class="r mono">27.602</td><td class="r mono">51.173</td><td class="r mono">0.773</td></tr>
+              <tr><td class="mono">20</td><td class="r mono">82</td><td class="r mono">27.597</td><td class="r mono">51.160</td><td class="r mono">0.771</td></tr>
+              <tr><td class="mono">21</td><td class="r mono">81</td><td class="r mono">27.580</td><td class="r mono">51.125</td><td class="r mono">0.768</td></tr>
+            </table></div>
+          </div>
+          <div style="flex:1.25;min-width:300px">
+            <div class="grouplbl">The curve</div>
+            <svg viewBox="0 0 460 230" width="100%" role="img" aria-label="EV keys per hour against $bw invested: the whole-wishlist curve peaks at 19, Lucy's at 15.">
+              <g font-family="IBM Plex Mono, monospace" font-size="9" fill="var(--mute)">
+                <text x="0" y="14">60</text><text x="0" y="70">45</text><text x="0" y="126">30</text><text x="0" y="182">15</text><text x="0" y="212">0</text>
+                <text x="432" y="14" fill="var(--accent2)">1.0</text><text x="432" y="113" fill="var(--accent2)">0.5</text><text x="432" y="212">0.0</text>
+                <text x="26" y="226">0</text><text x="150" y="226">25</text><text x="272" y="226">50</text><text x="392" y="226">100</text>
+              </g>
+              <g stroke="var(--line)" stroke-width="1">
+                <line x1="26" y1="10" x2="26" y2="206"/><line x1="26" y1="206" x2="424" y2="206"/><line x1="424" y1="10" x2="424" y2="206"/>
+              </g>
+              <path d="M26 192 L60 128 L94 103 L128 93 L162 92 L196 96 L230 107 L264 126 L298 148 L332 170 L366 189 L400 201 L424 204" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M26 93 L60 72 L94 60 L112 57 L162 61 L196 72 L230 89 L264 112 L298 137 L332 161 L366 182 L400 197 L424 204" fill="none" stroke="var(--accent2)" stroke-width="2" stroke-linejoin="round"/>
+              <line x1="128" y1="10" x2="128" y2="206" stroke="var(--good)" stroke-width="1" stroke-dasharray="3 3"/>
+              <circle cx="128" cy="93" r="3.5" fill="var(--accent)"/><circle cx="112" cy="57" r="3.5" fill="var(--accent2)"/>
+              <g font-family="IBM Plex Mono, monospace" font-size="9">
+                <text x="134" y="24" fill="var(--good)">wishlist 19</text><text x="118" y="47" fill="var(--accent2)">Lucy 15</text>
+              </g>
+            </svg>
+            <div class="legend"><span><i style="background:var(--accent)"></i>whole wishlist · left scale</span><span><i style="background:var(--accent2)"></i>Lucy · right scale</span></div>
+          </div>
+        </div>
+        <div class="note-l">Advisory only — nothing here sends <b>$bw</b>. Set it yourself with <b>$bw 19</b>. The peak is flat: several values sit within a percent of each other, and the base pool decides which one wins.</div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Inputs</div>
+          <div class="pk">Base pool<b class="ac">2,000</b></div>
+          <div class="pk">Roulette<b>all four</b></div>
+          <div class="pk">$persrare<b>1</b></div>
+          <div class="pk">Slash rolling<b>off</b></div>
+          <div class="tiny" style="margin-top:8px">Base pool and $persrare are <b>read</b> — from $limroul and $ov, not typed.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Evidence</div>
+          <div class="pk">$bonus<b class="gd">09-05 01:16</b></div>
+          <div class="pk">$wl<b class="gd">09-04 17:22</b></div>
+          <div class="pk">$shop<b class="gd">09-04 20:10</b></div>
+          <div class="pk">$settings<b class="gd">stored</b></div>
+          <div class="pk">$ov<b class="gd">09-05 19:45</b></div>
+          <div class="pk">$limroul<b class="gd">09-05 21:17</b></div>
+        </div>
+        <div class="sc">
+          <div class="h">Perk 1 check</div>
+          <div class="tiny">All <b>160</b> wishlist rows still match what $shop OP1 (50% shared) implies, so the captured spawn bonuses are current.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== STATISTICS · REPORT (all tiles) ================= -->
+  <section class="page" data-page="stats">
+    <div class="targets">
+      <div class="tg"><span>Day</span><b>2026-09-06 UTC</b></div>
+      <div class="tg"><span>Account</span><b>lukazade234</b></div>
+      <div class="tg"><span>Server</span><b>Key Server 0</b></div>
+      <div class="tg flat act"><span>Scope</span><b style="color:var(--good)">scoped</b></div>
+    </div>
+    <div class="pills">
+      <a class="sel">Report</a><a>Soulmates</a><a>Kakera</a><a>Spheres</a><a>Minigames</a><a>Keys</a>
+      <span class="hint">baseline is the trailing 7 days · 34 days logged</span>
+    </div>
+    <div class="body" style="display:block">
+      <div class="grid">
+
+        <div class="tile first s12" style="grid-column:span 12">
+          <div class="th"><span class="t">day</span><span class="s">against the trailing 7-day pace, so a long-running account is judged on its current form</span></div>
+          <div class="kpi">
+            <div><span>Kakera</span><b>184,220</b><i class="up">▲ 18%</i></div>
+            <div><span>Spheres</span><b>1,412</b><i class="up">▲ 4%</i></div>
+            <div><span>Keys</span><b>38</b><i class="dn">▼ 9%</i></div>
+            <div><span>Claims</span><b>11</b><i class="up">▲ 2%</i></div>
+            <div><span>Soulmates</span><b>2</b><i class="na">no baseline</i></div>
+            <div style="flex:1;min-width:220px">
+              <span>14-day trend · kakera</span>
+              <svg viewBox="0 0 260 44" width="100%" style="margin-top:8px" role="img" aria-label="Fourteen-day kakera trend, ending high at 184,220.">
+                <polyline points="4,32 22,28 40,34 58,22 76,26 94,18 112,24 130,14 148,20 166,12 184,17 202,9 220,14 238,6"
+                          fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
+                <circle cx="238" cy="6" r="3" fill="var(--accent)"/>
+                <line x1="4" y1="40" x2="252" y2="40" stroke="var(--line)" stroke-width="1"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="tile s8">
+          <div class="th"><span class="t">the day, hour by hour</span><span class="s">kakera stacked by source · spheres and keys on their own scales</span></div>
+          <svg id="hourly" viewBox="0 0 620 150" width="100%" role="img" aria-label="Kakera per hour stacked by source, with spheres and keys drawn as lines on their own scales."></svg>
+          <div class="legend">
+            <span><i style="background:var(--accent)"></i>buttons</span>
+            <span><i style="background:var(--accent2)"></i>$bku</span>
+            <span><i style="background:var(--warn)"></i>$dk</span>
+            <span><i style="background:var(--mute)"></i>chaos</span>
+            <span><i style="background:var(--good);border-radius:50%"></i>spheres</span>
+            <span><i style="background:var(--bad);border-radius:50%"></i>keys</span>
+          </div>
+        </div>
+
+        <div class="tile s4">
+          <div class="th"><span class="t">keys</span><span class="s">by type</span><span class="tot">38</span></div>
+          <div style="display:flex;gap:18px;align-items:center">
+            <svg viewBox="0 0 100 100" width="104" height="104" role="img" aria-label="Keys by type: 16 chaos, 11 bronze, 7 silver, 3 gold, 1 omega.">
+              <circle cx="50" cy="50" r="34" fill="none" stroke="var(--accent)" stroke-width="16" stroke-dasharray="90 124" transform="rotate(-90 50 50)"/>
+              <circle cx="50" cy="50" r="34" fill="none" stroke="var(--accent2)" stroke-width="16" stroke-dasharray="62 152" stroke-dashoffset="-90" transform="rotate(-90 50 50)"/>
+              <circle cx="50" cy="50" r="34" fill="none" stroke="var(--good)" stroke-width="16" stroke-dasharray="39 175" stroke-dashoffset="-152" transform="rotate(-90 50 50)"/>
+              <circle cx="50" cy="50" r="34" fill="none" stroke="var(--warn)" stroke-width="16" stroke-dasharray="17 197" stroke-dashoffset="-191" transform="rotate(-90 50 50)"/>
+              <circle cx="50" cy="50" r="34" fill="none" stroke="var(--mute)" stroke-width="16" stroke-dasharray="6 208" stroke-dashoffset="-208" transform="rotate(-90 50 50)"/>
+            </svg>
+            <div style="flex:1;min-width:0">
+              <div class="pk">Chaos<b class="ac">16</b></div>
+              <div class="pk">Bronze<b>11</b></div>
+              <div class="pk">Silver<b>7</b></div>
+              <div class="pk">Gold<b>3</b></div>
+              <div class="pk">Omega<b>1</b></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tile s7">
+          <div class="th"><span class="t">kakera by colour</span><span class="s">over clicks alone — $bku and $dk carry no colour</span><span class="tot">96,410</span><span class="tu">ka</span></div>
+          <svg id="bubbles" viewBox="0 0 560 150" width="100%" role="img" aria-label="Kakera clicks by colour: bubble area is total kakera, position is average value against click count."></svg>
+        </div>
+
+        <div class="tile s5">
+          <div class="th"><span class="t">spheres</span><span class="s">by source</span><span class="tot">1,412</span><span class="tu">SP</span></div>
+          <svg id="treemap" viewBox="0 0 380 150" width="100%" role="img" aria-label="Spheres by source: $ot 4,575, roll clicks, $oq, $oc, $oh, perk 10."></svg>
+        </div>
+
+        <div class="tile s7">
+          <div class="th"><span class="t">daily click budgets</span><span class="s">in the order they were clicked · today only, and scoped</span></div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);margin-bottom:6px">Perk 8 · 40 of 40</div>
+          <div class="tape" id="tape8"></div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);margin:12px 0 6px">Perk 9 · 11 of 15</div>
+          <div class="tape" id="tape9"></div>
+          <div class="tiny" style="margin-top:10px">The perk-8 tape is an <b>approximation</b>: nothing records which click consumed a slot, so purple is excluded (it cannot spawn on a perk-8 character) and the day's first 40 non-purple reactions stand in.</div>
+        </div>
+
+        <div class="tile s5">
+          <div class="th"><span class="t">minigames</span><span class="s">SP per use · 3 days with use counts</span></div>
+          <div class="dumb"><span class="nm">$ot</span><span class="tr"><span class="ln" style="left:0;right:0"></span><span class="a" style="left:0%"></span><span class="b" style="left:calc(100% - 10px)"></span></span><span class="vv">915</span></div>
+          <div class="dumb"><span class="nm">$oh</span><span class="tr"><span class="ln" style="left:0;right:0"></span><span class="a" style="left:0%"></span><span class="b" style="left:62%"></span></span><span class="vv">612</span></div>
+          <div class="dumb"><span class="nm">$oq</span><span class="tr"><span class="ln" style="left:0;right:0"></span><span class="a" style="left:0%"></span><span class="b" style="left:33%"></span></span><span class="vv">345</span></div>
+          <div class="dumb"><span class="nm">$oc</span><span class="tr"><span class="ln" style="left:0;right:0"></span><span class="a" style="left:0%"></span><span class="b" style="left:32%"></span></span><span class="vv">336</span></div>
+          <div class="tiny" style="margin-top:9px">Rated <b>per use, not per board</b> — <b>$ot 5</b> is one command that spends five of the day's allowance and pays roughly five times a single use.</div>
+        </div>
+
+        <div class="tile s5">
+          <div class="th"><span class="t">source</span><span class="s">kakera by method</span></div>
+          <div class="pk">Kakera buttons<b>96,410 <span style="color:var(--mute)">· 52%</span></b></div>
+          <div class="bar"><i style="width:52%"></i></div>
+          <div class="pk">$bku badges<b>44,180 <span style="color:var(--mute)">· 24%</span></b></div>
+          <div class="bar"><i style="width:24%;background:var(--accent2)"></i></div>
+          <div class="pk">$dk daily<b>26,500 <span style="color:var(--mute)">· 14%</span></b></div>
+          <div class="bar"><i style="width:14%;background:var(--warn)"></i></div>
+          <div class="pk">Chaos follow-ups<b>17,130 <span style="color:var(--mute)">· 10%</span></b></div>
+          <div class="bar"><i style="width:10%;background:var(--mute)"></i></div>
+        </div>
+
+        <div class="tile s7">
+          <div class="th"><span class="t">new soulmates</span><span class="s">2 today</span></div>
+          <div class="tbwrap"><table>
+            <tr><th>Character</th><th>Series</th><th class="r mono">Kakera</th><th class="r mono">Time</th></tr>
+            <tr><td><b>Yor Forger</b></td><td>Spy × Family</td><td class="r mono">2,180</td><td class="r mono">22:14</td></tr>
+            <tr><td><b>Frieren</b></td><td>Sousou no Frieren</td><td class="r mono">3,044</td><td class="r mono">09:41</td></tr>
+          </table></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- =============================== DEBUG =============================== -->
+  <section class="page" data-page="debug">
+    <div class="targets">
+      <div class="tg"><span>Account</span><b>lukazade234</b></div>
+      <div class="tg"><span>Channel</span><b>Key Server 0 · #mudae-w</b></div>
+      <div class="tg flat"><span>Captured</span><b>4</b></div>
+    </div>
+    <div class="acts">
+      <button class="go">Connect</button><button>Disconnect</button>
+      <span class="sp"></span><button>Save log</button><button>Clear</button>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="grouplbl n">Captured messages</div>
+        <div class="tbwrap"><table>
+          <tr><th class="mono">Time</th><th>Author</th><th>Kind</th><th>Summary</th></tr>
+          <tr class="pick"><td class="mono">19:44:27</td><td>LukaZade</td><td class="mono">command</td><td>$tu</td></tr>
+          <tr class="pick"><td class="mono">19:44:27</td><td><b>Mudae</b></td><td class="mono">$tu response</td><td>0 rolls (+5 mk) · claim cd 16m · power 46%</td></tr>
+          <tr class="pick"><td class="mono">19:45:01</td><td>LukaZade</td><td class="mono">command</td><td>$ov</td></tr>
+          <tr class="on pick"><td class="mono">19:45:01</td><td><b>Mudae</b></td><td class="mono">$ov</td><td>Premium 2 · $persrare none · 17/17 fields</td></tr>
+        </table></div>
+
+        <div class="grouplbl">Parse detail</div>
+        <div class="rows">
+          <div class="rw"><span class="k">Summary</span><span class="v">$ov · Premium 2 · $persrare none · 17/17 fields</span></div>
+          <div class="rw"><span class="k">Warnings</span><span class="v" style="color:var(--good)">none</span></div>
+        </div>
+        <div class="grouplbl n">Parsed fields (JSON)</div>
+        <pre style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.8;color:var(--dim);border-left:1px solid var(--line);padding:2px 0 2px 13px;overflow-x:auto">{
+  "player_premium": 2,
+  "persrare": 1,
+  "wishdm": ["n", "n", "n"],
+  "kakeradm": true,
+  "rdmimg_random": false,
+  "rdmimg_gif_webp": true,
+  "rdmimg_custom": true,
+  "limroul": "see $limroul"
+}</pre>
+        <div class="grouplbl n">Raw content</div>
+        <pre style="font-family:'IBM Plex Mono',monospace;font-size:11px;line-height:1.8;color:var(--mute);border-left:1px solid var(--line);padding:2px 0 2px 13px;overflow-x:auto">**⚒️ __Player Settings__** ⚒️
+⭐⭐ Player Premium 2 ⭐⭐
+
+· Increased rarity for owned characters: **none** ($persrare)
+· Private wishes: **n  n  n** ($wishdm)
+…</pre>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">Connection</div>
+          <div class="tiny">Uses the <b>Run target</b> — account token and channel from Run. ParseLab has no token field of its own and never persists one on keystroke.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Raw embeds / buttons</div>
+          <div class="tiny">none on this message</div>
+        </div>
+        <div class="sc">
+          <div class="h">Caught here</div>
+          <div class="tiny">Before <b>$ov</b> had a parser this message classified as a <b>claim</b> — the sheet is a wall of bold values and the claim heuristic counts bold names.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== SETTINGS ============================= -->
+  <section class="page" data-page="settings">
+    <div class="targets">
+      <div class="tg"><span>Shell</span><b>Quiet</b></div>
+      <div class="tg p"><span>Palette</span><b>Kakera</b></div>
+      <div class="tg flat"><span>Version</span><b style="color:var(--good)">up to date</b></div>
+    </div>
+    <div class="body">
+      <div class="main">
+        <div class="grouplbl">Appearance</div>
+        <div class="tog"><span class="k">Shell<em>Classic · Haul · Console · Boxed · Quiet</em></span><span class="in">Quiet</span></div>
+        <div class="tog"><span class="k">Palette</span><span class="in">Kakera</span></div>
+        <div class="tog"><span class="k">Use system fonts<em>Off keeps Space Grotesk and IBM Plex Mono.</em></span><span class="s off">off</span></div>
+
+        <div class="grouplbl">Mudae</div>
+        <div class="tog"><span class="k">Read Mudae direct messages<em>Opt-in. Every DM-answering command keeps an in-channel paging fallback for when this is off.</em></span><span class="s off">off</span></div>
+        <div class="tog"><span class="k">$wl capture route</span><span class="in">channel paging</span></div>
+
+        <div class="grouplbl">Application</div>
+        <div class="tog"><span class="k">Minimize to tray</span><span class="s">on</span></div>
+        <div class="tog"><span class="k">Check for updates on start</span><span class="s">on</span></div>
+        <div class="tog"><span class="k">Data folder<em>Holds tokens and logs. Gitignored, and synced between machines.</em></span><span class="in">data/</span></div>
+      </div>
+      <div class="sidecol">
+        <div class="sc">
+          <div class="h">This machine</div>
+          <div class="pk">data/ synced<b class="ac">Syncthing</b></div>
+          <div class="pk">Events<b>events.jsonl</b></div>
+          <div class="pk">Last sync<b>4m ago</b></div>
+          <div class="tiny" style="margin-top:8px">A gap in local logs is usually a sync gap, not a missing run.</div>
+        </div>
+        <div class="sc">
+          <div class="h">Update</div>
+          <div class="tiny">On <b>v3.4.1</b>, up to date. Checked 6m ago.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+const notes={
+ run:"<b>Run.</b> The only page with a dominant number — it always had one. New here: the two smart strips in the side column. <b>Smart saver</b> is cut to the two things you act on (is it holding normal clicks, and how much bar it will spend); <b>adaptive perk 9</b> to the live threshold, which colours that admits, and what changes it next.",
+ accounts:"<b>Accounts.</b> No hero number \u2014 it does not need one. The table is the page, and the side column carries the notes worth keeping.",
+ servers:"<b>Servers.</b> Channel table over the selected channel's $settings, both de-boxed. Sheet freshness is one line per sheet in the side column, since staleness is per sheet.",
+ presets:"<b>Presets.</b> Sub-tabs are the real five \u2014 Rolling / Claims / Reactions / $us / Expert \u2014 in the same pill row every other hub uses. The list and its Add / Duplicate / Rename / Wizard / Remove sit above it; rules are label rows with the explanation in --mute under the label, instead of boxed switch cards.",
+ mudae:"<b>Mudae.</b> Sub-tabs over label/value rows — the structure it already has. $limroul sits in the side column because $ov's own last line is the pointer to it.",
+ spheres:"<b>Spheres.</b> The two stock figures sit side by side as two <i>readings</i> with the gap between them stated, never merged. The value column abstains loudly on the nine perks that cannot be priced.",
+ advisor:"<b>Advisor.</b> Three optima separated by hairlines rather than boxed cards, table beside the dual-axis curve. Two scales because one character's EV is ~65\\u00d7 below the wishlist total.",
+ stats:"<b>Statistics \\u203a Report.</b> Every tile kept — KPI row and 14-day trend, hourly stacked columns, key donut, kakera-colour bubbles, sphere treemap, the click tapes, the minigame dumbbell, source shares, soulmates. Only the card is gone: a hairline rule and a mono label instead of a filled, bordered, rounded box.",
+ debug:"<b>Debug.</b> Left as the two-pane ParseLab it is — captured messages over the selected message's detail. Only the panel chrome changed; JSON and raw text keep a hairline gutter instead of a boxed frame.",
+ settings:"<b>Settings.</b> Unchanged from v1, which you liked. Label rows with the explanation in --mute underneath, no switch chrome."
+};
+
+/* --- charts drawn from data, so the shapes are honest ------------------- */
+const NS='http://www.w3.org/2000/svg';
+function el(n,a){const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e}
+
+/* hourly stacked kakera + sphere/key lines */
+(function(){
+  const svg=document.getElementById('hourly');if(!svg)return;
+  const hrs=[[0,0,0,0],[2100,0,0,0],[3400,0,0,900],[5100,4200,0,0],[6200,0,0,1400],[4800,0,0,0],
+             [7400,8100,0,2200],[9100,0,0,0],[6600,4300,0,1800],[8200,0,26500,0],[7700,0,0,0],[5400,9200,0,1100],
+             [6900,0,0,0],[8800,5600,0,2400],[7100,0,0,0],[9400,7300,0,1600],[6300,0,0,0],[5900,4800,0,900],
+             [8100,0,0,2100],[7600,0,0,0],[9900,0,0,1200],[8400,0,0,0],[6100,0,0,900],[3200,0,0,0]];
+  const sph=[0,12,44,61,38,20,96,74,55,110,88,72,66,120,58,94,41,63,87,52,101,70,45,24];
+  const key=[0,1,2,1,3,0,4,2,1,3,2,1,2,4,1,3,0,2,3,1,4,2,1,0];
+  const W=620,H=150,L=24,R=8,T=8,B=18,cols=['var(--accent)','var(--accent2)','var(--warn)','var(--mute)'];
+  const max=Math.max(...hrs.map(h=>h.reduce((a,b)=>a+b,0)));
+  const bw=(W-L-R)/hrs.length, plot=H-T-B;
+  svg.appendChild(el('line',{x1:L,y1:H-B,x2:W-R,y2:H-B,stroke:'var(--line)','stroke-width':1}));
+  hrs.forEach((h,i)=>{let y=H-B;h.forEach((v,j)=>{if(!v)return;const ht=v/max*plot;y-=ht;
+    svg.appendChild(el('rect',{x:L+i*bw+1.5,y:y,width:bw-3,height:ht,fill:cols[j],rx:1.5}));});});
+  const smax=Math.max(...sph),kmax=Math.max(...key);
+  const pl=(arr,m,c)=>{const p=arr.map((v,i)=>(L+i*bw+bw/2)+','+(H-B-v/m*plot*0.82)).join(' ');
+    svg.appendChild(el('polyline',{points:p,fill:'none',stroke:c,'stroke-width':1.5,'stroke-linejoin':'round',opacity:.9}));};
+  pl(sph,smax,'var(--good)');pl(key,kmax,'var(--bad)');
+  [0,6,12,18,23].forEach(i=>{const t=el('text',{x:L+i*bw+bw/2,y:H-5,'text-anchor':'middle',
+    'font-family':'IBM Plex Mono, monospace','font-size':9,fill:'var(--mute)'});t.textContent=String(i).padStart(2,'0');svg.appendChild(t);});
+})();
+
+/* kakera clicks by colour — Mudae's own colours, not the palette's */
+(function(){
+  const svg=document.getElementById('bubbles');if(!svg)return;
+  const d=[['purple','#a06ce0',62,318],['blue','#4a9de4',41,262],['cyan','#3ec7b0',33,214],
+           ['green','#6fbf5a',18,196],['yellow','#e4c04a',14,352],['orange','#e0913c',9,470],
+           ['red','#e05c5c',5,690],['rainbow','#d94fb0',2,1240]];
+  const W=560,H=150,L=34,R=90,T=12,B=26;
+  const cmax=70,vmax=1400,amax=Math.max(...d.map(x=>x[2]*x[3]));
+  svg.appendChild(el('line',{x1:L,y1:H-B,x2:W-R,y2:H-B,stroke:'var(--line)','stroke-width':1}));
+  svg.appendChild(el('line',{x1:L,y1:T,x2:L,y2:H-B,stroke:'var(--line)','stroke-width':1}));
+  d.forEach(([n,c,cnt,val])=>{
+    const x=L+cnt/cmax*(W-R-L), y=(H-B)-val/vmax*(H-B-T), r=6+Math.sqrt(cnt*val/amax)*20;
+    svg.appendChild(el('circle',{cx:x,cy:y,r:r,fill:c,opacity:.55,stroke:c,'stroke-width':1.5}));
+  });
+  [['0',L],['35',L+(W-R-L)/2],['70',W-R]].forEach(([t,x])=>{const e=el('text',{x:x,y:H-8,'text-anchor':'middle','font-family':'IBM Plex Mono, monospace','font-size':9,fill:'var(--mute)'});e.textContent=t;svg.appendChild(e);});
+  const ax=el('text',{x:(L+W-R)/2,y:H-8+14,'text-anchor':'middle','font-family':'IBM Plex Mono, monospace','font-size':9,fill:'var(--mute)'});
+  d.forEach(([n,c],i)=>{const yy=T+i*16;
+    svg.appendChild(el('rect',{x:W-R+10,y:yy,width:8,height:8,fill:c,rx:2}));
+    const e=el('text',{x:W-R+23,y:yy+8,'font-family':'IBM Plex Mono, monospace','font-size':9,fill:'var(--mute)'});e.textContent=n;svg.appendChild(e);});
+  const xl=el('text',{x:L,y:H-8,'font-family':'IBM Plex Mono, monospace','font-size':9,fill:'var(--mute)'});
+  svg.appendChild(el('text',{}));
+})();
+
+/* spheres by source — treemap */
+(function(){
+  const svg=document.getElementById('treemap');if(!svg)return;
+  const d=[['$ot',458,'var(--accent)'],['roll clicks',392,'var(--accent2)'],['$oq',188,'var(--good)'],
+           ['$oc',156,'var(--warn)'],['$oh',132,'var(--mute)'],['perk 10',86,'var(--bad)']];
+  const W=380,H=150,tot=d.reduce((a,b)=>a+b[1],0);
+  let x=0,y=0,rowH=H*0.62;
+  d.forEach(([n,v,c],i)=>{
+    if(i===3){x=0;y=rowH;rowH=H-rowH}
+    const share=v/tot, w=(i<3? W*(v/(d[0][1]+d[1][1]+d[2][1])) : W*(v/(d[3][1]+d[4][1]+d[5][1])));
+    svg.appendChild(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,2),height:rowH-2,fill:c,opacity:.30,rx:2}));
+    svg.appendChild(el('rect',{x:x+1,y:y+1,width:Math.max(w-2,2),height:rowH-2,fill:'none',stroke:c,'stroke-width':1,rx:2}));
+    if(w>52){
+      const t1=el('text',{x:x+9,y:y+19,'font-family':'IBM Plex Mono, monospace','font-size':10,fill:'var(--fg)'});t1.textContent=n;svg.appendChild(t1);
+      const t2=el('text',{x:x+9,y:y+33,'font-family':'IBM Plex Mono, monospace','font-size':10,fill:'var(--mute)'});t2.textContent=v+' SP';svg.appendChild(t2);
+    }
+    x+=w;
+  });
+})();
+
+/* the two click tapes */
+(function(){
+  const kak=['#a06ce0','#4a9de4','#3ec7b0','#6fbf5a','#e4c04a','#e0913c','#e05c5c','#d94fb0'];
+  const t8=document.getElementById('tape8');
+  if(t8){for(let i=0;i<40;i++){const b=document.createElement('i');
+    b.style.background=kak[1+Math.floor(Math.abs(Math.sin(i*2.7))*7)];b.title='perk-8 click '+(i+1);t8.appendChild(b);}}
+  const t9=document.getElementById('tape9');
+  const sph=['#e4c04a','#e8e8f4','#e05c5c','#a06ce0','#4a9de4','#3ec7b0','#6fbf5a'];
+  if(t9){for(let i=0;i<15;i++){const b=document.createElement('i');
+    if(i<11){b.style.background=sph[Math.floor(Math.abs(Math.cos(i*1.9))*6)]}
+    else{b.style.background='var(--line)'}
+    b.title=i<11?('perk-9 click '+(i+1)):'unspent';t9.appendChild(b);}}
+})();
+
+const win=document.getElementById('win'),note=document.getElementById('note');
+const tbtn=[...document.querySelectorAll('#tabs button')];
+const pbtn=[...document.querySelectorAll('#pals button')];
+const navs=[...document.querySelectorAll('.nav a')];
+function setTab(t){
+  tbtn.forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.t===t)));
+  navs.forEach(a=>a.classList.toggle('sel',a.dataset.t===t));
+  document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.dataset.page===t));
+  note.innerHTML=notes[t]||'';
+  try{localStorage.setItem('fm-quiet-tab',t)}catch(e){}
+}
+function setPal(c){
+  pbtn.forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.c===c)));
+  win.dataset.p=c;
+  try{localStorage.setItem('fm-quiet-pal',c)}catch(e){}
+}
+tbtn.forEach(b=>b.onclick=()=>setTab(b.dataset.t));
+navs.forEach(a=>a.onclick=e=>{e.preventDefault();setTab(a.dataset.t)});
+pbtn.forEach(b=>b.onclick=()=>setPal(b.dataset.c));
+let t0='run',p0='kakera';
+try{t0=localStorage.getItem('fm-quiet-tab')||'run';p0=localStorage.getItem('fm-quiet-pal')||'kakera'}catch(e){}
+if(!notes[t0])t0='run';
+setTab(t0);setPal(p0);
+</script>

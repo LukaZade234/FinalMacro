@@ -45,11 +45,16 @@ Item {
     readonly property bool hideEmptyRows: !isSettings && !isOv
     readonly property bool showCommandChip: sheetKind !== "shop"
     readonly property bool showFieldIcon: sheetKind === "bonus"
-    // `$ov` labels are sentences ("Emoji for disabled characters"), where the
-    // other sheets' are two or three words, so the label column widens for it
-    // rather than eliding most of the sheet.
-    readonly property real labelWidth: isOv ? 212 : 118
-    readonly property real labelMaxWidth: isOv ? 260 : 140
+    // Label columns follow the width available rather than a fixed 118px: the
+    // sheets are a full page wide now that `$settings` and `$bonus` are not
+    // squeezed into a Servers sidebar, and a fixed column elided most of a row
+    // while the rest of the line sat empty. `$ov` gets the wider floor because
+    // its labels are sentences, not two or three words.
+    readonly property real labelFloor: isOv ? 212 : 130
+    readonly property real labelWidth: Math.min(
+        labelCeiling, Math.max(labelFloor, displayScroll.availableWidth * 0.24))
+    readonly property real labelCeiling: isOv ? 300 : 260
+    readonly property real labelMaxWidth: labelCeiling
 
     readonly property real valueWidthFraction: {
         if (sheetKind === "shop") return 0.55

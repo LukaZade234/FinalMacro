@@ -114,6 +114,12 @@ class KakeraReactor:
         budget = perk8_click_budget(self.state, rules)
         has_chaos = _has_chaos_key(fields)
         has_perk_8 = bool(fields.get("perk_8"))
+        if has_perk_8:
+            # Seeing one is what proves the count is still plausible — the
+            # silence between them is the signal that it is not.
+            from macro.perk8_recheck import note_perk8_seen
+
+            note_perk8_seen(self.state)
         if (
             rules.perk_8_budget_mode
             and perk8_budget_applies(mode)
@@ -388,6 +394,16 @@ class KakeraReactor:
                 confirmed = True
                 if outcome.kind == MessageKind.KAKERA_CLAIM:
                     self._apply_chaos_claim_rewards(outcome)
+                    if outcome.fields.get("perk8_final_click"):
+                        # Mudae says that was the last one. Not taken as the
+                        # count — it schedules an `$ohu8` that asks properly.
+                        from macro.perk8_recheck import note_perk8_final_notice
+
+                        note_perk8_final_notice(self.state)
+                        self._debug(
+                            "perk 8: Mudae announced the day's last click — "
+                            "re-checking $ohu8"
+                        )
                 if chaos:
                     arm_idle_watch()
                     self._debug(

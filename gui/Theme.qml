@@ -99,6 +99,17 @@ QtObject {
     readonly property int radiusPill: shape.radiusPill
     readonly property int borderWidth: shape.borderWidth
     readonly property bool doubleBorder: shape.doubleBorder
+    // A panel is a hairline rule under a label rather than a filled box. Read by
+    // components/PanelCard.qml, so every page inherits it without being touched.
+    readonly property bool flatPanels: shape.flatPanels === true
+
+    // The three properties that turn a Rectangle into a card, resolved once so
+    // the views that hand-roll a stat tile do not each carry the same ternary.
+    // A flat design pairs these with a hairline rule of its own — see the
+    // `Theme.flatPanels` rule in KeyEvView / SphereStockView / DailyReportView.
+    readonly property color panelFill: flatPanels ? "transparent" : surface
+    readonly property int panelBorder: flatPanels ? 0 : borderWidth
+    readonly property int panelRadius: flatPanels ? 0 : radiusMd
 
     readonly property int controlHeight: shape.controlHeight
     readonly property int controlPadH: shape.controlPadH

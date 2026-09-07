@@ -60,6 +60,17 @@ class AccountState:
     kakera_clicks_today: int = 0
     kakera_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
     perk8_priority_mode: str = "inactive"
+    # When a perk-8 character was last seen or clicked, UTC ISO. The macro's
+    # perk-8 count is a belief it can only correct by asking Mudae, so a long
+    # silence here is the signal that the belief has gone stale — see
+    # `macro/perk8_recheck.py`.
+    perk8_last_seen_at: str = ""
+    # When the power bar first reached its cap, UTC ISO; cleared as soon as it
+    # is spent below. A bar that stays pinned is always waste, whatever caused it.
+    power_pinned_since: str = ""
+    # Mudae announced the day's last perk-8 click (`($op 8) … for today`). A
+    # reason to re-check, never a count in itself.
+    perk8_final_notice: bool = False
     perk8_click_max: int | None = None
     perk9_clicks_today: int = 0
     perk9_clicks_day: str = ""  # YYYY-MM-DD (UTC); resets daily
@@ -132,6 +143,9 @@ class AccountState:
             "activity_log": [entry.to_dict() for entry in self.activity_log[-400:]],
             "kakera_clicks_today": self.kakera_clicks_today,
             "perk8_priority_mode": self.perk8_priority_mode,
+            "perk8_last_seen_at": self.perk8_last_seen_at,
+            "power_pinned_since": self.power_pinned_since,
+            "perk8_final_notice": self.perk8_final_notice,
             "perk8_click_max": self.perk8_click_max,
             "perk9_clicks_today": self.perk9_clicks_today,
             "perk9_click_max": self.perk9_click_max,

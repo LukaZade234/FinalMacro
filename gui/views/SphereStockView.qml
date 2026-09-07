@@ -96,10 +96,21 @@ Item {
 
                     Layout.fillWidth: true
                     implicitHeight: 78
-                    color: Theme.surface
-                    border.width: Theme.borderWidth
+                    color: Theme.panelFill
+                    border.width: Theme.panelBorder
                     border.color: Theme.line
-                    radius: Theme.radiusMd
+                    radius: Theme.panelRadius
+
+                    // A flat design has no tile edge, so each tile is ruled off
+                    // the way the report's are.
+                    Rectangle {
+                        visible: Theme.flatPanels
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 1
+                        color: Theme.line
+                    }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -134,10 +145,19 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 78
-                color: Theme.surface
-                border.width: Theme.borderWidth
+                color: Theme.panelFill
+                border.width: Theme.panelBorder
                 border.color: Theme.line
-                radius: Theme.radiusMd
+                radius: Theme.panelRadius
+
+                Rectangle {
+                    visible: Theme.flatPanels
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 1
+                    color: Theme.line
+                }
 
                 ColumnLayout {
                     anchors.fill: parent

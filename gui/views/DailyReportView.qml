@@ -237,6 +237,9 @@ Item {
 
     // ---- reusable pieces -----------------------------------------------------
 
+    // One tile of the mosaic. Under `Theme.flatPanels` it drops the fill, the
+    // border and the radius and is ruled off from the tile above instead — the
+    // report keeps every chart it has, only the box around each one goes.
     component Tile: Rectangle {
         id: tile
         default property alias body: bodyColumn.data
@@ -246,18 +249,29 @@ Item {
         property string totalUnit: ""
         property string footnote: ""
 
-        color: Theme.surface
-        border.width: Theme.borderWidth
+        readonly property int pad: Theme.flatPanels ? 12 : Theme.cardPadding
+
+        color: Theme.flatPanels ? "transparent" : Theme.surface
+        border.width: Theme.flatPanels ? 0 : Theme.borderWidth
         border.color: Theme.line
-        radius: Theme.radiusMd
+        radius: Theme.flatPanels ? 0 : Theme.radiusMd
         Layout.fillWidth: true
         Layout.fillHeight: true
-        implicitHeight: inner.implicitHeight + Theme.cardPadding * 2
+        implicitHeight: inner.implicitHeight + tile.pad * 2
+
+        Rectangle {
+            visible: Theme.flatPanels
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 1
+            color: Theme.line
+        }
 
         ColumnLayout {
             id: inner
             anchors.fill: parent
-            anchors.margins: Theme.cardPadding
+            anchors.margins: tile.pad
             spacing: 10
 
             RowLayout {

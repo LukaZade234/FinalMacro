@@ -96,7 +96,11 @@ _RUN_SUMMARY_THROTTLE_MS = 1000
 
 _DEFAULT_UI_LAYOUT = "classic"
 _DEFAULT_UI_PALETTE = "tokyonight"
-_UI_LAYOUTS = frozenset({"classic", "haul", "console", "boxed"})
+# Must stay in step with `order` in gui/skins.js — Settings lists the designs
+# from the QML side while this decides which one may be *stored*, so a design
+# missing here is offered and then silently refused. `tests/test_appearance.py`
+# reads both files and fails when they drift.
+_UI_LAYOUTS = frozenset({"classic", "haul", "console", "boxed", "quiet"})
 _UI_PALETTES = frozenset({
     "kakera", "tokyonight", "ember", "phosphor", "ice", "bone", "mono",
 })
@@ -107,6 +111,7 @@ _LAYOUT_PALETTE = {
     "haul": "kakera",
     "console": "kakera",
     "boxed": "kakera",
+    "quiet": "kakera",
 }
 
 _PROFILE_META_KEYS = frozenset({
@@ -394,10 +399,19 @@ class AppBridge(QObject):
                 channel = found[1]
         if channel is None:
             channel = self._profiles.active_channel()
-        value = rolls_max_from_sheets(
-            getattr(channel, "bonus", None) if channel else None,
-            getattr(channel, "settings", None) if channel else None,
-        )
+        if channel is None:
+            return -1
+        # Through `account_sheet`, not `channel.bonus`: that attribute is the
+        # **pre-split** blob, and `apply_parsed` clears it the moment a sheet is
+        # filed per account. Reading it directly meant an account that had
+        # fetched `$bonus` still fell through to `$settings.setrolls` — the Run
+        # gauge showed the server's 21 against a real pool of 83.
+        bonus = self._profiles.account_sheet(
+            channel,
+            "bonus",
+            account_id=self._run_account_id or self._profiles.main_account_id,
+        ).fields
+        value = rolls_max_from_sheets(bonus, getattr(channel, "settings", None))
         return int(value) if value else -1
 
     @Property(str, constant=False, notify=macroStateChanged)

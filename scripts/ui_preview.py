@@ -30,7 +30,7 @@ PAGE_NAMES = [
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--layout", default="haul", choices=["classic", "haul", "console", "boxed"])
+    parser.add_argument("--layout", default="haul", choices=["classic", "haul", "console", "boxed", "quiet"])
     parser.add_argument("--palette", default="kakera")
     parser.add_argument("--page", default="0")
     parser.add_argument("--out", default="/tmp/finalmacro-preview.png")

@@ -3,12 +3,18 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import gui 1.0
 
-Rectangle {
+/*
+    An enable-toggleable rule block: title + on/off switch + collapse chevron,
+    then its own content. Presets' Claims / Kakera / Spheres sections are each
+    one of these.
+
+    Shares its chrome with `components/PanelCard.qml` rather than drawing its
+    own: under `Theme.flatPanels` this is a hairline rule and a mono label like
+    every other panel, instead of the curved box every other page already
+    dropped.
+*/
+Item {
     id: card
-    radius: 10
-    color: Theme.bgMedium
-    border.color: Theme.border
-    border.width: 1
 
     property string title: ""
     property string subtitle: ""
@@ -19,15 +25,38 @@ Rectangle {
 
     signal enabledToggled(bool value)
 
-    implicitHeight: outer.implicitHeight + 24
+    readonly property int topRule: Theme.flatPanels ? 11 : 0
+    readonly property int pad: Theme.flatPanels ? 0 : 12
+
+    implicitHeight: outer.implicitHeight + pad * 2 + topRule
     Layout.fillWidth: true
+
+    Rectangle {
+        visible: !Theme.flatPanels
+        anchors.fill: parent
+        radius: Theme.panelRadius
+        color: Theme.panelFill
+        border.color: Theme.border
+        border.width: Theme.panelBorder
+    }
+
+    Rectangle {
+        visible: Theme.flatPanels
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 1
+        color: Theme.line
+    }
 
     ColumnLayout {
         id: outer
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 12
+        anchors.topMargin: card.pad + card.topRule
+        anchors.leftMargin: card.pad
+        anchors.rightMargin: card.pad
         spacing: 8
 
         RowLayout {
@@ -35,10 +64,12 @@ Rectangle {
             spacing: 8
 
             Label {
-                text: card.title
-                color: Theme.fgPrimary
-                font.pixelSize: 13
+                text: Theme.flatPanels ? Theme.sectionLabel(card.title) : card.title
+                color: Theme.flatPanels ? Theme.fgMuted : Theme.fgPrimary
+                font.family: Theme.flatPanels ? Theme.monoFamily : Theme.fontFamily
+                font.pixelSize: Theme.flatPanels ? Theme.sizeMicro : 13
                 font.weight: Font.DemiBold
+                font.letterSpacing: Theme.flatPanels ? Theme.tracking(Theme.sizeMicro) : 0
                 Layout.fillWidth: true
             }
 
