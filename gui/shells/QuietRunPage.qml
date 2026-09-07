@@ -286,34 +286,60 @@ Item {
             Layout.topMargin: 16
             spacing: 40
 
-            ListView {
-                id: feedView
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                model: run.visibleFeed
-                spacing: 3
-                boundsBehavior: Flickable.StopAtBounds
 
-                delegate: RowLayout {
-                    required property var modelData
-                    width: feedView.width
-                    spacing: 20
+                ListView {
+                    id: feedView
+                    anchors.fill: parent
+                    clip: true
+                    model: run.visibleFeed
+                    spacing: 3
+                    boundsBehavior: Flickable.StopAtBounds
 
-                    Label {
-                        Layout.preferredWidth: 56
-                        text: run.timeOf(modelData)
-                        color: Theme.mute
-                        font.family: Theme.monoFamily
-                        font.pixelSize: Theme.sizeSmall
+                    // Newest lines are the ones worth reading, so the feed rests
+                    // at the bottom until the reader scrolls up to look back.
+                    property bool stickToBottom: true
+
+                    function updateStickToBottom() {
+                        if (!moving && !flicking)
+                            return
+                        var maxY = Math.max(0, contentHeight - height)
+                        stickToBottom = (contentY + height) >= (maxY - 24)
                     }
 
-                    Label {
-                        Layout.fillWidth: true
-                        text: modelData.text || ""
-                        color: run.colorFor(modelData.kind)
-                        font.pixelSize: Theme.sizeBody
-                        elide: Text.ElideRight
+                    onMovingChanged: updateStickToBottom()
+                    onFlickingChanged: updateStickToBottom()
+                    onCountChanged: if (stickToBottom) Qt.callLater(positionViewAtEnd)
+                    Component.onCompleted: Qt.callLater(positionViewAtEnd)
+
+                    delegate: RowLayout {
+                        required property var modelData
+                        width: feedView.width
+                        spacing: 20
+
+                        Label {
+                            Layout.preferredWidth: 56
+                            Layout.alignment: Qt.AlignTop
+                            text: modelData.time
+                            color: Theme.mute
+                            font.family: Theme.monoFamily
+                            font.pixelSize: Theme.sizeSmall
+                        }
+
+                        // Rich text so Mudae's emoji resolve to images and the
+                        // per-token tinting matches the other shells; the kind
+                        // colour stays as the base for everything untinted.
+                        Label {
+                            Layout.fillWidth: true
+                            text: MudaeEmoji.feedHtml(modelData.text, 16)
+                            textFormat: Text.RichText
+                            color: run.colorFor(modelData.kind)
+                            font.pixelSize: Theme.sizeBody
+                            wrapMode: Text.NoWrap
+                            elide: Text.ElideRight
+                        }
                     }
                 }
 

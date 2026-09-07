@@ -711,11 +711,20 @@ class AppBridge(QObject):
             "read_at": sheet.read_at,
             "inferred": sheet.inferred,
             "stock": {
-                # Two different readings from two different commands, shown as
-                # such: $ohu prints a sphere stock line, $shop prints its own
-                # balance, and they are read at different moments.
+                # $ohu's stock line and $shop's balance are the same pool read
+                # by two commands, so a single resolved figure is published
+                # alongside the raw readings; $ohu is preferred because it is
+                # re-read far more often than the shop sheet.
                 "ohu_stock": perk9.stock,
                 "shop_spheres": shop.get("spheres"),
+                "spheres": (
+                    perk9.stock if perk9.stock is not None else shop.get("spheres")
+                ),
+                "spheres_source": (
+                    "$ohu"
+                    if perk9.stock is not None
+                    else ("$shop" if shop.get("spheres") is not None else "")
+                ),
             },
             "shop": {
                 "level_cost_step": shop.get("level_cost_step"),

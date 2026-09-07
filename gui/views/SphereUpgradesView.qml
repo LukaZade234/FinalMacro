@@ -52,7 +52,9 @@ Item {
     }
 
     function affordable(cost) {
-        var have = (economy.stock || {}).shop_spheres
+        // The same resolved stock figure the Stock page shows, so the two pages
+        // never disagree about what is affordable.
+        var have = (economy.stock || {}).spheres
         return have !== null && have !== undefined && cost <= have
     }
 

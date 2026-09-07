@@ -7,11 +7,10 @@ import "../components"
 /*
     Spheres › Stock & shop — what you hold and what the ladder costs.
 
-    The two stock figures are shown as two readings rather than merged into a
-    "liquid vs invested" split: `$ohu` prints a sphere stock line and `$shop`
-    prints its own balance, they are read at different moments, and nothing in
-    the app establishes that they mean different pools. Labelling them by source
-    is the honest presentation.
+    `$ohu`'s stock line and `$shop`'s balance are the same pool read by two
+    commands, so one figure is shown and the source it came from is named under
+    it. The bridge prefers `$ohu`, which is re-read far more often than the shop
+    sheet.
 */
 Item {
     id: root
@@ -87,8 +86,7 @@ Item {
 
             Repeater {
                 model: [
-                    { key: "ohu_stock", label: "Sphere stock", note: "from $ohu" },
-                    { key: "shop_spheres", label: "Shop balance", note: "from $shop" }
+                    { key: "spheres", label: "Sphere stock" }
                 ]
 
                 delegate: Rectangle {
@@ -134,7 +132,10 @@ Item {
                         }
 
                         Label {
-                            text: modelData.note
+                            text: {
+                                var src = (root.economy.stock || {}).spheres_source
+                                return src ? "from " + src : ""
+                            }
                             color: Theme.mute
                             font.pixelSize: Theme.sizeMicro
                         }

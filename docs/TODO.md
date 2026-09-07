@@ -188,10 +188,13 @@ without disturbing a live run.
   walking raw events.
 - ~~**Spheres hub**~~ — Stock & shop (`$shop` moved here off Servers; it is the
   sphere economy, not a setting) / Upgrades / Characters. Notes from building it:
-  - The two stock figures are shown as **two readings, not a liquid/invested
-    split**: `$ohu` prints a stock line and `$shop` prints its own balance, they
-    are read at different moments, and nothing establishes they are different
-    pools. Do not merge them without evidence.
+  - The two stock figures are **the same pool read by two commands**, confirmed
+    by the account's owner: `$ohu` prints a stock line and `$shop` prints its
+    own balance, and they mean the same thing. The bridge publishes one resolved
+    `stock.spheres` (preferring `$ohu`, which is re-read far more often) plus
+    `stock.spheres_source`; the raw `ohu_stock` / `shop_spheres` keys stay in the
+    payload. Only the resolved figure is shown, and Upgrades prices
+    affordability off the same one so the two pages cannot disagree.
   - **Cost is `(level + 1) × level_cost_step`**, from the sheet's "cost increased
     by +4,000 **per level**" — not a flat 4,000 per upgrade. Mudae never prints
     the figure for a specific level, so the UI labels it derived.

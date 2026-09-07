@@ -19,10 +19,10 @@ from macro.state import MacroPhase
 FEED: list[tuple[str, str]] = [
     ("info", "Sent $wa ×10 · interval 1.8s ±0.4"),
     ("skip", "Makima — Chainsaw Man · 1,411 ka · below 2,000"),
-    ("click", "Reacted purple · +312 ka · power 74% → 68%"),
+    ("click", "Reacted :kakeraP: purple · +312 ka · power 74% → 68%"),
     ("skip", "Ryuk — Death Note · 640 ka · below 2,000"),
-    ("claim", "Claimed Yor Forger — Spy × Family · 2,180 ka"),
-    ("click", "Reacted rainbow · +540 ka"),
+    ("claim", "Claimed Yor Forger — Spy × Family · 2,180 ka · :chaoskey: +1"),
+    ("click", "Reacted :kakeraR: rainbow · +540 ka"),
     ("error", "Reaction failed · message deleted before click"),
     ("info", "Levi Ackerman — Attack on Titan · 1,905 ka"),
     ("skip", "Nezuko — Demon Slayer · 1,120 ka · below 2,000"),
