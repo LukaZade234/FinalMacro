@@ -89,6 +89,18 @@ def apply(bridge: Any) -> None:
             "detail": "Spy × Family · 2,180 ka",
             "time": "22:14:19",
         },
+        # The force-divorce farm mid-hunt, so its status block renders in the
+        # previews — it is hidden entirely when the farm is not running.
+        "force_divorce": {
+            "enabled": True,
+            "target": "Lucy",
+            "target_kakera": 271065,
+            "phase": "hunting",
+            "cycles": 3,
+            "kakera": 813195,
+            "spheres": 276,
+            "stop_reason": "",
+        },
     }
 
     # runSummaryJson recomputes from the earning logs on every read. Those live

@@ -21,6 +21,16 @@ from macro.roll_scheduler import (
 )
 from macro.session_log import SessionLogRecorder
 from macro.claim_window import is_final_roll_session_before_claim_reset
+from macro import force_divorce
+from macro.force_divorce import (
+    ForceDivorceRecord,
+    ForceDivorceSession,
+    harem_holds,
+    load_force_divorce_record,
+    save_force_divorce_record,
+    target_from_harem,
+)
+from macro.wishlist import normalize_wishlist_name
 from macro.config import MacroConfig
 from macro.runtime_store import (
     RuntimeRestoreResult,
@@ -47,6 +57,8 @@ from macro.us_stop import (
     _minimum_kakera_cost,
 )
 from mudae.discord_errors import is_fatal_runtime_error
+from mudae.account_context import username_matches_own
+from mudae.clock import utc_now
 from mudae.macro_activity import enter_macro_activity, exit_macro_activity
 from macro.perk8_daily import Perk8DailyRecord, Perk8PriorityMode, mudae_daily_date
 from macro.kakera_reactor import KakeraReactor
@@ -85,7 +97,14 @@ _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($u
 _PERK6_SPAWN_WAIT_SEC = 0.5  # brief poll; queue drain catches late spawns
 _PERK6_SPAWN_POLL_SEC = 0.25
 _PERK6_POST_SETTLE_SEC = 1.2  # pause after spawn reactions before next roll
-_US_ADD_SETTLE_SEC = 1.0  # pause after $us N before the first $wa
+_US_ADD_SETTLE_SEC = 1.0
+# $forcedivorce is a two-step exchange: the command, then a plain "y".
+_FORCE_DIVORCE_PROMPT_TIMEOUT_SEC = 12.0
+_FORCE_DIVORCE_RESULT_TIMEOUT_SEC = 12.0
+# Spacing before the confirmation, for the same reason $rt has one: Mudae
+# answers badly when two actions land in the same instant.
+_FORCE_DIVORCE_CONFIRM_PAUSE_SEC = 1.0
+_HAREM_TIMEOUT_SEC = 12.0  # pause after $us N before the first $wa
 
 # How long the hourly loop yields to a manually started minigame before giving
 # up on the pass. A full $oh/$oc/$oq board is well under a minute, so anything
@@ -142,6 +161,10 @@ class RollCycleEngine:
         # The Mudae day auto-play has already covered. ``None`` until the first
         # attempt, which is what makes macro start one of the two firing points.
         self._minigames_played_for_day: dt.date | None = None
+        # Set while the force-divorce farm is running. It owns the claim policy
+        # for the whole session: nothing but its own target may be claimed.
+        self._force_divorce: ForceDivorceSession | None = None
+        self._force_divorce_last_skip = ""
         self._notification_connection_held = notification_connection_held
         self._minigames_busy = minigames_busy
         # Live lookup rather than a snapshot, so edits to the wishlist page
@@ -382,12 +405,433 @@ class RollCycleEngine:
         self._roll_stop.threshold = ROLLS_LEFT_STOP
         self._roll_stop.tail_count = ROLLS_LEFT_STOP
 
+    def _load_force_divorce_record(self) -> ForceDivorceRecord:
+        try:
+            return load_force_divorce_record(self._get_daily_resets())
+        except Exception:
+            return ForceDivorceRecord()
+
+    def _save_force_divorce_record(self, target: str, *, owned: bool) -> None:
+        """Remember whether the farm's character is currently ours.
+
+        Written at both edges of the exposure window — the moment a divorce
+        lands, and the moment the claim comes back — so a restart in between
+        can tell that the character is still out there.
+        """
+        try:
+            record = ForceDivorceRecord(
+                target=str(target or ""),
+                owned=bool(owned),
+                updated_at=utc_now().isoformat(),
+            )
+            self._save_daily_resets(
+                save_force_divorce_record(self._get_daily_resets(), record)
+            )
+        except Exception as exc:  # never lose a claim over bookkeeping
+            self._log_debug(f"$forcedivorce: could not save state ({exc})")
+
+    async def _refresh_force_divorce_target(self) -> bool:
+        """Read ``$mmk=`` and take the top row as the farm's target.
+
+        ``$mmk=`` sorts the harem by kakera value, so the answer is row 0 of
+        page 1 and no paging is needed. Once a day is enough — the ordering
+        does not move while the farm is the only thing claiming.
+        """
+        session = self._force_divorce
+        if session is None:
+            return False
+        self._log("$forcedivorce: reading $mmk= for the most valuable character")
+        message_id = await self._send_command_with_reconnect("mmk=", label="$mmk")
+        if message_id is None:
+            self._log("$forcedivorce: could not send $mmk= — no target")
+            return False
+        parsed = await self._actions.wait_for_harem(timeout=_HAREM_TIMEOUT_SEC)
+        if parsed is None:
+            self._log(
+                f"$forcedivorce: no $mmk= reply within {_HAREM_TIMEOUT_SEC:g}s — no target"
+            )
+            return False
+        owner = parsed.fields.get("owner")
+        if owner and not username_matches_own(str(owner), self._state.own_usernames):
+            # Somebody else's harem answered first. Farming from it would
+            # divorce a character we do not own.
+            self._log(f"$forcedivorce: that harem belongs to {owner}, not us — ignored")
+            return False
+        # A character this macro divorced and never claimed back is not in the
+        # harem, so ``$mmk=`` now tops out at somebody *else*. Taking that name
+        # would divorce a second character and leave two of the account's most
+        # valuable sitting unowned. The saved record is what catches it.
+        record = self._load_force_divorce_record()
+        if record.outstanding and not harem_holds(parsed.fields, record.target):
+            session.set_target(record.target, day=str(mudae_daily_date(utc_now())))
+            session.note_divorced()
+            self._log(
+                f"$forcedivorce: {record.target} is still divorced from an earlier "
+                "run — claiming it back before starting a new cycle"
+            )
+            self._notify()
+            return True
+
+        picked = target_from_harem(parsed.fields)
+        if picked is None:
+            self._log("$forcedivorce: $mmk= listed no characters — no target")
+            return False
+        name, kakera = picked
+        session.set_target(name, kakera, day=str(mudae_daily_date(utc_now())))
+        self._log(f"$forcedivorce: target is {name} ({kakera:,} ka)")
+        self._notify()
+        return True
+
+    async def _force_divorce_exchange(self) -> bool:
+        """Send ``$forcedivorce <target>``, check the prompt, confirm with ``y``."""
+        session = self._force_divorce
+        if session is None or session.target is None:
+            return False
+        target = session.target
+        session.begin_divorce()
+
+        self._log(f"$forcedivorce: divorcing {target.name}")
+        message_id = await self._send_command_with_reconnect(
+            f"forcedivorce {target.name}", label="$forcedivorce"
+        )
+        if message_id is None:
+            session.note_divorce_failed()
+            self._log("$forcedivorce: send failed — nothing divorced")
+            return False
+
+        prompt = await self._actions.wait_for_force_divorce_prompt(
+            timeout=_FORCE_DIVORCE_PROMPT_TIMEOUT_SEC
+        )
+        if prompt is None:
+            # No prompt means no confirmation was sent, so nothing was
+            # divorced and nothing is exposed. Try again next cycle.
+            session.note_divorce_failed()
+            self._log(
+                "$forcedivorce: no confirmation prompt within "
+                f"{_FORCE_DIVORCE_PROMPT_TIMEOUT_SEC:g}s — nothing divorced"
+            )
+            return False
+
+        # The gate. ``$forcedivorce`` works on other players' characters too, so
+        # a blind "y" would divorce whatever Mudae happened to match.
+        named = str(prompt.fields.get("character") or "")
+        if not session.is_target(named):
+            session.stop(f"prompt named {named or 'nobody'}, not {target.name}")
+            self._log(
+                f"$forcedivorce: Mudae asked about {named or 'an unnamed character'}, "
+                f"not {target.name} — not confirming, stopping the farm"
+            )
+            self._stop.set()
+            return False
+        owner_id = prompt.fields.get("owner_id")
+        own_ids = {str(uid) for uid in (self._state.own_user_ids or [])}
+        if own_ids and str(owner_id or "") not in own_ids:
+            session.stop(f"{target.name} belongs to someone else")
+            self._log(
+                f"$forcedivorce: {target.name} belongs to another account "
+                "— not confirming, stopping the farm"
+            )
+            self._stop.set()
+            return False
+
+        await self._sleep(_FORCE_DIVORCE_CONFIRM_PAUSE_SEC)
+        if await self._actions.send_text("y") is None:
+            # The prompt expires on its own, so an unanswered one divorces
+            # nothing.
+            session.note_divorce_failed()
+            self._log("$forcedivorce: could not send the confirmation — nothing divorced")
+            return False
+
+        result = await self._actions.wait_for_force_divorce_result(
+            timeout=_FORCE_DIVORCE_RESULT_TIMEOUT_SEC
+        )
+        if result is None:
+            return await self._confirm_force_divorce_with_harem(target.name)
+
+        outcome = str(result.fields.get("outcome") or "")
+        if outcome == "success":
+            session.note_divorced()
+            self._save_force_divorce_record(target.name, owned=False)
+            self._log(f"$forcedivorce: {target.name} divorced — hunting for it now")
+            self._notify()
+            return True
+        if outcome == "cancelled":
+            session.note_divorce_failed()
+            self._log("$forcedivorce: Mudae cancelled the divorce — nothing divorced")
+            return False
+        if outcome == "refused":
+            # The whole method needs admin; a refusal will not fix itself.
+            session.stop("Mudae refused the command")
+            self._log("$forcedivorce: refused by Mudae — stopping the farm")
+            self._stop.set()
+            return False
+        return await self._confirm_force_divorce_with_harem(target.name)
+
+    async def _confirm_force_divorce_with_harem(self, name: str) -> bool:
+        """Ask ``$mmk=`` whether the divorce landed after an unreadable reply.
+
+        The confirmation was sent, so the character may well be divorced and
+        sitting unowned. Guessing either way is worse than asking: a wrong
+        "it failed" leaves it exposed with the farm idle, and a wrong "it
+        worked" hunts for a character that is still ours.
+        """
+        session = self._force_divorce
+        if session is None:
+            return False
+        self._log("$forcedivorce: reply unreadable — re-reading $mmk= to see if it landed")
+        if await self._send_command_with_reconnect("mmk=", label="$mmk") is None:
+            session.note_divorce_failed()
+            return False
+        parsed = await self._actions.wait_for_harem(timeout=_HAREM_TIMEOUT_SEC)
+        if parsed is None:
+            session.note_divorce_failed()
+            self._log("$forcedivorce: no $mmk= reply — assuming nothing was divorced")
+            return False
+        names = {
+            normalize_wishlist_name(str(entry.get("name") or ""))
+            for entry in (parsed.fields.get("entries") or [])
+        }
+        if normalize_wishlist_name(name) in names:
+            session.note_divorce_failed()
+            self._log(f"$forcedivorce: {name} is still in the harem — nothing divorced")
+            return False
+        session.note_divorced()
+        self._save_force_divorce_record(name, owned=False)
+        self._log(f"$forcedivorce: {name} is gone from the harem — it landed")
+        self._notify()
+        return True
+
+    async def _run_force_divorce_step(self) -> None:
+        """The farm's per-cycle work: pick a target, then divorce it."""
+        session = self._force_divorce
+        if session is None or not session.active or self._stop.is_set():
+            return
+        session.ready_for_next_cycle()
+        if session.needs_target(str(mudae_daily_date(utc_now()))):
+            override = str(
+                getattr(self._config.force_divorce, "target_override", "") or ""
+            ).strip()
+            if override:
+                session.set_target(override, day=str(mudae_daily_date(utc_now())))
+                self._log(f"$forcedivorce: target is {override} (set on the preset)")
+            else:
+                await self._refresh_force_divorce_target()
+        allow_rt = bool(self._config.character_claim.auto_use_rt)
+        ok, why = session.can_divorce(self._state, allow_rt=allow_rt)
+        if not ok:
+            if why and why != self._force_divorce_last_skip:
+                self._force_divorce_last_skip = why
+                self._log(f"$forcedivorce: not divorcing — {why}")
+            return
+        self._force_divorce_last_skip = ""
+        await self._force_divorce_exchange()
+
+    async def _add_us_batch(self, request: int) -> bool:
+        """Move ``request`` rolls off the ``$us`` stack into the usable pool.
+
+        The same handshake ``$us`` mode uses — send, wait for Mudae's tick,
+        then treat the rolls as usable — without that loop's stack bookkeeping,
+        which the farm does not need: it tops up once per hunt round and stops
+        the moment the target is claimed.
+        """
+        message_id = await self._send_command_with_reconnect(
+            f"us {request}", label="$forcedivorce hunt"
+        )
+        if message_id is None:
+            return False
+        ticked = await self._actions.wait_for_mudae_tick(
+            message_id, timeout=self._config.us_add_delay()
+        )
+        if not ticked:
+            self._log(f"$forcedivorce: {self._config.prefix}us {request} not acknowledged")
+            return False
+        self._state.rolls_us_bonus = request
+        await self._sleep(_US_ADD_SETTLE_SEC)
+        return True
+
+    async def _force_divorce_us_hunt(
+        self,
+        session_records: list[RollRecord],
+        roll_index: int,
+    ) -> bool:
+        """Spend the ``$us`` stack hunting a target that is already out there.
+
+        This was originally gated on the final hour, on the reasoning that the
+        claim slot dies at the reset anyway so the last hour is the only one
+        where stacked rolls are clearly worth burning. A live run showed why
+        that is the wrong clock: at ``claim reset 60m · rolls reset 55m`` the
+        hour is not the final one, so 39 rolls failed to find the divorced
+        character and the macro then waited **53 minutes** — with the account's
+        most valuable character sitting unowned the whole time, in a channel
+        anyone can roll.
+
+        The exposure is the cost, not the claim slot. So the hunt runs whenever
+        a divorce has already happened and the hour's own rolls did not close
+        it. That cannot burn the stack casually: it is only ever reached after
+        a divorce this mode chose to make, which it only makes with a claim
+        slot in hand. Returns True when the target was claimed.
+        """
+        session = self._force_divorce
+        if session is None or not session.active or self._stop.is_set():
+            return False
+        if session.phase != force_divorce.HUNTING:
+            return False
+        allow_rt = bool(self._config.character_claim.auto_use_rt)
+        if self._state.claim_available is not True and not (
+            allow_rt and self._state.rt_available is True
+        ):
+            self._log("$forcedivorce: no claim slot left — not spending $us this hour")
+            return False
+
+        stack = await self._read_us_stack()
+        if not stack or stack < 1:
+            self._log("$forcedivorce: nothing on the $us stack to hunt with")
+            return False
+
+        target = session.target.name if session.target else "the target"
+        self._log(
+            f"$forcedivorce: {target} is still out there · {stack:g} $us stacked "
+            "— hunting rather than leaving it unowned"
+        )
+        self._state.us_stacked = stack
+        cmd = self._config.normalized_roll_command()
+        max_request = self._config.us_batch()
+        margin = max(0, self._config.us_reset_margin_minutes)
+
+        while session.phase == force_divorce.HUNTING and stack >= 1:
+            if self._stop.is_set():
+                break
+            reset_m = self._state.rolls_reset_minutes
+            if reset_m is not None and reset_m <= margin:
+                # Rolls added this close to the reset are wiped unspent.
+                self._log("$forcedivorce: rolls reset is due — stopping the hunt")
+                break
+            request = min(max_request, int(stack))
+            if not await self._add_us_batch(request):
+                break
+            stack -= request
+            self._state.us_stacked = stack
+            done, claimed, halt = await self._roll_us_batch(
+                cmd,
+                request,
+                session_records,
+                roll_index,
+                us_roll=True,
+            )
+            roll_index += done
+            if claimed:
+                return True
+            if halt:
+                self._log_us_halt(halt)
+                break
+            if done < request:
+                break
+        if session.phase == force_divorce.HUNTING:
+            self._log(f"$forcedivorce: {target} did not spawn before the stack ran out")
+        return False
+
+    async def _force_divorce_roll_check(
+        self,
+        record: RollRecord,
+        fields: dict[str, Any],
+        rolls_left: Any,
+    ) -> _RollOutcome | None:
+        """Handle a rolled card while the force-divorce farm is running.
+
+        Returns an outcome when this roll is the farm's own business — the
+        target spawned, or it turned up owned by somebody else — and ``None``
+        when the roll should fall through to the ordinary claim rules (which
+        the claim gate will then refuse anyway; falling through keeps the log
+        honest about *why* a roll was passed over).
+        """
+        session = self._force_divorce
+        if session is None or not session.active:
+            return None
+        if not session.is_target(fields.get("character_name")):
+            return None
+
+        name = fields.get("character_name") or "?"
+        owner = fields.get("owner")
+        if fields.get("claimed"):
+            if username_matches_own(str(owner or ""), self._state.own_usernames):
+                # Ours already — nothing to do until the next divorce.
+                return None
+            # The whole method rests on being the one who re-claims it. Somebody
+            # else holding it is not something to roll through.
+            session.stop(f"{name} was claimed by {owner or 'another player'}")
+            self._log(
+                f"$forcedivorce: {name} is now owned by {owner or 'another player'} "
+                "— stopping the farm"
+            )
+            self._stop.set()
+            return None
+
+        if not fields.get("can_claim"):
+            return None
+
+        self._log(f"$forcedivorce: {name} rolled — claiming")
+        self._state.phase = MacroPhase.POST_ROLL
+        self._notify()
+        # ``allow_rt`` on purpose: a reset in hand is exactly the slot this
+        # cycle was started on, and the preset's own claim rules (min kakera,
+        # final hour, even ``enabled``) have no say over the farm's target.
+        claimed = await self._make_post_roll_handler().claim_record(
+            record,
+            reason="$forcedivorce target",
+            allow_rt=True,
+        )
+        if claimed:
+            # Start the next cycle here rather than at the top of the next
+            # hour. The rolls left in *this* hour are what the new cycle has to
+            # hunt with, so waiting until they are spent throws away the very
+            # chance an unspent $rt is worth having.
+            await self._run_force_divorce_step()
+        return _RollOutcome(
+            ok=True,
+            rolls_left=rolls_left,
+            claimed=claimed,
+            # Never stop the batch: the remaining normal rolls are still worth
+            # rolling for kakera and spheres.
+            stop=False,
+        )
+
+    def _claim_gate(self) -> Callable[[str], bool] | None:
+        """The active claim policy, or ``None`` when the preset rules decide."""
+        session = self._force_divorce
+        if session is None or not session.active:
+            return None
+        return session.allows_claim
+
+    def _note_claim_payout(self, character: str, fields: dict[str, Any]) -> None:
+        """Bank what a claim actually paid, when it was the farm's own target.
+
+        Emerald IV pays the character's kakera value, which is the entire point
+        of the farm — and the figure is printed on the claim message, so it is
+        read rather than estimated.
+        """
+        session = self._force_divorce
+        if session is None or not session.is_target(character):
+            return
+        session.note_claimed(
+            kakera=fields.get("kakera") or 0,
+            spheres=fields.get("spheres") or 0,
+        )
+        self._save_force_divorce_record(character, owned=True)
+        banked = f"{session.kakera_banked:,}"
+        self._log(
+            f"$forcedivorce: {character} claimed for "
+            f"{int(fields.get('kakera') or 0):,} ka — {banked} ka banked this session"
+        )
+        self._notify()
+
     def _make_post_roll_handler(self) -> PostRollHandler:
         return PostRollHandler(
             self._actions,
             self._config,
             self._state,
             log=self._log,
+            claim_gate=self._claim_gate(),
+            on_claim=self._note_claim_payout,
         )
 
     def _make_kakera_reactor(self) -> KakeraReactor:
@@ -409,6 +853,7 @@ class RollCycleEngine:
             on_click_timeout=on_timeout,
             on_state=self._notify,
             on_keys=self._notify_keys,
+            claim_gate=self._claim_gate(),
         )
 
     def _get_daily_resets(self) -> dict[str, Any]:
@@ -607,15 +1052,33 @@ class RollCycleEngine:
 
     @property
     def running_mode(self) -> str | None:
-        """``hourly``, ``us``, or ``None`` when the engine is idle."""
+        """``hourly``, ``us``, ``forcedivorce``, or ``None`` when idle.
+
+        The force-divorce farm runs the *hourly* loop — same refill waits,
+        notification disconnect, minigames and perk budgets — with only the
+        claim policy replaced, so it is named separately here purely so the GUI
+        can say which button is lit.
+        """
         if not self.is_running or self._task is None:
             return None
         name = self._task.get_name()
         if name == "us-roll-cycle":
             return "us"
+        if name == "forcedivorce-roll-cycle":
+            return "forcedivorce"
         if name == "roll-cycle":
             return "hourly"
         return None
+
+    @property
+    def force_divorce_status(self) -> dict[str, Any]:
+        """Live farm state for the Run page, empty when the farm is not running."""
+        session = self._force_divorce
+        if session is None:
+            return {"enabled": False}
+        status = session.status()
+        status["enabled"] = True
+        return status
 
     @property
     def waiting_for_hourly_refill(self) -> bool:
@@ -746,8 +1209,33 @@ class RollCycleEngine:
             return
         if session_meta:
             self.begin_session("hourly", session_meta)
+        self._force_divorce = None
         self._stop.clear()
         self._task = asyncio.create_task(self._run_cycle(), name="roll-cycle")
+
+    def start_force_divorce_mode(
+        self,
+        *,
+        session_meta: dict[str, Any] | None = None,
+    ) -> None:
+        """Roll the hourly loop, but claim only the harem's most valuable character.
+
+        Deliberately the *same* loop as :meth:`start`: the farm is hourly
+        rolling with a different claim policy and two extra steps, and every
+        behaviour the user asked to keep — refill waits, minigames, perk 8/9,
+        the notification disconnect — is already there.
+        """
+        if self.is_running:
+            return
+        if self._minigame_start_blocked("$forcedivorce mode"):
+            return
+        if session_meta:
+            self.begin_session("forcedivorce", session_meta)
+        self._force_divorce = ForceDivorceSession()
+        self._stop.clear()
+        self._task = asyncio.create_task(
+            self._run_cycle(), name="forcedivorce-roll-cycle"
+        )
 
     def start_us_mode(
         self,
@@ -822,6 +1310,14 @@ class RollCycleEngine:
                     await self._maybe_refresh_perk8_status()
                     await self._maybe_play_daily_minigames()
 
+                    # The farm's own step: pick a target once a day, and
+                    # divorce it whenever a claim slot is in hand. It runs
+                    # before the batch so the character is already in the pool
+                    # for this hour's rolls.
+                    await self._run_force_divorce_step()
+                    if self._stop.is_set():
+                        break
+
                     pool = int(self._state.rolls_left or 0)
                     if pool <= 0:
                         if not await self._wait_for_hourly_refill():
@@ -845,6 +1341,8 @@ class RollCycleEngine:
                             normal_rolls=pool,
                         )
                     )
+                    if await self._force_divorce_us_hunt(session_records, roll_index):
+                        claimed = True
                     remaining = int(self._state.rolls_left or 0)
                     if done == 0 and not claimed and remaining <= 0:
                         if not await self._wait_for_hourly_refill():
@@ -1061,6 +1559,10 @@ class RollCycleEngine:
             if record_roll_key_events(snapshot, fields, from_macro=True):
                 self._notify_keys()
 
+        farm_outcome = await self._force_divorce_roll_check(record, fields, rl)
+        if farm_outcome is not None:
+            return farm_outcome
+
         wishlist_characters, wishlist_series = (
             self._wishlist_get() if self._wishlist_get else ([], [])
         )
@@ -1089,6 +1591,10 @@ class RollCycleEngine:
             )
             if (
                 not us_roll
+                # The farm claims a character that is very likely wished, and
+                # stopping there would end the day's rolling at the first
+                # successful cycle — the opposite of what the mode is for.
+                and self._force_divorce is None
                 and interrupt.code == "wish_ping"
                 and claimed
                 and should_stop_after_wish_claim(self._state)
@@ -1542,7 +2048,10 @@ class RollCycleEngine:
                 start_index + done + 1,
                 session_records,
                 us_roll=False,
-                stop_on_interrupt=True,
+                # The farm's claim is not a reason to stop the batch: the user
+                # wants the rest of the hour's rolls spent as usual once the
+                # target is banked.
+                stop_on_interrupt=self._force_divorce is None,
             )
             if not outcome.ok:
                 roll_limit_hit = outcome.roll_limit

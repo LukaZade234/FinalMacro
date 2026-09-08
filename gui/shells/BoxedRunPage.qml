@@ -147,6 +147,11 @@ Item {
                     onClicked: App.startUsMode()
                 }
                 BoxedButton {
+                    text: "$forcedivorce"
+                    enabled: run.canForceDivorce
+                    onClicked: App.startForceDivorce()
+                }
+                BoxedButton {
                     text: "$tu"
                     enabled: run.canCheck
                     onClicked: App.runTu()
@@ -368,6 +373,31 @@ Item {
                             model: run.powerSaveRows
                             BoxedStatRow {
                                 width: saverCol.width
+                                label: modelData.label
+                                value: modelData.value
+                                tone: modelData.tone || ""
+                            }
+                        }
+                    }
+                }
+
+                BoxedBox {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: farmCol.implicitHeight + 28
+                    visible: run.forceDivorceOn
+                    caption: "Force divorce"
+                    stateText: run.forceDivorceTarget || "idle"
+                    stateOn: run.forceDivorceOn
+
+                    Column {
+                        id: farmCol
+                        width: parent.width
+                        spacing: 0
+
+                        Repeater {
+                            model: run.forceDivorceRows
+                            BoxedStatRow {
+                                width: farmCol.width
                                 label: modelData.label
                                 value: modelData.value
                                 tone: modelData.tone || ""

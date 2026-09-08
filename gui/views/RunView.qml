@@ -332,6 +332,7 @@ Item {
                             onPlayOtClicked: App.playOtSphere()
                             onPlayAllMinigamesClicked: App.playAllMinigames()
                             onPlayUsClicked: App.startUsMode()
+                            onForceDivorceClicked: App.startForceDivorce()
                         }
                     }
                 }

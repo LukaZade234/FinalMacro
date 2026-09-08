@@ -24,6 +24,7 @@ _recording_account_name: str = ""
 SOURCE_LABELS: dict[str, str] = {
     "sphere_click": "Sphere button",
     "kakera_bonus": "Kakera click",
+    "claim": "Claim (Emerald IV)",
     "perk10": "Perk 10",
     "minigame_oh": "$oh",
     "minigame_oc": "$oc",

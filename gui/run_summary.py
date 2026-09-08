@@ -104,6 +104,7 @@ def build_run_summary(
     *,
     kakera_rules: Any = None,
     sphere_rules: Any = None,
+    force_divorce: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from macro.perk8_power import power_save_status
     from macro.perk9_threshold import adaptive_status
@@ -152,4 +153,8 @@ def build_run_summary(
         "last_claim": last_claim,
         "power_save": power_save_status(state, kakera_rules),
         "perk9_adaptive": adaptive_status(state, sphere_rules),
+        # The farm's own progress. Its kakera deliberately does *not* get a
+        # line of its own in the session haul — a claim is logged as an
+        # ordinary kakera event, so it is already inside ``session.kakera``.
+        "force_divorce": force_divorce or {"enabled": False},
     }

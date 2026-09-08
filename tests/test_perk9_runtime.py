@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+from unittest.mock import patch
 
 from macro.config import MacroConfig, SphereReactionRules
 from macro.perk9_daily import (
@@ -43,6 +44,13 @@ OHU8_SAMPLE = (
 # Anchored to the real clock: the decision helpers call ``utc_now()`` themselves,
 # so a frozen date would drift past the refill deadlines below.
 _NOW = dt.datetime.now(dt.timezone.utc)
+# The same date at midday, for the tests that must not run inside the perk-9
+# spend-down window. Inside the last hour of the UTC day the bar drops to 0 on
+# purpose — unspent clicks expire at the reset — so a test asserting that a low
+# sphere is skipped is asserting something that is deliberately untrue then, and
+# failed for that one hour a day. Only the time of day is pinned; the date stays
+# real so the refill deadlines above still resolve.
+_MIDDAY = _NOW.replace(hour=12, minute=0, second=0, microsecond=0)
 
 
 class _Actions:
@@ -294,7 +302,7 @@ def test_adaptive_status_reports_when_the_set_changes_each_way():
     state.perk9_roll_pool = 400
     state.perk9_rolled_today = 0
     rules = SphereReactionRules(enabled=True, budget_aware=True)
-    status = adaptive_status(state, rules)
+    status = adaptive_status(state, rules, now=_MIDDAY)
     # Running low on spawns opens the bar; running low on clicks tightens it.
     assert status["looser_at"] is not None
     assert status["looser_at"] < status["spawns_left"]
@@ -358,7 +366,8 @@ def test_reactor_counts_every_sphere_spawn_even_when_it_skips():
     state = AccountState()
     reactor = _reactor(state=state, on_spawn=seen.append)
     # Blue is far below the bar with 130 spawns still to come.
-    asyncio.run(reactor.react(message_id=1, fields=_roll_fields("spB")))
+    with patch("mudae.clock.utc_now", return_value=_MIDDAY):
+        asyncio.run(reactor.react(message_id=1, fields=_roll_fields("spB")))
     assert seen == [1]
     assert reactor.actions.clicked == []
 

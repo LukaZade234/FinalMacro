@@ -82,6 +82,9 @@ class KakeraReactor:
     on_state: Callable[[], None] | None = None
     on_keys: Callable[[], None] | None = None
     debug_log: Callable[[str], None] | None = None
+    # A chaos wish spawn is claimed from here, outside the roll loop entirely,
+    # so a mode that reserves the claim slot has to reach this path too.
+    claim_gate: Callable[[str], bool] | None = None
 
     def __post_init__(self) -> None:
         self._last_outcome_snapshot: MudaeMessageSnapshot | None = None
@@ -785,7 +788,11 @@ class KakeraReactor:
             fields=claim_fields,
         )
         handler = PostRollHandler(
-            self.actions, self.config, self.state, log=self.log
+            self.actions,
+            self.config,
+            self.state,
+            log=self.log,
+            claim_gate=self.claim_gate,
         )
         await handler.claim_record(
             record,

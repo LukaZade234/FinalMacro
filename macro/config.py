@@ -263,6 +263,29 @@ class UsRollKakeraRules:
 
 
 @dataclass
+class ForceDivorceRules:
+    """Settings for the force-divorce farm (started from the Run page).
+
+    Deliberately one field. The target is read from ``$mmk=`` once a day and is
+    always the harem's most valuable character, so the only thing worth
+    configuring is a name to fall back on when that read fails or when a
+    different character should be farmed.
+    """
+
+    # Blank means "whatever tops $mmk=", which is the normal case.
+    target_override: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ForceDivorceRules:
+        if not data:
+            return cls()
+        return cls(target_override=str(data.get("target_override") or "").strip())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"target_override": self.target_override}
+
+
+@dataclass
 class SphereReactionRules:
     """When to click sphere buttons (perk 9).
 
@@ -340,6 +363,7 @@ class MacroConfig:
     # Discord notifications are not suppressed. Does not affect $us or minigames.
     notification_mode: bool = False
     us_roll_kakera: UsRollKakeraRules = field(default_factory=UsRollKakeraRules)
+    force_divorce: ForceDivorceRules = field(default_factory=ForceDivorceRules)
     character_claim: CharacterClaimRules = field(default_factory=CharacterClaimRules)
     kakera_reaction: KakeraReactionRules = field(default_factory=KakeraReactionRules)
     sphere_reaction: SphereReactionRules = field(default_factory=SphereReactionRules)
@@ -484,6 +508,7 @@ class MacroConfig:
             us_schedule_end=_coerce_hhmm(data.get("us_schedule_end"), "06:00"),
             notification_mode=bool(data.get("notification_mode", False)),
             us_roll_kakera=us_roll_kakera,
+            force_divorce=ForceDivorceRules.from_dict(data.get("force_divorce")),
             character_claim=character_claim,
             kakera_reaction=kakera_reaction,
             sphere_reaction=sphere_reaction,
@@ -512,6 +537,7 @@ class MacroConfig:
             "us_schedule_end": _coerce_hhmm(self.us_schedule_end, "06:00"),
             "notification_mode": self.notification_mode,
             "us_roll_kakera": self.us_roll_kakera.to_dict(),
+            "force_divorce": self.force_divorce.to_dict(),
             "character_claim": self.character_claim.to_dict(),
             "kakera_reaction": self.kakera_reaction.to_dict(),
             "sphere_reaction": self.sphere_reaction.to_dict(),

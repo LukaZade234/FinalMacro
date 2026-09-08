@@ -25,6 +25,10 @@ EARN_METHOD_LABELS: dict[str, str] = {
     "daily_kakera": "Daily kakera ($dk)",
     "bku_reset": "BKU reset",
     "bku_roll": "BKU roll gain",
+    # Emerald IV pays the character's own kakera value on every claim, which
+    # is the whole point of the force-divorce farm and was going unrecorded:
+    # the figure is printed on the claim message and was parsed and dropped.
+    "claim": "Claim (Emerald IV)",
 }
 
 
@@ -76,6 +80,8 @@ def normalize_earn_method(entry: dict[str, Any]) -> str:
 def earn_method_from_parse(kind: MessageKind, fields: dict[str, Any]) -> str | None:
     if kind == MessageKind.KAKERA_CLAIM:
         return "kakera_click"
+    if kind in {MessageKind.CLAIM, MessageKind.MARRIAGE}:
+        return "claim" if fields.get("kakera") is not None else None
     if kind == MessageKind.DK_CLAIM:
         return str(fields.get("earn_method") or "daily_kakera")
     if kind == MessageKind.TU and fields.get("dk_used"):
@@ -86,6 +92,15 @@ def earn_method_from_parse(kind: MessageKind, fields: dict[str, Any]) -> str | N
         if fields.get("bku") is not None:
             return "bku_roll"
     return None
+
+
+def claim_kakera_amount(fields: dict[str, Any]) -> int:
+    """Kakera a claim message says it paid, or 0."""
+    try:
+        amount = int(fields.get("kakera") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return amount if amount > 0 else 0
 
 
 def should_record_earning(
@@ -103,6 +118,12 @@ def should_record_earning(
             return int(amount) > 0
         except (TypeError, ValueError):
             return False
+    if kind in {MessageKind.CLAIM, MessageKind.MARRIAGE}:
+        # A claim names its owner in ``winner``, not ``claimed_by``, and puts
+        # the payout in ``kakera`` rather than ``amount``.
+        if not claim_kakera_amount(fields):
+            return False
+        return username_matches_own(str(fields.get("winner") or ""), own_usernames)
     if kind != MessageKind.KAKERA_CLAIM:
         return False
     amount = fields.get("amount")
@@ -169,15 +190,20 @@ def record_kakera_earning(
     earn_method: str,
     account_id: str | None = None,
     account_name: str | None = None,
+    amount: int | None = None,
     now: dt.datetime | None = None,
 ) -> dict[str, Any]:
-    """Append one kakera earning event and return the stored entry."""
+    """Append one kakera earning event and return the stored entry.
+
+    ``amount`` overrides ``fields["amount"]`` for messages that carry the
+    figure under another name — a claim puts it in ``kakera``.
+    """
     stamp = now or dt.datetime.now(dt.timezone.utc)
     acc_id = str(account_id if account_id is not None else _recording_account_id).strip()
     acc_name = str(
         account_name if account_name is not None else _recording_account_name or "Main"
     ).strip() or "Main"
-    amount = int(fields["amount"])
+    value = int(amount if amount is not None else fields["amount"])
     method = str(earn_method or fields.get("earn_method") or "unknown").strip()
     entry = {
         "guild_id": snapshot.guild_id,
@@ -186,13 +212,15 @@ def record_kakera_earning(
         "channel_name": snapshot.channel_name,
         "account_id": acc_id,
         "account_name": acc_name,
-        "amount": amount,
+        "amount": value,
         "earn_method": method,
         "source": method,
         "kakera_type": fields.get("kakera_type") or fields.get("sphere_type"),
-        "character_name": fields.get("character_name"),
+        # A claim names the character in ``character`` and the owner in
+        # ``winner``; every other source uses the first spelling.
+        "character_name": fields.get("character_name") or fields.get("character"),
         "starwish": bool(fields.get("starwish")),
-        "claimed_by": fields.get("claimed_by"),
+        "claimed_by": fields.get("claimed_by") or fields.get("winner"),
         "recorded_at": stamp.isoformat(),
         "date_key": utc_date_key(stamp),
         "time": snapshot.created_at,

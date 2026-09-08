@@ -121,3 +121,66 @@ def test_build_stats_by_method():
     methods = {row["id"]: row["amount"] for row in stats["by_method"]}
     assert methods["bku_reset"] == 250
     assert methods["kakera_click"] == 100
+
+
+# --- claim income (Emerald IV) ------------------------------------------------
+#
+# The claim message prints what the claim paid. It was parsed and then dropped,
+# so the one figure that measures the force-divorce farm was never recorded.
+
+
+def test_claim_is_an_earning_method():
+    from mudae.kakera_log import claim_kakera_amount, earn_method_from_parse
+
+    fields = {"winner": "me", "character": "Lucy", "kakera": 316, "spheres": 92}
+    assert earn_method_from_parse(MessageKind.MARRIAGE, fields) == "claim"
+    assert earn_method_from_parse(MessageKind.CLAIM, fields) == "claim"
+    assert claim_kakera_amount(fields) == 316
+    # A claim with no payout line is not an earning.
+    assert earn_method_from_parse(MessageKind.CLAIM, {"winner": "me"}) is None
+
+
+def test_claim_is_recorded_only_for_our_own_account():
+    # Attribution is ``winner`` here, not the ``claimed_by`` every other
+    # kakera message uses.
+    fields = {"winner": "me", "character": "Lucy", "kakera": 316}
+    assert should_record_earning(MessageKind.MARRIAGE, fields, ["me"])
+    assert not should_record_earning(MessageKind.MARRIAGE, fields, ["someone else"])
+    assert not should_record_earning(
+        MessageKind.MARRIAGE, {"winner": "me", "kakera": 0}, ["me"]
+    )
+
+
+def test_recording_a_claim_lands_in_the_same_totals_as_a_click():
+    import mudae.kakera_log as kakera_log
+    from mudae.kakera_log import claim_kakera_amount
+
+    kakera_log._events.clear()
+    set_recording_account("acc1", "Main")
+    now = dt.datetime(2026, 9, 8, 12, 0, tzinfo=dt.timezone.utc)
+    snapshot = MudaeMessageSnapshot(
+        message_id=7, channel_id=99, channel_name="mudae", guild_id=42,
+        guild_name="Guild", author_id=1, author_name="Mudae", is_mudae=True,
+        content="", embeds=[], buttons=[], created_at="12:00:00",
+    )
+    fields = {"winner": "Main", "character": "Lucy", "kakera": 316, "spheres": 92}
+
+    entry = record_kakera_earning(
+        snapshot,
+        fields,
+        earn_method="claim",
+        amount=claim_kakera_amount(fields),
+        now=now,
+    )
+
+    assert entry["amount"] == 316
+    assert entry["earn_method"] == "claim"
+    # The claim's own names, read from the fields a claim actually carries.
+    assert entry["character_name"] == "Lucy"
+    assert entry["claimed_by"] == "Main"
+    # One kakera event like any other, so the Run page's session total picks it
+    # up with no separate line and the daily cube needs no new kind.
+    store = type("S", (), {"accounts": [AccountProfile(id="acc1", name="Main", type="Main")]})()
+    payload = client_payload(store)
+    assert payload["totals"]["all_time"] == 316
+    assert payload["recent"][0]["earn_method_label"] == earn_method_label("claim")

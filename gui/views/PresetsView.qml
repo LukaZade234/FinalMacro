@@ -490,6 +490,43 @@ Item {
                             }
                         }
                     }
+
+                    PanelCard {
+                        Layout.fillWidth: true
+                        title: "Force divorce farm"
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Started from the Run page. It claims nothing but its "
+                                + "own target all day, so every other claim rule above is "
+                                + "held while it runs."
+                            color: Theme.fgSecondary
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 10
+                            rowSpacing: 8
+
+                            Label {
+                                text: "Target character"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.preferredWidth: 180
+                                wrapMode: Text.WordWrap
+                            }
+                            ThemedTextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                placeholderText: "blank = top of $mmk= (most valuable)"
+                                text: getField("force_divorce", "target_override")
+                                onEditingFinished: patch("force_divorce", "target_override", text)
+                            }
+                        }
+                    }
                 }
 
                 // ---- Kakera ----

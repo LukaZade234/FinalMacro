@@ -25,6 +25,11 @@ from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
 from mudae.parsers.wishlist import is_wishlist_message
+from mudae.parsers.force_divorce import (
+    is_force_divorce_prompt,
+    is_force_divorce_result,
+)
+from mudae.parsers.harem import is_harem_message
 from mudae.parsers.embed import (
     is_character_embed,
     is_ownership_footer,
@@ -88,6 +93,10 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
     # bold names, which is exactly what ``is_custom_claim`` calls a claim.
     if is_wishlist_message(content):
         return MessageKind.WISHLIST
+    # Same reason again: a harem page is a wall of names and numbers, and it
+    # arrives as an embed that ``is_character_embed`` happily calls a roll.
+    if is_harem_message(content):
+        return MessageKind.HAREM
     if is_tu_response(content):
         return MessageKind.TU
     if is_kakera_react_denied(content):
@@ -104,6 +113,13 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
     # a dozen bogus claims per game.
     if is_minigame_board(snapshot):
         return MessageKind.MINIGAME_BOARD
+    # Before the claim heuristics: the $forcedivorce prompt carries two bold
+    # runs ("**Lucy** … **$sphererefund**"), so it read as a CLAIM — which also
+    # let it satisfy the waiter that watches for a real claim's confirmation.
+    if is_force_divorce_prompt(content):
+        return MessageKind.FORCE_DIVORCE_PROMPT
+    if is_force_divorce_result(content):
+        return MessageKind.FORCE_DIVORCE_RESULT
     if is_marriage_claim(content):
         return MessageKind.MARRIAGE
     if is_custom_claim(content):

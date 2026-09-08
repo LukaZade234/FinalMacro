@@ -240,6 +240,93 @@ recognizes the kind (it used to time out on it, since it only matched
 in `claim_record`) then apply immediately, instead of a later roll in the same
 batch clicking into the same wall again.
 
+### Force-divorce farming
+
+Two mechanics multiply. A character's kakera value rises with the **keys** on
+it, and **Emerald IV** pays out the character's kakera value on *every claim*.
+So divorcing the single most valuable character and claiming it again banks that
+value, once per claim reset, plus once more per `$rt`.
+
+`$forcedivorce` is used rather than `$divorce` because `$divorce` strips **5% of
+the character's keys** — which would erode the very thing the value rests on.
+That makes the method admin-only.
+
+What shapes the implementation is not the earning but the **exposure**: between
+the divorce and the re-claim the character belongs to nobody, and it is by
+definition the most valuable character on the server. Hence the two invariants
+in `macro/force_divorce.py`:
+
+* **A claim slot must be in hand before the divorce is sent** — `claim_available`
+  or an unspent `$rt`. Divorcing on the hope of a slot can leave the character
+  unowned for an hour. (This is also why the `$rt` re-cycle needs no special
+  case: a reset in hand simply *is* a slot.)
+* **Nothing else is claimed all day.** One slot per reset has to go to the
+  target, so wish pings, app-wishlist matches and the end-of-batch best pick are
+  all refused while a session runs. `ForceDivorceSession.allows_claim` is the
+  gate, and it is passed to `PostRollHandler`, which every claim path in the app
+  ends in — including the chaos wish spawn, which reaches its own handler
+  outside the roll loop.
+
+**The exchange.** `$forcedivorce <name>` is answered with a confirmation
+question, and Mudae acts only on a plain `y`:
+
+```
+<@5540…>, **Lucy** belongs to <@5540…>, do you want to force the divorce? (y/n/yes/no)
+```
+
+That line is a safety gate, not a formality — the command works on *other
+people's* characters, so both the character and the owner mention are checked
+against the intended target before `y` is sent. `y` goes out through
+`ChannelMonitor.send_text`, which deliberately does **not** claim the
+command-pairing slot the way `send_command` does: a confirmation is not a
+command. Mudae's reply to the `y` is exactly `Successful divorce...` — the whole
+message, with no character name in it. If the result is unreadable, `$mmk=` is
+re-read instead: the character being gone from the harem is what proves the
+divorce landed.
+
+**Choosing the target.** `$mmk=` prints the harem sorted by kakera value, so the
+answer is row 0 of page 1 and no paging is needed. Read once a day; the ordering
+does not move while the farm is the only thing claiming.
+
+**Except when one is already out there.** A restart between the divorce and the
+claim would otherwise pick a *new* target: the divorced character is not in the
+harem — that is what divorced means — so `$mmk=` tops out at somebody else, and
+divorcing that one leaves **two** of the account's most valuable characters
+unowned at once. `ForceDivorceRecord` is written at both edges of the exposure
+window (`owned: false` the moment a divorce lands, `true` the moment the claim
+comes back) and lives in the account's daily blob. On the next `$mmk=`, an
+outstanding name that is absent from the page means the character is still out
+there, and the farm claims it back before starting any new cycle.
+
+**Rolling.** The farm runs the ordinary hourly loop — same refill waits,
+minigames, perk 8/9 budgets and notification disconnect — with only the claim
+policy changed.
+
+**`$us` hunts whenever the character is out there**, not only in the final hour.
+The first design gated it on `is_final_roll_session_before_claim_reset`, on the
+reasoning that the claim slot expires at the reset anyway. A live run showed
+that is the wrong clock: at `claim reset 60m · rolls reset 55m` the hour is not
+the final one, so 39 rolls failed to find the divorced character and the macro
+then waited **53 minutes** — with the account's most valuable character sitting
+unowned in a channel anyone can roll. The cost being managed is the exposure,
+not the claim slot. This cannot burn the stack casually: the hunt is only ever
+reached after a divorce the farm chose to make, which it only makes with a
+claim slot already in hand.
+
+**Cycling on `$rt`.** The moment a claim lands, the next cycle starts — not at
+the top of the next hour. The rolls left in the current hour are what the new
+cycle hunts with, so waiting until they are spent wastes the chance the `$rt`
+was worth. A reset is only spent with at least
+`RT_MIN_MINUTES_BEFORE_RESET` (30) minutes left before the claim reset: below
+that the free slot arrives sooner than the hunt would finish, so holding the
+`$rt` for the next cycle is strictly better than burning it now.
+
+**Two parsers exist because of this feature, and both fixed live bugs.** The
+`$mmk=` page and the `$forcedivorce` prompt were each being misread — the harem
+page as a claimable roll worth the account's whole collection, and the prompt as
+a claim. See the `$mm` and `$forcedivorce` notes under **Claims** above and
+`mudae/parsers/harem.py` / `mudae/parsers/force_divorce.py`.
+
 ---
 
 

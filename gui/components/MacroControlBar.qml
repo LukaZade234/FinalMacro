@@ -39,6 +39,7 @@ ColumnLayout {
     signal playOtClicked()
     signal playAllMinigamesClicked()
     signal playUsClicked()
+    signal forceDivorceClicked()
 
     spacing: 10
 
@@ -164,6 +165,20 @@ ColumnLayout {
         fillColor: Theme.bgLight
         textColor: Theme.fgPrimary
         onClicked: bar.playUsClicked()
+    }
+
+    ActionButton {
+        visible: bar.showActions
+        text: "$forcedivorce"
+        loading: App.runActionPending === "forcedivorce"
+        enabled: bar.connected && !bar.macroEngineRunning
+                 && App.runActionPending !== "forcedivorce"
+                 && !bar.checkBusy && !bar.minigameBusy
+        Layout.fillWidth: true
+        buttonHeight: 34
+        fillColor: Theme.bgLight
+        textColor: Theme.fgPrimary
+        onClicked: bar.forceDivorceClicked()
     }
 
     Label {

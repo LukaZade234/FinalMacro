@@ -113,6 +113,21 @@ def is_perk6_spawn_parse_result(
     return perk6_spawner_matches(parsed.fields.get("spawned_by"), parent_character)
 
 
+def is_harem_parse_result(parsed: ParseResult) -> bool:
+    """A ``$mm*`` harem page, whichever way the pipeline labelled it.
+
+    A typed ``$mmk=`` comes back as a command response wrapping the harem
+    parse; one nobody typed classifies as ``HAREM``. Both carry the rows.
+    """
+    if parsed.kind == MessageKind.HAREM:
+        return True
+    if parsed.kind == MessageKind.COMMAND_RESPONSE:
+        parser = (parsed.fields.get("parser_command") or "").lower()
+        if parser == "harem":
+            return True
+    return parsed.fields.get("top_name") is not None
+
+
 def is_tu_parse_result(parsed: ParseResult) -> bool:
     if parsed.kind == MessageKind.TU:
         return True
@@ -411,6 +426,42 @@ class DiscordActions:
         for item in items:
             self._queue.put_nowait(item)
         return len(items), matches
+
+    async def send_text(self, text: str) -> int | None:
+        """Send a plain (non-``$``) message — the ``y`` a ``$forcedivorce`` needs."""
+        send = getattr(self._monitor, "send_text", None)
+        if send is None:
+            return None
+        return await send(text)
+
+    async def wait_for_harem(self, *, timeout: float = 12.0) -> ParseResult | None:
+        result = await self.wait_for(
+            lambda _s, p: is_harem_parse_result(p),
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
+    async def wait_for_force_divorce_prompt(
+        self,
+        *,
+        timeout: float = 12.0,
+    ) -> ParseResult | None:
+        result = await self.wait_for(
+            lambda _s, p: p.kind == MessageKind.FORCE_DIVORCE_PROMPT,
+            timeout=timeout,
+        )
+        return result[1] if result else None
+
+    async def wait_for_force_divorce_result(
+        self,
+        *,
+        timeout: float = 12.0,
+    ) -> ParseResult | None:
+        result = await self.wait_for(
+            lambda _s, p: p.kind == MessageKind.FORCE_DIVORCE_RESULT,
+            timeout=timeout,
+        )
+        return result[1] if result else None
 
     async def wait_for_dk_use(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(is_dk_use_parse_result, timeout=timeout)

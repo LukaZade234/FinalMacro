@@ -61,6 +61,12 @@ COMMAND_ALIASES: dict[str, str] = {
     "wls": "wishlist",
     "wlz": "wishlist",
     "wlsz": "wishlist",
+    # The harem listing, for the same load-bearing reason. ``$mmk=`` arrives
+    # here as ``mmk`` (flags are stripped above) and, without this, resolved to
+    # "roll" — so a harem page parsed as a claimable character worth the
+    # account's whole collection, with the page arrows typed as claim buttons.
+    "mm": "harem",
+    "mmk": "harem",
     **ROLL_COMMAND_ALIASES,
 }
 

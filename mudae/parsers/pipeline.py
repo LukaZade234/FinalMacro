@@ -12,6 +12,8 @@ from mudae.commands import ResolvedCommand, normalize_command, resolve_command
 from mudae.parsers.bonus import parse_bonus
 from mudae.parsers.classify import classify_message
 from mudae.parsers.embed import is_character_embed, parse_character_embed, parse_ownership_update
+from mudae.parsers.force_divorce import parse_force_divorce
+from mudae.parsers.harem import parse_harem
 from mudae.parsers.claim_interval import parse_claim_interval
 from mudae.parsers.kakera import parse_kakera_claim
 from mudae.parsers.claim import parse_claim
@@ -51,7 +53,9 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "p": parse_p,
     "daily": parse_daily,
 }
-_KNOWN_PARSERS = frozenset({*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop", "wishlist"})
+_KNOWN_PARSERS = frozenset(
+    {*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop", "wishlist", "harem"}
+)
 
 # GUI kind column — human-readable names for non-command message types.
 _KIND_DISPLAY: dict[MessageKind, str] = {
@@ -111,6 +115,14 @@ def _run_command_parser(
         if snapshot is not None:
             return parse_wishlist_result(snapshot)
         return parse_wishlist_text_result(content)
+    if parser_id == "harem":
+        # The listing lives entirely in the embed, so the plain content is
+        # empty and the visible text is the only thing worth parsing.
+        if snapshot is not None:
+            from mudae.parsers.classify import snapshot_text
+
+            return parse_harem(snapshot_text(snapshot))
+        return parse_harem(content)
     if parser_id in {"p", "daily"}:
         text = content
         if snapshot is not None:
@@ -223,6 +235,10 @@ def parse_mudae_message(
         return parse_shop_snapshot(snapshot)
     if kind == MessageKind.WISHLIST:
         return parse_wishlist_result(snapshot)
+    if kind == MessageKind.HAREM:
+        return parse_harem(visible or snapshot.content)
+    if kind in {MessageKind.FORCE_DIVORCE_PROMPT, MessageKind.FORCE_DIVORCE_RESULT}:
+        return parse_force_divorce(snapshot.content)
     if kind == MessageKind.SETTINGS:
         result = parse_settings(snapshot.content)
         _store_settings_cache(snapshot, result)

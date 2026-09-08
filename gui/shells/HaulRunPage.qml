@@ -112,6 +112,12 @@ Item {
                     onClicked: App.startUsMode()
                 }
 
+                HaulButton {
+                    text: "$forcedivorce"
+                    enabled: run.canForceDivorce
+                    onClicked: App.startForceDivorce()
+                }
+
                 ControlDivider {}
 
                 ControlGroupLabel { text: "Checks" }
@@ -604,6 +610,64 @@ Item {
                         color: Theme.mute
                         font.family: Theme.monoFamily
                         font.pixelSize: Theme.sizeSmall
+                    }
+                }
+
+                // force divorce farm
+                Rectangle {
+                    id: farmBox
+                    Layout.fillWidth: true
+                    visible: run.forceDivorceOn
+                    Layout.preferredHeight: visible ? farmCol.implicitHeight + 26 : 0
+                    radius: Theme.radiusLg
+                    color: Theme.surface
+                    border.width: 1
+                    border.color: Theme.line
+
+                    Column {
+                        id: farmCol
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.leftMargin: 15
+                        anchors.rightMargin: 15
+                        anchors.topMargin: 13
+                        spacing: 0
+
+                        PanelFoldHeader {
+                            width: farmCol.width
+                            title: "Force divorce"
+                            on: run.forceDivorceOn
+                            collapsed: false
+                        }
+
+                        Repeater {
+                            model: run.forceDivorceRows
+                            delegate: Item {
+                                required property var modelData
+                                width: farmCol.width
+                                height: 22
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: Theme.dim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.sizeBody
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.value
+                                    color: modelData.tone === "good" ? Theme.good
+                                        : (modelData.tone === "bad" ? Theme.bad
+                                        : (modelData.tone === "accent" ? Theme.accent : Theme.fg))
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.sizeBody
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -258,6 +258,62 @@ Solver/calculator pickup order is the **Unlock path** waves 1 and 4 (and `$bw` i
 - ~~**`$settings` / `$bonus` shown in two places**~~ — the duplicate panels are off Servers; Mudae is the one place the sheets are read.
 - **Still open on Quiet:** the Mudae `$settings` editor (drift/preset/diff/dry-run/apply) is unmounted and wants a deliberate home — it changes a live server, unlike everything else on that page. The perk-9 sphere row on the Run page hasn't been seen with live data; previews all run disconnected.
 
+## Force-divorce farm (2026-09-08)
+
+- ~~**Shipped**~~ — Emerald IV pays a character's kakera value on every claim, so
+  the harem's most valuable character is divorced with `$forcedivorce` (which,
+  unlike `$divorce`, keeps its keys) and re-claimed each reset. `macro/force_divorce.py`
+  holds the policy, the ordinary hourly loop does the rolling, and the button
+  sits beside **Roll `$us`** on all five shells. Target comes from `$mmk=` once
+  a day; `$us` is spent hunting only in the final hour; nothing else is claimed
+  all day. Two invariants carry the risk: a claim slot must be in hand *before*
+  the divorce, and the confirmation prompt's character **and owner** are checked
+  before `y` is sent. See `MUDAE_LOGIC.md`.
+- ~~**Two live misparses, both the wishlist-listing bug again**~~ — `$mmk=`
+  parsed as a claimable roll (`can_claim: true`, 4.8M kakera, page arrows typed
+  as claim buttons) and the `$forcedivorce` prompt parsed as a claim
+  (`winner="Lucy", character="$sphererefund"`), which could also satisfy
+  `wait_for_claim`. Both now have parsers and classify ahead of the claim
+  heuristics; `mm`/`mmk` joined the alias table the way `wl` did.
+- ~~**Claim kakera was parsed and thrown away**~~ — `parse_claim` already read
+  `kakera`/`spheres` off the claim line; `_handle_claim_reply` dropped both.
+  Now logged as a kakera event with `earn_method="claim"` (and spheres with
+  `source="claim"`), so it lands in Statistics, the daily report, and the Run
+  page's existing session total rather than a separate line. The bonus label
+  was mangled (`469835869059153940>(Emerald IV bonus) +92`) and now reads
+  `Emerald IV bonus`.
+- ~~**Two perk-9 tests failed for one hour a day**~~ — they asserted a low
+  sphere is skipped, which is deliberately untrue inside the spend-down window
+  (the last hour of the UTC day, when unspent clicks expire). Found because they
+  went red at 23:46 UTC having passed at 22:00. The clock is pinned now.
+- ~~**First live run, three fixes**~~ (2026-09-08). **`kakera banked` read 0**:
+  the session was told a claim happened but never what it paid, because the
+  figure is only on the claim message, which `PostRollHandler` sees and the
+  caller does not — an `on_claim` callback now carries it back. **Spheres were
+  under-counted**: `_parse_claim_spheres` read only the first line, so a claim
+  paying `+92` and `+72` reported 92; summed now, like the kakera lines beside
+  them. **`$rt` sat unspent**: the next cycle only began at the top of the next
+  hour, by which time the rolls that could have hunted the character were gone.
+  It now starts the moment a claim lands, and a reset is spent only with
+  `RT_MIN_MINUTES_BEFORE_RESET` (30) minutes or more before the claim reset —
+  under that the free slot arrives first and holding the `$rt` is better.
+- Mudae's reply to the confirmation is exactly `Successful divorce...` — the
+  whole message, no character name — confirmed live and now pinned.
+- ~~**The `$us` hunt was gated on the wrong clock**~~ — it required the final
+  hour, but on a live run at `claim reset 60m · rolls reset 55m` that was false,
+  so 39 rolls missed the divorced character and the macro waited **53 minutes**
+  with it sitting unowned. The trigger is now simply "a divorce has happened and
+  this hour's rolls did not close it", which cannot burn the stack casually
+  because a divorce is only ever made with a claim slot in hand.
+- ~~**A restart mid-cycle would have divorced a second character**~~ — the
+  divorced one is absent from `$mmk=`, so the next start would take a *new* top
+  name and leave two of the account's most valuable unowned. `ForceDivorceRecord`
+  (in the account's daily blob) records `owned` at both edges of the exposure
+  window, and an outstanding name missing from the page is claimed back before
+  any new cycle starts.
+- **Still open:** Classic's Run page has the button but not the farm status
+  block.
+
 ## `$rt` claim path (2026-09-07)
 
 - ~~**Every `$rt` waited 12s for a reply Mudae never sends, then cancelled the

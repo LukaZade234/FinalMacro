@@ -55,6 +55,8 @@ Item {
         && App.runActionPending !== "start" && !checkBusy && !minigameBusy
     readonly property bool canStartUs: connected && !engineRunning
         && App.runActionPending !== "us" && !checkBusy && !minigameBusy
+    readonly property bool canForceDivorce: connected && !engineRunning
+        && App.runActionPending !== "forcedivorce" && !checkBusy && !minigameBusy
     readonly property bool canCheck: connected && !engineRunning
         && !checkBusy && !minigameBusy
     readonly property bool canPlayMinigame: connected && !engineRunning
@@ -185,6 +187,30 @@ Item {
             { label: "clicks", value: s.kakera_free ? "free" : "limited", tone: s.kakera_free ? "good" : "" },
             { label: "can spend", value: spend, tone: "" }
         ]
+    }
+
+    // ---- force-divorce farm -------------------------------------------------
+
+    readonly property var forceDivorce: summary.force_divorce || null
+    readonly property bool forceDivorceOn: !!(forceDivorce && forceDivorce.enabled)
+    readonly property string forceDivorceTarget: forceDivorceOn ? (forceDivorce.target || "") : ""
+    // One row array, rendered generically by every shell — the same shape the
+    // perk-8 and perk-9 status blocks use.
+    readonly property var forceDivorceRows: {
+        if (!forceDivorceOn)
+            return []
+        var s = forceDivorce
+        var phaseTone = s.phase === "stopped" ? "bad"
+            : (s.phase === "hunting" ? "accent" : "")
+        var rows = [
+            { label: "target", value: s.target || "—", tone: "" },
+            { label: "state", value: s.phase || "—", tone: phaseTone },
+            { label: "cycles today", value: String(numberOr(s.cycles, 0)), tone: "" },
+            { label: "kakera banked", value: compact(numberOr(s.kakera, 0)), tone: "good" }
+        ]
+        if (s.stop_reason)
+            rows.push({ label: "stopped", value: s.stop_reason, tone: "bad" })
+        return rows
     }
 
     // ---- adaptive perk 9 ---------------------------------------------------

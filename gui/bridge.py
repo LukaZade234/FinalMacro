@@ -1339,7 +1339,7 @@ class AppBridge(QObject):
         phase = self._macro_state.phase
         running = bool(self._engine and self._engine.is_running)
 
-        if pending in {"start", "us"}:
+        if pending in {"start", "us", "forcedivorce"}:
             if running or phase != MacroPhase.IDLE:
                 self._set_run_action_pending("")
         elif pending == "stop":
@@ -1759,6 +1759,7 @@ class AppBridge(QObject):
                 "kakera_reaction": data["kakera_reaction"],
                 "sphere_reaction": data["sphere_reaction"],
                 "us_roll_kakera": data["us_roll_kakera"],
+                "force_divorce": data["force_divorce"],
                 "us_mode": {
                     "us_batch_size": data["us_batch_size"],
                     "us_reset_margin_minutes": data["us_reset_margin_minutes"],
@@ -1930,7 +1931,13 @@ class AppBridge(QObject):
                 if key in expert_patch:
                     data[key] = expert_patch[key]
 
-        for block in ("character_claim", "kakera_reaction", "sphere_reaction", "us_roll_kakera"):
+        for block in (
+            "character_claim",
+            "kakera_reaction",
+            "sphere_reaction",
+            "us_roll_kakera",
+            "force_divorce",
+        ):
             block_patch = patch.get(block)
             if isinstance(block_patch, dict):
                 current = data.get(block) or {}
@@ -2095,6 +2102,9 @@ class AppBridge(QObject):
                     getattr(self._macro_config, "sphere_reaction", None)
                     if self._macro_config
                     else None
+                ),
+                force_divorce=(
+                    self._engine.force_divorce_status if self._engine else None
                 ),
             )
         )
@@ -2842,6 +2852,7 @@ class AppBridge(QObject):
         parsed: ParseResult,
     ) -> bool:
         from mudae.kakera_log import (
+            claim_kakera_amount,
             earn_method_from_parse,
             record_kakera_earning,
             record_roll_bku_earning,
@@ -2868,7 +2879,13 @@ class AppBridge(QObject):
         method = earn_method_from_parse(parsed.kind, parsed.fields)
         if not method:
             return False
-        record_kakera_earning(snapshot, parsed.fields, earn_method=method)
+        # A claim prints its payout as ``kakera``; everything else uses
+        # ``amount``. Both land as one kakera event, which is what keeps the
+        # Run page's session haul a single figure rather than a second line.
+        amount = claim_kakera_amount(parsed.fields) if method == "claim" else None
+        record_kakera_earning(
+            snapshot, parsed.fields, earn_method=method, amount=amount
+        )
         spheres = parsed.fields.get("spheres")
         if spheres is not None:
             try:
@@ -2881,7 +2898,7 @@ class AppBridge(QObject):
                 record_sphere_earning(
                     snapshot,
                     parsed.fields,
-                    source="kakera_bonus",
+                    source="claim" if method == "claim" else "kakera_bonus",
                     amount=bonus,
                 )
         return True
@@ -3973,6 +3990,33 @@ class AppBridge(QObject):
             self._macro_config.us_schedule_end,
         ):
             self._mark_us_schedule_consumed()
+
+    @Slot()
+    def startForceDivorce(self) -> None:
+        """Start the force-divorce farm — hourly rolling that claims one character.
+
+        Same gating as the other roll modes: connected, engine idle, no
+        minigame mid-board. The engine re-checks on the loop thread, which is
+        the only place that sees a Start and a Play clicked in the same instant.
+        """
+        if not self._loop or not self._engine:
+            self._set_status("Connect first")
+            return
+        if self._engine.is_running:
+            self._set_status("Macro already running")
+            return
+        if self._minigames_busy():
+            self._set_status("Stop the minigame before starting $forcedivorce")
+            return
+        self._persist()
+        self._engine.update_config(self._macro_config)
+        self._set_run_action_pending("forcedivorce")
+        meta = self._session_meta()
+
+        def _start() -> None:
+            self._engine.start_force_divorce_mode(session_meta=meta)
+
+        self._loop.call_soon_threadsafe(_start)
 
     @Slot()
     def stopMacro(self) -> None:

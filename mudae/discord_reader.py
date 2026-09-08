@@ -139,12 +139,32 @@ class ChannelMonitor:
     async def send_command(self, command: str, *, prefix: str | None = None) -> int | None:
         cmd = command.strip().lstrip("$")
         pre = prefix if prefix is not None else "$"
-        payload = f"{pre}{cmd}"
+        return await self._send_payload(f"{pre}{cmd}", pending_command=cmd.lower())
+
+    async def send_text(self, text: str) -> int | None:
+        """Send a plain message that is **not** a ``$command``.
+
+        ``$forcedivorce`` asks a question and acts on a bare ``y``. Routing that
+        through :meth:`send_command` would work, but it would also stamp
+        ``_pending_macro_command = "y"``, and that is what the next Mudae
+        message is paired with — so Mudae's answer would be read as the reply
+        to a command called ``y``. A confirmation is not a command, so it does
+        not claim the pairing.
+        """
+        return await self._send_payload(str(text), pending_command=None)
+
+    async def _send_payload(
+        self,
+        payload: str,
+        *,
+        pending_command: str | None,
+    ) -> int | None:
         last_exc: BaseException | None = None
         for attempt in range(1, _SEND_ATTEMPTS + 1):
             try:
                 channel = await self._get_text_channel()
-                self._pending_macro_command = cmd.lower()
+                if pending_command is not None:
+                    self._pending_macro_command = pending_command
                 message = await channel.send(payload)
                 self._remember_message(message)
                 return int(message.id)

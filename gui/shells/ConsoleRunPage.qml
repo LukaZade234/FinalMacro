@@ -493,6 +493,23 @@ Item {
                     ConsoleRailBlock {
                         Layout.fillWidth: true
                         Layout.preferredHeight: implicitHeight
+                        visible: run.forceDivorceOn
+                        title: "force divorce"
+                        rows: run.forceDivorceRows
+                        stateText: run.forceDivorceTarget || "idle"
+                        stateOn: run.forceDivorceOn
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: run.forceDivorceOn ? 1 : 0
+                        visible: run.forceDivorceOn
+                        color: Theme.line
+                    }
+
+                    ConsoleRailBlock {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: implicitHeight
                         title: "adaptive perk 9"
                         rows: run.perk9AdaptiveRows
                         collapsible: run.perk9AdaptiveOn
@@ -608,6 +625,12 @@ Item {
                     text: "Roll $us"
                     enabled: run.canStartUs
                     onClicked: App.startUsMode()
+                }
+
+                ConsoleButton {
+                    text: "$forcedivorce"
+                    enabled: run.canForceDivorce
+                    onClicked: App.startForceDivorce()
                 }
 
                 ConsoleButton {

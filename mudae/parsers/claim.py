@@ -8,8 +8,16 @@ from typing import Any
 from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
+# The kakera emoji, consumed whole. Matching only the ``<:kakera:`` prefix left
+# the id and the closing ``>`` in the label, so "Emerald IV bonus" arrived as
+# "469835869059153940>(Emerald IV bonus) +92" — parseable as an amount, useless
+# as a name.
+_KAKERA_EMOJI = r"(?:<a?:kakera:\d+>|:kakera:)"
+# Mudae writes the bonus name in parentheses after the emoji, and not every
+# line has one (a plain claim payout carries no label at all).
+_BONUS_LABEL = r"\s*(?:\(\s*([^)\n]*?)\s*\))?"
 _KAKERA_BONUS_RE = re.compile(
-    r"\*\*\+([\d,]+)\*\*(?:<:kakera:|:kakera:)([^<\n]*)",
+    r"\*\*\+([\d,]+)\*\*\s*" + _KAKERA_EMOJI + _BONUS_LABEL,
     re.IGNORECASE,
 )
 _SKIP_LINE_RE = re.compile(
@@ -17,7 +25,7 @@ _SKIP_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 _KAKERA_BONUS_FALLBACK_RE = re.compile(
-    r"\+([\d,]+)\s*(?:<:kakera:|:kakera:)([^<\n]*)",
+    r"\+([\d,]+)\s*" + _KAKERA_EMOJI + _BONUS_LABEL,
     re.IGNORECASE,
 )
 _CLAIM_SPHERES_RE = re.compile(
@@ -38,11 +46,7 @@ def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
     for match in _KAKERA_BONUS_RE.finditer(content):
         amount = int(match.group(1).replace(",", ""))
         label = (match.group(2) or "").strip()
-        if label.startswith("("):
-            label = label[1:]
-        if label.endswith(")"):
-            label = label[:-1]
-        bonuses.append({"amount": amount, "label": label.strip() or None})
+        bonuses.append({"amount": amount, "label": label or None})
 
     if bonuses:
         return sum(entry["amount"] for entry in bonuses), bonuses
@@ -51,7 +55,7 @@ def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
     fallback: list[dict[str, Any]] = []
     for match in _KAKERA_BONUS_FALLBACK_RE.finditer(clean):
         amount = int(match.group(1).replace(",", ""))
-        label = (match.group(2) or "").strip().strip("()")
+        label = (match.group(2) or "").strip()
         fallback.append({"amount": amount, "label": label or None})
     if fallback:
         return sum(entry["amount"] for entry in fallback), fallback
@@ -59,10 +63,18 @@ def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
 
 
 def _parse_claim_spheres(content: str) -> int | None:
-    match = _CLAIM_SPHERES_RE.search(content)
-    if match:
-        return int(match.group(1).replace(",", ""))
-    return None
+    """Sum every sphere line, the way the kakera lines are summed.
+
+    A claim can pay more than once — an Emerald IV line and a Bronze IV line
+    each carry their own spheres — and reading only the first one silently
+    dropped the rest (92 reported against a real 164).
+    """
+    total = 0
+    found = False
+    for match in _CLAIM_SPHERES_RE.finditer(content):
+        total += int(match.group(1).replace(",", ""))
+        found = True
+    return total if found else None
 
 
 def is_marriage_claim(content: str) -> bool:

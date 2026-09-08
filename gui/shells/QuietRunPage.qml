@@ -258,10 +258,15 @@ Item {
                 enabled: run.canStartUs
                 onClicked: App.startUsMode()
             }
+            QuietAction {
+                text: "$forcedivorce"
+                enabled: run.canForceDivorce
+                onClicked: App.startForceDivorce()
+            }
 
             QuietGroupLabel { text: "Checks" }
-            QuietAction { text: "$tu"; enabled: run.canCheck; onClicked: App.checkTu() }
-            QuietAction { text: "$us"; enabled: run.canCheck; onClicked: App.checkUs() }
+            QuietAction { text: "$tu"; enabled: run.canCheck; onClicked: App.runTu() }
+            QuietAction { text: "$us"; enabled: run.canCheck; onClicked: App.runUsCheck() }
 
             QuietGroupLabel { text: "Minigames" }
             QuietAction { text: "$oh"; enabled: run.canPlayMinigame; onClicked: App.playOhSphere() }
@@ -388,6 +393,39 @@ Item {
                             font.family: Theme.monoFamily
                             font.pixelSize: Theme.sizeSmall
                             elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                // -- force divorce farm -----------------------------------------
+                QuietSection {
+                    title: "Force divorce"
+                    visible: run.forceDivorceOn
+                    status: run.forceDivorceTarget
+                    statusGood: run.forceDivorceOn
+                    Layout.fillWidth: true
+
+                    Repeater {
+                        model: run.forceDivorceRows
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 12
+
+                            Label {
+                                text: modelData.label
+                                color: Theme.dim
+                                font.pixelSize: Theme.sizeSmall
+                            }
+                            Item { Layout.fillWidth: true }
+                            Label {
+                                text: modelData.value
+                                color: modelData.tone === "good" ? Theme.good
+                                    : (modelData.tone === "bad" ? Theme.bad
+                                    : (modelData.tone === "accent" ? Theme.accent : Theme.fg))
+                                font.pixelSize: Theme.sizeSmall
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                 }

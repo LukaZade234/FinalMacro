@@ -138,11 +138,31 @@ class PostRollHandler:
         state: AccountState,
         *,
         log: Callable[[str], None],
+        claim_gate: Callable[[str], bool] | None = None,
+        on_claim: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
         self._state = state
         self._log = log
+        # A mode that must spend the claim slot on one specific character
+        # passes a gate here. Every claim path in the app ends in this class —
+        # the in-loop interrupt, the end-of-batch picker, a perk-6 spawn and
+        # the chaos wish spawn all build a handler and call one of the two
+        # methods below — so one gate closes all of them at once.
+        self._claim_gate = claim_gate
+        # Called with (character, claim fields) once a claim is confirmed. The
+        # payout is only knowable here — the claim message is what carries it,
+        # and ``claim_record`` returns a bare bool to its caller.
+        self._on_claim = on_claim
+
+    def _gate_allows(self, character_name: Any) -> bool:
+        if self._claim_gate is None:
+            return True
+        try:
+            return bool(self._claim_gate(str(character_name or "")))
+        except Exception:  # a broken gate must not silently claim
+            return False
 
     def _claim_expire_sec(self) -> int:
         if self._state.claim_expire_sec is not None:
@@ -172,6 +192,10 @@ class PostRollHandler:
         """Claim one roll immediately (interrupt path). Returns True if claim attempted."""
         prefix = f"{reason}: " if reason else ""
         rules = self._config.character_claim
+        name = record.character_name or "?"
+        if not self._gate_allows(record.character_name):
+            self._log(f"{prefix}{name} is not the claim this session is saved for — skipped")
+            return False
         if not (rules.enabled or rules.claim_on_wish_ping):
             self._log(f"{prefix}character claim off — skipped")
             return False
@@ -281,6 +305,20 @@ class PostRollHandler:
                 "for a wish rather than claiming the best of this batch"
             )
             return
+
+        if self._claim_gate is not None:
+            # The batch picker exists to spend a slot that would otherwise
+            # expire. While a session is saving that slot for one character,
+            # spending it on the best of the batch is exactly the loss the
+            # gate is there to prevent.
+            allowed = [r for r in records if self._gate_allows(r.character_name)]
+            if not allowed:
+                self._log(
+                    f"{len(records)} roll(s) this session — claim best skipped, "
+                    "the slot is saved for this session's own character"
+                )
+                return
+            records = allowed
 
         expire = self._claim_expire_sec()
         now = time.monotonic()
@@ -584,3 +622,8 @@ class PostRollHandler:
         self._state.rt_claim_slot_for = ""
         record.fields["claimed"] = True
         self._log(f"Claimed {character} ({winner})")
+        if self._on_claim is not None:
+            try:
+                self._on_claim(character, dict(parsed.fields))
+            except Exception:  # reporting must never lose a landed claim
+                pass
