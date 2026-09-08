@@ -430,6 +430,14 @@ buttons (click all, cost 0), or spawn a wish (claim with wish-ping rules,
 kakera react and is not a chaos minigame. Raw windows still go to
 `data/chaos_log.json`.
 
+`+N rolls this hour` lands *mid-batch*, so the roll segment's budget grows
+with it (`macro/roll_cycle.py::_run_normal_roll_segment`) and the extra
+rolls go out inside the batch that won them — before the end-of-batch
+claim picker runs, so their cards are candidates like any other. If Mudae's
+"N rolls left" countdown had already armed, it is re-armed, because that
+countdown was measuring the old pool. Rolling them in a second pass instead
+would put them after the claim and after a `$tu` that can omit them.
+
 ---
 
 

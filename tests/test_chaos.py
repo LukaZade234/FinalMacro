@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -582,3 +583,112 @@ def test_hourly_loop_rolls_chaos_extras_with_stop_at_two():
     assert any("Parsed 2 rolls left" in entry.text for entry in state.activity_log)
     assert any("Finished rolls after warning" in entry.text for entry in state.activity_log)
     assert not any("extra hourly roll" in entry.text for entry in state.activity_log)
+
+
+# --- chaos rolls join the batch they arrived in ---
+
+
+class _SegmentActions:
+    """Serves rolls forever, granting chaos rolls on a chosen roll number."""
+
+    def __init__(self, state, *, grant_on: int, grant: int) -> None:
+        self._state = state
+        self._grant_on = grant_on
+        self._grant = grant
+        self.rolls_served = 0
+        self.footers: dict[int, int] = {}
+
+    def drain_queue(self) -> None:
+        pass
+
+    def queue_size(self) -> int:
+        return 0
+
+    async def send_command(self, command: str, *, prefix: str | None = None) -> int:
+        return 1000 + self.rolls_served
+
+    async def wait_for_roll(self, *, roll_command: str, timeout: float = 20.0):
+        self.rolls_served += 1
+        n = self.rolls_served
+        if n == self._grant_on:
+            apply_chaos_hourly_rolls(self._state, self._grant)
+        fields: dict = {"character_name": f"Char{n}", "wished_by": None}
+        if n in self.footers:
+            fields["rolls_left"] = self.footers[n]
+        return (
+            _snap(2000 + n),
+            ParseResult(kind=MessageKind.ROLL, summary="$roll", fields=fields),
+        )
+
+    async def wait_for_perk6_spawn(self, *, parent_character: str, timeout: float = 5.0):
+        return None
+
+
+def _segment_engine(grant_on: int, grant: int) -> tuple[RollCycleEngine, AccountState, _SegmentActions]:
+    state = AccountState()
+    actions = _SegmentActions(state, grant_on=grant_on, grant=grant)
+    config = MacroConfig(
+        roll_command="wa",
+        roll_delay_sec=0.0,
+        character_claim=CharacterClaimRules(enabled=False, claim_on_wish_ping=False),
+        kakera_reaction=KakeraReactionRules(enabled=False),
+    )
+    engine = RollCycleEngine(
+        actions, config, state, SimpleNamespace(macro_active=False)
+    )
+    return engine, state, actions
+
+
+def test_chaos_rolls_are_spent_in_the_batch_that_won_them():
+    """+N rolls this hour extend the running batch, not a second pass after it."""
+
+    async def _case() -> None:
+        engine, state, actions = _segment_engine(grant_on=3, grant=4)
+        state.rolls_left = 5
+        claimed_from: list[int] = []
+
+        async def _claim_best(records, claimed):
+            claimed_from.append(len(records))
+
+        engine._claim_best_at_session_end = _claim_best
+        records: list = []
+        engine._stop.clear()
+        with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+            done, _claimed, _idx = await engine._roll_hourly_normal_segment(
+                "wa", records, 0, normal_rolls=5
+            )
+        # 5 planned + 4 granted mid-batch, all in one segment.
+        assert done == 9
+        assert actions.rolls_served == 9
+        # The end-of-batch picker sees the chaos rolls' cards, because they were
+        # rolled before it ran — the whole point of the fix.
+        assert claimed_from == [9]
+
+    asyncio.run(_case())
+
+
+def test_chaos_rolls_rearm_the_stop_countdown():
+    """A grant after Mudae's "2 rolls left" warning restarts the tail."""
+
+    async def _case() -> None:
+        engine, state, actions = _segment_engine(grant_on=2, grant=5)
+        state.rolls_left = 3
+        # Mudae warns on roll 1; the grant lands on roll 2, mid-tail.
+        actions.footers = {1: 2}
+        engine._claim_best_at_session_end = _noop_claim_best
+        records: list = []
+        engine._stop.clear()
+        with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+            done, _claimed, _idx = await engine._roll_hourly_normal_segment(
+                "wa", records, 0, normal_rolls=3
+            )
+        # Without the re-arm the tail would have stopped at 3 rolls, stranding
+        # the 5 new ones for a second pass after the claim.
+        assert done == 8
+        assert engine._roll_stop.tail_remaining is None
+
+    asyncio.run(_case())
+
+
+async def _noop_claim_best(records, claimed) -> None:
+    return None

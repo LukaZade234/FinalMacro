@@ -33,12 +33,19 @@ def discounted_reaction_cost(cost: float, discount_pct: float | None) -> float:
 
 
 def apply_chaos_hourly_rolls(state: Any, extra: int) -> int:
-    """Add ``+N rolls this hour`` to the ordinary hourly pool. Returns new total."""
+    """Add ``+N rolls this hour`` to the ordinary hourly pool. Returns new total.
+
+    ``chaos_rolls_granted`` is bumped alongside the spendable count so a roll
+    segment already in flight can see that its pool grew underneath it and roll
+    the extras in the same batch, before the end-of-batch claim.
+    """
     added = max(0, int(extra))
     pending = int(getattr(state, "chaos_rolls_left", 0) or 0)
     if added > 0:
         pending += added
         state.chaos_rolls_left = pending
+        granted = int(getattr(state, "chaos_rolls_granted", 0) or 0)
+        state.chaos_rolls_granted = granted + added
         current = getattr(state, "rolls_left", None)
         if current is None:
             state.rolls_left = added

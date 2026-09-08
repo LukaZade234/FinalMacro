@@ -1369,9 +1369,11 @@ class RollCycleEngine:
                         tu_fresh = True
                         continue
                     if remaining > 0:
-                        # Chaos +N (or a missed footer) grew the pool after this
-                        # pass. Keep rolling — do not $tu, which can omit extras.
-                        tu_fresh = False
+                        # A missed footer left rolls in the pool after this pass
+                        # (chaos +N is spent inside the batch now). Keep rolling
+                        # straight away: a $tu here can omit the extras, and it
+                        # would put those rolls after the end-of-batch claim.
+                        tu_fresh = True
                         continue
 
                     if not await self._wait_for_hourly_refill():
@@ -2024,6 +2026,13 @@ class RollCycleEngine:
         """Roll normal hourly rolls with standard stop/interrupt rules.
 
         Returns ``(rolls_done, claimed_via_interrupt, roll_limit_hit)``.
+
+        ``max_rolls`` is the pool as it stood when the batch started, but a chaos
+        kakera clicked *during* the batch grants ``+N rolls this hour`` on the
+        spot. Those are ordinary hourly rolls, so the budget grows to match and
+        they are spent here — before ``_claim_best_at_session_end`` picks from
+        the batch — rather than being left for a second pass that would roll
+        them after the claim.
         """
         if respect_roll_stop:
             self._sync_roll_stop_config()
@@ -2032,9 +2041,11 @@ class RollCycleEngine:
         done = 0
         stop_rolling = False
         roll_limit_hit = False
+        granted_before = int(getattr(self._state, "chaos_rolls_granted", 0) or 0)
+        budget = max_rolls
 
         while not self._stop.is_set() and not stop_rolling:
-            if max_rolls is not None and done >= max_rolls:
+            if budget is not None and done >= budget:
                 break
             if respect_roll_stop and self._roll_stop.should_stop_before_roll(
                 self._state.rolls_left
@@ -2060,6 +2071,23 @@ class RollCycleEngine:
             if outcome.stop:
                 claimed_via_interrupt = outcome.claimed
                 break
+
+            granted = int(getattr(self._state, "chaos_rolls_granted", 0) or 0)
+            if granted > granted_before:
+                extra = granted - granted_before
+                granted_before = granted
+                if budget is not None:
+                    budget += extra
+                self._log(
+                    f"chaos: +{extra} roll(s) added to this batch — "
+                    "rolling them before the end-of-batch claim"
+                )
+                # Mudae's "N rolls left" countdown was for the old pool. Re-arm
+                # the tracker so the tail waits for a fresh footer instead of
+                # stopping the batch with the new rolls unspent.
+                if respect_roll_stop and self._roll_stop.tail_remaining is not None:
+                    self._roll_stop.tail_remaining = None
+                    self._roll_stop.saw_warning = False
 
             if respect_roll_stop:
                 rl = outcome.rolls_left

@@ -26,6 +26,11 @@ class AccountState:
     rolls_left: int | None = None
     rolls_us_bonus: int | None = None  # stacked rolls added via $us, usable now
     chaos_rolls_left: int = 0  # +N this hour not yet folded by $tu; ordinary rolls
+    # Monotonic count of chaos ``+N rolls this hour`` granted this run. Never
+    # decremented, so a roll segment can compare it against the value it
+    # started with and notice rolls that arrived mid-batch; session-only, so
+    # it is deliberately absent from the persisted runtime snapshot.
+    chaos_rolls_granted: int = 0
     us_stacked: float | None = None  # full stacked pool from bare $us
     claim_available: bool | None = None
     claim_cooldown_minutes: int | None = None
