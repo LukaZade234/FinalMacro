@@ -313,6 +313,28 @@ not the claim slot. This cannot burn the stack casually: the hunt is only ever
 reached after a divorce the farm chose to make, which it only makes with a
 claim slot already in hand.
 
+A missing Mudae tick on the hunt's `$us N` is **not** proof the add failed.
+Mudae frequently applies `$us` and reacts late or not at all, so `$tu` is asked
+before the add is written off, and the hunt retries up to `_MAX_FAILED_US_ADDS`
+(3) times rather than abandoning on one dropped command — the same handshake
+`$us` mode uses. A live run gave up on the first unacknowledged `$us 20` and
+left the divorced character unowned with 20,534 rolls still stacked, which is
+precisely what the hunt exists to prevent. The stack is not the scarce resource
+here; the exposure window is.
+
+For the same reason the hunt is tried **before** the hourly-refill wait, not
+only after a batch of rolls. A run resumed at `$tu OK · 0 rolls` recognised that
+Lucy was still divorced from the previous run and then went straight to a 19
+minute wait, because the "no rolls left" branch came first — with a claim slot
+in hand and 20k rolls stacked. With no hourly rolls to find the character with,
+the stack is the only thing that can close the exposure before the refill.
+
+**Every join in the handshake gets a beat.** `$mmk=` reply → `$forcedivorce` →
+`y` → first roll are each separated by `_FORCE_DIVORCE_STEP_PAUSE_SEC` (1s).
+Mudae answers badly when two actions land in the same instant: a live run sent
+`$forcedivorce` in the same second as the `$mmk=` reply and got no confirmation
+prompt at all, so nothing was divorced that hour.
+
 **Cycling on `$rt`.** The moment a claim lands, the next cycle starts — not at
 the top of the next hour. The rolls left in the current hour are what the new
 cycle hunts with, so waiting until they are spent wastes the chance the `$rt`

@@ -97,14 +97,16 @@ _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($u
 _PERK6_SPAWN_WAIT_SEC = 0.5  # brief poll; queue drain catches late spawns
 _PERK6_SPAWN_POLL_SEC = 0.25
 _PERK6_POST_SETTLE_SEC = 1.2  # pause after spawn reactions before next roll
-_US_ADD_SETTLE_SEC = 1.0
+_US_ADD_SETTLE_SEC = 1.0  # pause after $us N before the first $wa
 # $forcedivorce is a two-step exchange: the command, then a plain "y".
 _FORCE_DIVORCE_PROMPT_TIMEOUT_SEC = 12.0
 _FORCE_DIVORCE_RESULT_TIMEOUT_SEC = 12.0
-# Spacing before the confirmation, for the same reason $rt has one: Mudae
-# answers badly when two actions land in the same instant.
-_FORCE_DIVORCE_CONFIRM_PAUSE_SEC = 1.0
-_HAREM_TIMEOUT_SEC = 12.0  # pause after $us N before the first $wa
+# Mudae answers badly when two actions land in the same instant, so every join
+# in the farm's handshake -- $mmk= reply -> $forcedivorce -> y -> first roll --
+# gets a beat. A live run sent $forcedivorce in the same second as the $mmk=
+# reply and never got a confirmation prompt at all.
+_FORCE_DIVORCE_STEP_PAUSE_SEC = 1.0
+_HAREM_TIMEOUT_SEC = 12.0
 
 # How long the hourly loop yields to a manually started minigame before giving
 # up on the pass. A full $oh/$oc/$oq board is well under a minute, so anything
@@ -534,7 +536,7 @@ class RollCycleEngine:
             self._stop.set()
             return False
 
-        await self._sleep(_FORCE_DIVORCE_CONFIRM_PAUSE_SEC)
+        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
         if await self._actions.send_text("y") is None:
             # The prompt expires on its own, so an unanswered one divorces
             # nothing.
@@ -601,11 +603,15 @@ class RollCycleEngine:
         self._notify()
         return True
 
-    async def _run_force_divorce_step(self) -> None:
-        """The farm's per-cycle work: pick a target, then divorce it."""
+    async def _run_force_divorce_step(self) -> bool:
+        """The farm's per-cycle work: pick a target, then divorce it.
+
+        Returns True when a divorce actually landed, so the caller knows to let
+        Mudae settle before it starts rolling.
+        """
         session = self._force_divorce
         if session is None or not session.active or self._stop.is_set():
-            return
+            return False
         session.ready_for_next_cycle()
         if session.needs_target(str(mudae_daily_date(utc_now()))):
             override = str(
@@ -622,32 +628,55 @@ class RollCycleEngine:
             if why and why != self._force_divorce_last_skip:
                 self._force_divorce_last_skip = why
                 self._log(f"$forcedivorce: not divorcing — {why}")
-            return
+            return False
         self._force_divorce_last_skip = ""
-        await self._force_divorce_exchange()
+        # Let the $mmk= reply settle before the next command.
+        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+        return await self._force_divorce_exchange()
 
-    async def _add_us_batch(self, request: int) -> bool:
+    async def _add_us_batch(self, request: int) -> int:
         """Move ``request`` rolls off the ``$us`` stack into the usable pool.
 
-        The same handshake ``$us`` mode uses — send, wait for Mudae's tick,
-        then treat the rolls as usable — without that loop's stack bookkeeping,
-        which the farm does not need: it tops up once per hunt round and stops
-        the moment the target is claimed.
+        Returns the rolls now usable, or 0 when the add did not land.
+
+        The same handshake ``$us`` mode uses, including its fallback: a missing
+        tick is *not* a missing add. Mudae often applies ``$us`` and reacts late
+        or not at all, so ``$tu`` is asked before giving up. A live hunt gave up
+        on the first unacknowledged ``$us 20`` and left the divorced character
+        unowned with 20,534 rolls still stacked — which is exactly the outcome
+        the hunt exists to prevent.
         """
         message_id = await self._send_command_with_reconnect(
             f"us {request}", label="$forcedivorce hunt"
         )
         if message_id is None:
-            return False
+            return 0
         ticked = await self._actions.wait_for_mudae_tick(
             message_id, timeout=self._config.us_add_delay()
         )
-        if not ticked:
-            self._log(f"$forcedivorce: {self._config.prefix}us {request} not acknowledged")
-            return False
-        self._state.rolls_us_bonus = request
-        await self._sleep(_US_ADD_SETTLE_SEC)
-        return True
+        if ticked:
+            self._state.rolls_us_bonus = request
+            await self._sleep(_US_ADD_SETTLE_SEC)
+            return request
+
+        self._log(
+            f"$forcedivorce: no tick on {self._config.prefix}us {request} "
+            "— checking $tu"
+        )
+        if not await self.run_tu():
+            return 0
+        confirmed = int(self._state.rolls_us_bonus or 0)
+        if confirmed > 0:
+            self._log(
+                f"$forcedivorce: {self._config.prefix}us landed after all "
+                f"— {confirmed} roll(s) usable"
+            )
+            await self._sleep(_US_ADD_SETTLE_SEC)
+            return confirmed
+        self._log(
+            f"$forcedivorce: {self._config.prefix}us {request} did not register"
+        )
+        return 0
 
     async def _force_divorce_us_hunt(
         self,
@@ -698,6 +727,7 @@ class RollCycleEngine:
         max_request = self._config.us_batch()
         margin = max(0, self._config.us_reset_margin_minutes)
 
+        failed_adds = 0
         while session.phase == force_divorce.HUNTING and stack >= 1:
             if self._stop.is_set():
                 break
@@ -707,13 +737,26 @@ class RollCycleEngine:
                 self._log("$forcedivorce: rolls reset is due — stopping the hunt")
                 break
             request = min(max_request, int(stack))
-            if not await self._add_us_batch(request):
-                break
+            usable = await self._add_us_batch(request)
+            if usable <= 0:
+                # Retry rather than abandon the hunt on one dropped command:
+                # the character stays exposed for as long as the hunt is off,
+                # and the stack is not the scarce thing here.
+                failed_adds += 1
+                if failed_adds >= _MAX_FAILED_US_ADDS:
+                    self._log(
+                        f"$forcedivorce: {self._config.prefix}us not registering "
+                        f"after {failed_adds} attempts — stopping the hunt"
+                    )
+                    break
+                await self._sleep(self._config.us_add_delay())
+                continue
+            failed_adds = 0
             stack -= request
             self._state.us_stacked = stack
             done, claimed, halt = await self._roll_us_batch(
                 cmd,
-                request,
+                usable,
                 session_records,
                 roll_index,
                 us_roll=True,
@@ -724,10 +767,20 @@ class RollCycleEngine:
             if halt:
                 self._log_us_halt(halt)
                 break
-            if done < request:
+            if done < usable:
                 break
         if session.phase == force_divorce.HUNTING:
-            self._log(f"$forcedivorce: {target} did not spawn before the stack ran out")
+            if stack < 1:
+                self._log(
+                    f"$forcedivorce: {target} did not spawn before the stack ran out"
+                )
+            else:
+                # The reason the hunt ended is already logged above; what
+                # matters here is that the character is still exposed.
+                self._log(
+                    f"$forcedivorce: hunt ended with {stack:g} $us still stacked "
+                    f"— {target} is still unowned"
+                )
         return False
 
     async def _force_divorce_roll_check(
@@ -785,7 +838,8 @@ class RollCycleEngine:
             # hour. The rolls left in *this* hour are what the new cycle has to
             # hunt with, so waiting until they are spent throws away the very
             # chance an unspent $rt is worth having.
-            await self._run_force_divorce_step()
+            if await self._run_force_divorce_step():
+                await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
         return _RollOutcome(
             ok=True,
             rolls_left=rolls_left,
@@ -1314,12 +1368,24 @@ class RollCycleEngine:
                     # divorce it whenever a claim slot is in hand. It runs
                     # before the batch so the character is already in the pool
                     # for this hour's rolls.
-                    await self._run_force_divorce_step()
+                    if await self._run_force_divorce_step():
+                        # A divorce just landed. Give Mudae a beat to finish
+                        # with it before the roll stream starts.
+                        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
                     if self._stop.is_set():
                         break
 
                     pool = int(self._state.rolls_left or 0)
                     if pool <= 0:
+                        # No hourly rolls, but the farm's target may still be
+                        # out there — on a restart mid-exposure it always is.
+                        # The $us stack is then the only thing that can close
+                        # the exposure before the refill, so hunt before
+                        # settling in to wait an hour with the account's most
+                        # valuable character sitting unowned.
+                        if await self._force_divorce_us_hunt([], roll_index):
+                            tu_fresh = False
+                            continue
                         if not await self._wait_for_hourly_refill():
                             break
                         tu_fresh = True

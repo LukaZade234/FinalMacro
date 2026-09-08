@@ -190,6 +190,7 @@ def test_a_real_marriage_is_left_alone():
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from macro import force_divorce as fd
 from macro.config import CharacterClaimRules, MacroConfig
@@ -755,3 +756,168 @@ def test_the_us_hunt_still_needs_a_target_that_is_actually_out_there():
     # Nothing divorced yet: no hunt, and no $us spent.
     assert asyncio.run(engine._force_divorce_us_hunt([], 0)) is False
     assert actions.sent == []
+
+
+# --- the hunt survives a $us that Mudae acknowledges late ---------------------
+
+
+class _HuntActions(_FarmActions):
+    """A hunt harness: a stack to spend, ticks that can be withheld, and rolls.
+
+    ``ticks`` is consumed one entry per ``$us N``; ``tu_us_bonus`` is what a
+    follow-up ``$tu`` reports, which is how a missed tick is distinguished from
+    a missed add.
+    """
+
+    def __init__(self, *, stacked=40.0, ticks=(), tu_us_bonus=()):
+        super().__init__()
+        self.stacked = stacked
+        self._ticks = list(ticks)
+        self._tu_us_bonus = list(tu_us_bonus)
+        self.tu_calls = 0
+        self.rolls_served = 0
+
+    def queue_size(self) -> int:
+        return 0
+
+    async def wait_for(self, predicate, *, timeout=15.0):
+        content = (
+            f"<:rollstack:1> You have **{self.stacked:,}** rolls stacked.\n"
+            "Syntax: **$us <number of stacked rolls to use>**"
+        )
+        return SimpleNamespace(message_id=900, content=content), None
+
+    async def wait_for_mudae_tick(self, message_id, *, timeout=5.0):
+        return self._ticks.pop(0) if self._ticks else False
+
+    async def wait_for_tu(self, *, timeout=12.0):
+        from mudae.types import ParseResult
+
+        self.tu_calls += 1
+        bonus = self._tu_us_bonus.pop(0) if self._tu_us_bonus else 0
+        return ParseResult(
+            kind=MessageKind.TU,
+            summary="$tu",
+            fields={
+                "rolls_left": 0,
+                "rolls_us_bonus": bonus,
+                "claim_available": True,
+                "rolls_reset_minutes": 40,
+            },
+        )
+
+    async def wait_for_roll(self, *, roll_command, timeout=20.0):
+        from mudae.types import ParseResult
+
+        self.rolls_served += 1
+        return (
+            SimpleNamespace(message_id=3000 + self.rolls_served),
+            ParseResult(
+                kind=MessageKind.ROLL,
+                summary="$roll",
+                fields={"character_name": f"Other{self.rolls_served}", "wished_by": None},
+            ),
+        )
+
+    async def wait_for_perk6_spawn(self, *, parent_character, timeout=5.0):
+        return None
+
+
+def _hunting_engine(actions):
+    engine, state = _farm_engine(actions)
+    session = engine._force_divorce
+    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.note_divorced()
+    state.rolls_reset_minutes = 40
+    return engine, state
+
+
+def test_a_missed_us_tick_is_confirmed_with_tu_rather_than_ending_the_hunt():
+    """The live failure: one unacknowledged ``$us 20`` abandoned the hunt.
+
+    Mudae applies ``$us`` and reacts late often enough that the tick alone is
+    not evidence. The stack was 20,534 rolls deep and the divorced character was
+    left unowned, which is the one outcome the hunt exists to prevent.
+    """
+    actions = _HuntActions(stacked=20.0, ticks=[False], tu_us_bonus=[20])
+    engine, _state = _hunting_engine(actions)
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        claimed = asyncio.run(engine._force_divorce_us_hunt([], 0))
+    assert claimed is False
+    # $tu was asked, and the rolls were spent instead of abandoned.
+    assert actions.tu_calls == 1
+    assert actions.rolls_served == 20
+
+
+def test_the_hunt_retries_a_us_that_really_did_not_register():
+    """Three tries before giving up, as $us mode does — the stack is not scarce."""
+    actions = _HuntActions(stacked=40.0, ticks=[False, False, False], tu_us_bonus=[0, 0, 0])
+    engine, _state = _hunting_engine(actions)
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        claimed = asyncio.run(engine._force_divorce_us_hunt([], 0))
+    assert claimed is False
+    assert len([c for c in actions.sent if c.startswith("$us ")]) == 3
+    assert actions.rolls_served == 0
+
+
+async def _fast_sleep(*_a, **_k) -> None:
+    return None
+
+
+def test_zero_hourly_rolls_still_hunts_before_waiting_out_the_hour():
+    """The restart case: nothing to roll with, but the target is still exposed.
+
+    A run resumed at ``$tu OK · 0 rolls`` correctly saw Lucy was still divorced
+    from the previous run, then took the "no rolls" branch straight to a 19
+    minute refill wait — with 20k rolls stacked and a claim slot in hand. The
+    $us stack is the only thing that can close the exposure before the refill,
+    so it is tried before the wait.
+    """
+    actions = _FarmActions()
+    engine, state = _farm_engine(actions)
+    session = engine._force_divorce
+    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.note_divorced()
+    state.rolls_left = 0
+    order: list[str] = []
+
+    async def _ok(*_a, **_k):
+        return True
+
+    async def _none(*_a, **_k):
+        return None
+
+    async def _tu():
+        order.append("tu")
+        return True
+
+    async def _step():
+        return False
+
+    async def _hunt(_records, _index):
+        order.append("hunt")
+        return False
+
+    async def _refill():
+        order.append("refill")
+        engine._stop.set()
+        return False
+
+    engine._restore_connection_for_notifications = _ok
+    engine._refresh_perk8_status = _none
+    engine._run_priority_pause = _none
+    engine._maybe_refresh_perk8_status = _none
+    engine._maybe_play_daily_minigames = _none
+    engine.run_tu = _tu
+    engine._run_force_divorce_step = _step
+    engine._force_divorce_us_hunt = _hunt
+    engine._wait_for_hourly_refill = _refill
+
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._run_cycle())
+
+    assert "hunt" in order, "the exposed target was never hunted"
+    assert order.index("hunt") < order.index("refill")
