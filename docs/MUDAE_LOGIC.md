@@ -329,6 +329,24 @@ minute wait, because the "no rolls left" branch came first — with a claim slot
 in hand and 20k rolls stacked. With no hourly rolls to find the character with,
 the stack is the only thing that can close the exposure before the refill.
 
+**Usable `$us` rolls are spent before any are added.** Mudae spends the `$us`
+bonus before anything else, and the bonus is wiped at the rolls reset whether or
+not it is used, so topping the stack up ahead of it strands rolls that are
+already paid for and delays the hunt. A live `$tu` read `0 (+9 $us) rolls` and
+the hunt went straight to the stack, leaving those nine to expire. If the target
+turns up in the bonus rolls, the stack is never read at all.
+
+**Reading the stack needs a beat and a retry.** The hunt asks for the stack
+straight off the back of another command — usually the `$mmk=` that chose the
+target — and Mudae simply *ignores* a bare `$us` that lands on top of one: no
+reply, no error. A silent `$us` is indistinguishable from an empty stack, and
+two consecutive live runs read it that way and logged "nothing on the $us stack
+to hunt with" with 20k rolls actually stacked. So the hunt waits
+`_FORCE_DIVORCE_STEP_PAUSE_SEC` before asking and retries up to
+`_US_STACK_READ_ATTEMPTS` (3) times; only then does it give up, and it says it
+got no answer rather than claiming the stack is empty. The GUI's own `$us`
+button still asks once — the user is watching it and can press again.
+
 **Every join in the handshake gets a beat.** `$mmk=` reply → `$forcedivorce` →
 `y` → first roll are each separated by `_FORCE_DIVORCE_STEP_PAUSE_SEC` (1s).
 Mudae answers badly when two actions land in the same instant: a live run sent

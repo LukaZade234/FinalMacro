@@ -195,9 +195,22 @@ from unittest.mock import patch
 from macro import force_divorce as fd
 from macro.config import CharacterClaimRules, MacroConfig
 from macro.force_divorce import ForceDivorceSession, target_from_harem
+from macro.perk8_daily import mudae_daily_date
 from macro.post_roll import PostRollHandler, RollRecord
 from macro.roll_cycle import RollCycleEngine
 from macro.state import AccountState
+
+
+def _today() -> str:
+    """The Mudae day the engine will compute, not a fixed date.
+
+    A hardcoded day silently changes what these tests exercise once the
+    calendar passes it: the target reads as stale, so the farm re-reads $mmk=
+    before doing anything and the assertions about what it sent stop matching.
+    """
+    from mudae.clock import utc_now
+
+    return str(mudae_daily_date(utc_now()))
 
 
 class _FarmActions:
@@ -292,7 +305,7 @@ def test_a_divorce_needs_a_claim_slot_already_in_hand():
     whole design is built to avoid.
     """
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
 
     ok, why = session.can_divorce(AccountState(claim_available=False, rt_available=False))
     assert ok is False
@@ -307,7 +320,7 @@ def test_a_divorce_needs_a_claim_slot_already_in_hand():
 
 def test_no_divorce_is_sent_while_the_target_is_already_out_there():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     session.note_divorced()
     ok, why = session.can_divorce(AccountState(claim_available=True))
     assert ok is False
@@ -436,7 +449,7 @@ def _gate_handler(session):
 
 def test_the_gate_refuses_every_character_but_the_target():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     # Whatever the reason a claim was triggered — a wish ping, an app-wishlist
     # match, the end-of-batch best pick — the slot belongs to the target.
     assert session.allows_claim("Lucy")
@@ -447,7 +460,7 @@ def test_the_gate_refuses_every_character_but_the_target():
 
 def test_claim_record_refuses_a_non_target():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     handler = _gate_handler(session)
     record = RollRecord(message_id=1, character_name="Rem",
                         fields={"can_claim": True, "claimed": False})
@@ -456,7 +469,7 @@ def test_claim_record_refuses_a_non_target():
 
 def test_once_stopped_the_ordinary_claim_rules_come_back():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     session.stop("target lost")
     assert session.allows_claim("Rem") is True
 
@@ -555,7 +568,7 @@ def test_the_farm_banks_what_the_claim_actually_paid():
     does not.
     """
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     actions = _FarmActions()
     engine, _ = _farm_engine(actions)
     engine._force_divorce = session
@@ -572,7 +585,7 @@ def test_the_farm_banks_what_the_claim_actually_paid():
 
 def test_rt_is_spent_when_there_is_time_to_hunt_with_it():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     session.note_divorced()
     session.note_claimed(kakera=641_734)
     session.ready_for_next_cycle()
@@ -587,7 +600,7 @@ def test_rt_is_spent_when_there_is_time_to_hunt_with_it():
 
 def test_rt_is_held_when_the_reset_is_about_to_hand_one_over():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     ok, why = session.can_divorce(
         AccountState(claim_available=False, rt_available=True,
                      next_claim_reset_minutes=12)
@@ -604,7 +617,7 @@ def test_rt_is_held_when_the_reset_is_about_to_hand_one_over():
 
 def test_a_free_claim_slot_is_never_held_back_by_the_rt_rule():
     session = ForceDivorceSession()
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     ok, _ = session.can_divorce(
         AccountState(claim_available=True, next_claim_reset_minutes=2)
     )
@@ -625,7 +638,7 @@ def test_claiming_the_target_banks_it_and_starts_the_next_cycle_at_once():
     state.next_claim_reset_minutes = 50
     state.rt_available = True
     session = engine._force_divorce
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     session.note_divorced()
 
     class _StubHandler:
@@ -751,7 +764,7 @@ def test_the_us_hunt_still_needs_a_target_that_is_actually_out_there():
     actions = _FarmActions()
     engine, _ = _farm_engine(actions)
     session = engine._force_divorce
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
 
     # Nothing divorced yet: no hunt, and no $us spent.
     assert asyncio.run(engine._force_divorce_us_hunt([], 0)) is False
@@ -776,11 +789,19 @@ class _HuntActions(_FarmActions):
         self._tu_us_bonus = list(tu_us_bonus)
         self.tu_calls = 0
         self.rolls_served = 0
+        self.stack_reads = 0
+        self.stack_silent_for = 0  # how many bare $us reads answer nothing
+        self.rolls_before_stack_read = None
 
     def queue_size(self) -> int:
         return 0
 
     async def wait_for(self, predicate, *, timeout=15.0):
+        if self.rolls_before_stack_read is None:
+            self.rolls_before_stack_read = self.rolls_served
+        self.stack_reads += 1
+        if self.stack_reads <= self.stack_silent_for:
+            return None
         content = (
             f"<:rollstack:1> You have **{self.stacked:,}** rolls stacked.\n"
             "Syntax: **$us <number of stacked rolls to use>**"
@@ -826,7 +847,7 @@ class _HuntActions(_FarmActions):
 def _hunting_engine(actions):
     engine, state = _farm_engine(actions)
     session = engine._force_divorce
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     session.note_divorced()
     state.rolls_reset_minutes = 40
     return engine, state
@@ -878,7 +899,7 @@ def test_zero_hourly_rolls_still_hunts_before_waiting_out_the_hour():
     actions = _FarmActions()
     engine, state = _farm_engine(actions)
     session = engine._force_divorce
-    session.set_target("Lucy", 271_065, day="2026-09-08")
+    session.set_target("Lucy", 271_065, day=_today())
     session.note_divorced()
     state.rolls_left = 0
     order: list[str] = []
@@ -921,3 +942,106 @@ def test_zero_hourly_rolls_still_hunts_before_waiting_out_the_hour():
 
     assert "hunt" in order, "the exposed target was never hunted"
     assert order.index("hunt") < order.index("refill")
+
+
+def test_a_silent_us_is_retried_rather_than_read_as_an_empty_stack():
+    """The live failure: $us sent on the heels of $mmk= got no reply at all.
+
+    Mudae ignores a bare $us that lands on top of another command — no reply,
+    no error — and the hunt read that silence as "nothing stacked" and gave up,
+    twice in a row, with the divorced character still out there.
+    """
+    actions = _HuntActions(stacked=20.0, ticks=[True])
+    actions.stack_silent_for = 2  # first two $us reads answer nothing
+    engine, _state = _hunting_engine(actions)
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._force_divorce_us_hunt([], 0))
+
+    assert actions.stack_reads == 3, "the stack read was not retried"
+    # The third answer was believed, so the hunt actually spent the stack.
+    assert actions.rolls_served == 20
+
+
+def test_the_hunt_gives_up_after_the_retries_without_claiming_the_stack_is_empty():
+    actions = _HuntActions(stacked=20.0)
+    actions.stack_silent_for = 99
+    engine, _state = _hunting_engine(actions)
+    logs: list[str] = []
+    engine._log = logs.append
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._force_divorce_us_hunt([], 0))
+
+    assert actions.stack_reads == 3
+    assert actions.rolls_served == 0
+    # "nothing stacked" would be a lie — the stack was never read.
+    assert not any("nothing on the $us stack" in line for line in logs)
+    assert any("no answer to $us" in line for line in logs)
+
+
+def test_the_hunt_lets_the_previous_command_settle_before_asking_for_the_stack():
+    """One second between the $mmk= that chose the target and the bare $us."""
+    from macro.roll_cycle import _FORCE_DIVORCE_STEP_PAUSE_SEC
+
+    actions = _HuntActions(stacked=20.0, ticks=[True])
+    engine, _state = _hunting_engine(actions)
+    waits: list[float] = []
+    sends_at_first_wait: list[int] = []
+
+    async def _record_sleep(seconds, *_a, **_k):
+        waits.append(seconds)
+        sends_at_first_wait.append(actions.stack_reads)
+
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_record_sleep):
+        asyncio.run(engine._force_divorce_us_hunt([], 0))
+
+    assert waits, "the hunt asked for the stack with no settle at all"
+    assert waits[0] == _FORCE_DIVORCE_STEP_PAUSE_SEC
+    # And it waited *before* sending, not after the answer came back.
+    assert sends_at_first_wait[0] == 0
+
+
+def test_usable_us_rolls_are_spent_before_the_stack_is_topped_up():
+    """A live $tu read ``0 (+9 $us) rolls`` and the hunt ignored the 9.
+
+    Mudae spends the $us bonus before anything else, and the bonus is wiped at
+    the rolls reset whether or not it is used, so adding more on top of it both
+    strands rolls that are already paid for and delays the hunt.
+    """
+    actions = _HuntActions(stacked=40.0, ticks=[True, True])
+    engine, state = _hunting_engine(actions)
+    state.rolls_us_bonus = 9
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        asyncio.run(engine._force_divorce_us_hunt([], 0))
+
+    # The 9 usable rolls went out before the stack was even asked about, and
+    # the 40 stacked then followed in two batches.
+    assert actions.rolls_before_stack_read == 9
+    assert actions.rolls_served == 9 + 40
+    assert [c for c in actions.sent if c.startswith("$us")] == [
+        "$us", "$us 20", "$us 20",
+    ]
+
+
+def test_the_usable_bonus_alone_can_close_the_hunt():
+    """Claiming off the already-usable rolls never touches the stack at all."""
+    actions = _HuntActions(stacked=40.0)
+    engine, state = _hunting_engine(actions)
+    state.rolls_us_bonus = 5
+    claimed_after = 3
+
+    async def _roll_batch(cmd, count, records, index, *, us_roll=True, respect_us_stop=True):
+        actions.rolls_served += count
+        return claimed_after, True, None
+
+    engine._roll_us_batch = _roll_batch
+    engine._stop.clear()
+    with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
+        claimed = asyncio.run(engine._force_divorce_us_hunt([], 0))
+
+    assert claimed is True
+    assert actions.stack_reads == 0, "the stack was read despite the claim landing"
+    assert [c for c in actions.sent if c.startswith("$us")] == []

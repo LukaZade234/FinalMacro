@@ -106,6 +106,10 @@ _FORCE_DIVORCE_RESULT_TIMEOUT_SEC = 12.0
 # gets a beat. A live run sent $forcedivorce in the same second as the $mmk=
 # reply and never got a confirmation prompt at all.
 _FORCE_DIVORCE_STEP_PAUSE_SEC = 1.0
+# A bare $us that Mudae ignores looks exactly like an empty stack, so the
+# farm asks more than once before believing it has nothing to hunt with.
+_US_STACK_READ_ATTEMPTS = 3
+_US_STACK_RETRY_PAUSE_SEC = 1.0
 _HAREM_TIMEOUT_SEC = 12.0
 
 # How long the hourly loop yields to a manually started minigame before giving
@@ -699,6 +703,9 @@ class RollCycleEngine:
         it. That cannot burn the stack casually: it is only ever reached after
         a divorce this mode chose to make, which it only makes with a claim
         slot in hand. Returns True when the target was claimed.
+
+        Rolls already moved off the stack are spent before any are added, since
+        the usable bonus expires at the rolls reset either way.
         """
         session = self._force_divorce
         if session is None or not session.active or self._stop.is_set():
@@ -712,20 +719,63 @@ class RollCycleEngine:
             self._log("$forcedivorce: no claim slot left — not spending $us this hour")
             return False
 
-        stack = await self._read_us_stack()
-        if not stack or stack < 1:
-            self._log("$forcedivorce: nothing on the $us stack to hunt with")
-            return False
-
         target = session.target.name if session.target else "the target"
-        self._log(
-            f"$forcedivorce: {target} is still out there · {stack:g} $us stacked "
-            "— hunting rather than leaving it unowned"
-        )
-        self._state.us_stacked = stack
         cmd = self._config.normalized_roll_command()
         max_request = self._config.us_batch()
         margin = max(0, self._config.us_reset_margin_minutes)
+
+        # Rolls already moved off the stack come first. Mudae spends the ``$us``
+        # bonus before anything else, and the bonus is wiped at the rolls reset
+        # whether or not it is used -- so topping the stack up ahead of it both
+        # strands rolls that are already paid for and delays the hunt. A live
+        # ``$tu`` read ``0 (+9 $us) rolls`` and the hunt went straight to the
+        # stack, leaving those nine to expire unspent.
+        usable_now = int(self._state.rolls_us_bonus or 0)
+        if usable_now > 0:
+            self._log(
+                f"$forcedivorce: {target} is still out there · {usable_now} "
+                f"{self._config.prefix}us roll(s) already usable — spending "
+                "those before touching the stack"
+            )
+            done, claimed, halt = await self._roll_us_batch(
+                cmd,
+                usable_now,
+                session_records,
+                roll_index,
+                us_roll=True,
+            )
+            roll_index += done
+            if claimed:
+                return True
+            if halt:
+                self._log_us_halt(halt)
+                return False
+            if done < usable_now or self._stop.is_set():
+                return False
+
+        # The farm reaches the stack read straight off the back of another
+        # command -- usually the $mmk= that decided the target. Mudae ignores a
+        # bare $us that lands on top of it, and a silent $us reads as an empty
+        # stack, so the hunt gets a beat and a retry rather than being written
+        # off.
+        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+        stack = await self._read_us_stack(attempts=_US_STACK_READ_ATTEMPTS)
+        if stack is None:
+            self._log(
+                f"$forcedivorce: no answer to {self._config.prefix}us after "
+                f"{_US_STACK_READ_ATTEMPTS} tries — cannot hunt this hour"
+            )
+            return False
+        if stack < 1:
+            self._log("$forcedivorce: nothing on the $us stack to hunt with")
+            return False
+
+        if usable_now <= 0:
+            self._log(
+                f"$forcedivorce: {target} is still out there · {stack:g} $us stacked "
+                "— hunting rather than leaving it unowned"
+            )
+        self._state.us_stacked = stack
 
         failed_adds = 0
         while session.phase == force_divorce.HUNTING and stack >= 1:
@@ -2943,19 +2993,36 @@ class RollCycleEngine:
 
         return False
 
-    async def _read_us_stack(self) -> float | None:
-        """Send a bare ``$us`` and return the stacked-roll pool size."""
-        self._actions.drain_queue()
-        await self._actions.send_command("us", prefix=self._config.prefix)
-        result = await self._actions.wait_for(
-            lambda snapshot, _parsed: is_us_stack_response(
-                getattr(snapshot, "content", "") or ""
-            ),
-            timeout=_RESPONSE_TIMEOUT_SEC,
-        )
-        if result is None:
-            return None
-        return parse_us_stacked(result[0].content or "")
+    async def _read_us_stack(self, *, attempts: int = 1) -> float | None:
+        """Send a bare ``$us`` and return the stacked-roll pool size.
+
+        ``attempts`` above 1 re-sends after a silent Mudae. A bare ``$us`` that
+        lands too soon after another command is simply ignored — no reply, no
+        error — so one timeout is not evidence that the stack is empty. The
+        default stays 1 for the GUI's ``$us`` button, which the user is waiting
+        on and can press again.
+        """
+        tries = max(1, int(attempts))
+        for attempt in range(1, tries + 1):
+            if self._stop.is_set():
+                return None
+            self._actions.drain_queue()
+            await self._actions.send_command("us", prefix=self._config.prefix)
+            result = await self._actions.wait_for(
+                lambda snapshot, _parsed: is_us_stack_response(
+                    getattr(snapshot, "content", "") or ""
+                ),
+                timeout=_RESPONSE_TIMEOUT_SEC,
+            )
+            if result is not None:
+                return parse_us_stacked(result[0].content or "")
+            if attempt < tries:
+                self._log(
+                    f"{self._config.prefix}us: no reply "
+                    f"(attempt {attempt}/{tries}) — retrying"
+                )
+                await self._sleep(_US_STACK_RETRY_PAUSE_SEC)
+        return None
 
     async def _roll_us_batch(
         self,
