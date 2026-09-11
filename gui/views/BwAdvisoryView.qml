@@ -55,6 +55,12 @@ Item {
     // number that would be ignored.
     readonly property bool persrareFromOv: (bw.options || {}).persrare_source === "ov"
     readonly property bool poolFromLimroul: (bw.options || {}).base_pool_source === "limroul"
+    // Ticked, the typed figure wins even with $limroul fetched. The sheet is
+    // the better default, not a lock: it reports the server's ceiling as of the
+    // read, which a stale sheet, a server mid-change, or a "what if" comparison
+    // all need to be able to override.
+    readonly property bool poolManual: !!(bw.options || {}).base_pool_manual
+    readonly property var limroulWouldBe: (bw.options || {}).limroul_would_be
 
     // The four roulettes $limroul reports, as picker rows. "Auto" is only a
     // real answer while they agree; when they differ it is the unanswered state.
@@ -750,9 +756,9 @@ Item {
                         font.pixelSize: Theme.sizeSmall
                     }
 
-                    // Read-only once $limroul has answered: the pool is that
-                    // sheet's limit less the wishlist, which carries its own
-                    // weight in the sweep, so typing over it would double-count.
+                    // Read-only while $limroul is answering, since a number
+                    // typed there would simply be ignored. The checkbox below
+                    // hands it back.
                     ThemedSpinBox {
                         Layout.fillWidth: true
                         from: 1
@@ -762,6 +768,21 @@ Item {
                         enabled: !root.poolFromLimroul
                         value: root.options.base_pool || 2000
                         onValueModified: root.setOption("base_pool", value)
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        visible: root.hasLimroul
+                        implicitHeight: 0
+                    }
+
+                    ThemedCheckBox {
+                        Layout.fillWidth: true
+                        visible: root.hasLimroul
+                        text: "Set base pool manually"
+                        textSize: Theme.sizeMicro
+                        checked: root.poolManual
+                        onToggled: root.setOption("base_pool_manual", checked)
                     }
 
                     Label {
@@ -833,6 +854,15 @@ Item {
                                    + " characters $limroul says you can roll in $"
                                    + opts.limroul_pool_used + ". It is what decides which "
                                    + "$bw wins, so it is read rather than typed."
+                        }
+                        if (root.poolManual && root.limroulWouldBe !== null
+                                && root.limroulWouldBe !== undefined) {
+                            return "Base pool is the typed "
+                                   + Number(opts.base_pool).toLocaleString(Qt.locale(), "f", 0)
+                                   + ", set manually over $limroul's "
+                                   + Number(root.limroulWouldBe).toLocaleString(
+                                       Qt.locale(), "f", 0)
+                                   + ". Untick above to go back to the sheet."
                         }
                         if (opts.limroul_needs_pick)
                             return "Your four roulettes have different $limroul limits, so "

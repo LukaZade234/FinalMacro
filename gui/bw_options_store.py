@@ -6,8 +6,15 @@ remembers the answers:
 * **base pool** — how many different characters the roulette can roll, the
   wishlist included. A *fallback* since ``$limroul`` parsed: that sheet reports
   the figure per roulette and :func:`macro.advisor.bw_advisory` prefers it,
-  flat. This typed value stands when ``$limroul`` has not been fetched, or when
-  the four roulettes disagree and ``limroul_pool`` has not named one.
+  flat. This typed value stands when ``$limroul`` has not been fetched, when the
+  four roulettes disagree and ``limroul_pool`` has not named one, or whenever
+  ``base_pool_manual`` is set.
+* **base pool, manually** (``base_pool_manual``) — take the typed figure even
+  though ``$limroul`` has answered. The sheet reports the server's *ceiling*,
+  which is not always the pool being rolled against: a ``$limroul`` read before
+  an unlock, a server mid-change, or a "what if" comparison all want a number
+  the sheet does not supply. Preferring the sheet is right by default, but it
+  is a default and not a lock.
 * **which roulette** (``limroul_pool``) — blank means "they agree, take any".
   Setting one below the server's ceiling is itself an unlock, so the four can
   differ and there is then a real choice to make.
@@ -66,6 +73,8 @@ class BwOptions:
     """One pair's answers to the questions no sheet answers."""
 
     base_pool: int = DEFAULT_BASE_POOL
+    # Use ``base_pool`` even when $limroul has an answer of its own.
+    base_pool_manual: bool = False
     persrare_n: int = 1
     claimed_pool: int = 0
     uses_slash: bool = False
@@ -81,6 +90,7 @@ class BwOptions:
             base_pool=_clamp(
                 data.get("base_pool"), MIN_BASE_POOL, MAX_BASE_POOL, DEFAULT_BASE_POOL
             ),
+            base_pool_manual=bool(data.get("base_pool_manual")),
             persrare_n=_clamp(data.get("persrare_n"), 1, MAX_PERSRARE_N, 1),
             claimed_pool=_clamp(data.get("claimed_pool"), 0, MAX_BASE_POOL, 0),
             uses_slash=bool(data.get("uses_slash")),
@@ -91,6 +101,7 @@ class BwOptions:
     def to_dict(self) -> dict[str, Any]:
         return {
             "base_pool": self.base_pool,
+            "base_pool_manual": self.base_pool_manual,
             "persrare_n": self.persrare_n,
             "claimed_pool": self.claimed_pool,
             "uses_slash": self.uses_slash,

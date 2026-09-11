@@ -285,6 +285,8 @@ def test_options_come_back_defaulted_and_are_honoured():
         "persrare_typed": 1,
         "base_pool_source": "manual",
         "base_pool_typed": 2000,
+        "base_pool_manual": False,
+        "limroul_would_be": None,
         "limroul_pool": "",
         "limroul_pool_used": "",
         "limroul_limit": None,

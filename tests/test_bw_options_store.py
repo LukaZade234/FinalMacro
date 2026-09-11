@@ -86,3 +86,19 @@ def test_a_malformed_settings_blob_loads_as_empty():
     assert store.by_scope == {}
     store.load_from_settings({"bw_options": {"": {"base_pool": 5}}})
     assert store.by_scope == {}
+
+
+def test_the_manual_pool_flag_round_trips_with_the_pool_it_qualifies():
+    """The flag is worthless on its own — it only says what to do with
+    ``base_pool``, so the two have to survive a save together."""
+    store = BwOptionsStore()
+    store.set("acc-a", "chan-1", BwOptions(base_pool=6500, base_pool_manual=True))
+    fragment = store.to_settings_fragment()
+
+    restored = BwOptionsStore()
+    restored.load_from_settings(fragment)
+    options = restored.get("acc-a", "chan-1")
+    assert options.base_pool == 6500
+    assert options.base_pool_manual is True
+    # And it is off unless it was asked for: $limroul stays the default.
+    assert restored.get("acc-a", "chan-2").base_pool_manual is False

@@ -927,6 +927,17 @@ When they agree there is nothing to choose. This is the input that decides which
 `$bw` wins — pools from 500 to 20,000 move the optimum from 12 to 30 — which is
 why reading it beats the 2,000 placeholder it replaced.
 
+**The sheet is the default, not a lock.** "Set base pool manually"
+(`base_pool_manual`) hands the field back and runs the sweep on the typed
+figure even with `$limroul` fetched. `$limroul` reports the server's ceiling as
+of the moment it was read, which is not always the pool actually being rolled
+against: a read taken before an unlock, a server mid-change, or a deliberate
+"what if" comparison all need a number the sheet cannot supply. The typed value
+is kept while the sheet is driving, so unticking restores it; the page reports
+what is being overridden (`limroul_would_be`) rather than hiding it. A manual
+pool also settles the four-roulettes-disagree question, so the page stops asking
+for a pick.
+
 **Slash commands are modelled and not applied.** Mudae counts a flat +10% slash
 bonus into the wish figure it reports (`source_tags` lists `slash`), but the
 macro rolls with the `$` prefix and never receives it, so the sweep takes it back

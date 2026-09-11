@@ -235,8 +235,15 @@ def _base_pool(
     itself an unlock. When they agree there is nothing to choose and the pool is
     taken automatically; when they differ, a roulette has to be named, and until
     one is the typed value stands.
+
+    ``base_pool_manual`` overrides all of that and takes the typed figure. The
+    sheet is the better default, not a lock: it reports the server's ceiling at
+    the moment it was read, which is not always the pool actually being rolled
+    against -- a stale read, a server mid-change, or a deliberate "what if"
+    comparison all need a number ``$limroul`` cannot supply.
     """
     typed = int(_number(opts.get("base_pool"), DEFAULT_BASE_POOL))
+    manual = bool(opts.get("base_pool_manual"))
     limits = (limroul or {}).get("limits") or {}
     chosen = str(opts.get("limroul_pool") or "").strip().lower()
     if chosen and chosen not in ROULETTES:
@@ -258,11 +265,16 @@ def _base_pool(
         "limits_agree": agreed,
         "limit": None,
         "typed": typed,
+        "manual": manual,
+        # What the sheet would have said, so the page can show what is being
+        # overridden rather than hiding it while the manual figure is in use.
+        "limroul_would_be": limit,
         # True when $limroul is here but cannot answer on its own, which is the
-        # one case the page has to ask about rather than report.
-        "needs_pick": bool(limits) and agreed is None and not chosen,
+        # one case the page has to ask about rather than report. A manual pool
+        # is an answer, so there is nothing left to ask.
+        "needs_pick": bool(limits) and agreed is None and not chosen and not manual,
     }
-    if limit is None:
+    if manual or limit is None:
         return out
 
     out["base_pool"] = limit
@@ -393,6 +405,12 @@ def bw_advisory(
             f"Base pool is $limroul's {base_pool['limit']:,} characters in "
             f"${base_pool['roulette_used']}, read rather than typed."
         )
+    elif base_pool["manual"] and base_pool["limroul_would_be"] is not None:
+        notes.append(
+            f"Base pool is the typed {base_pool['typed']:,}, set manually over "
+            f"$limroul's {base_pool['limroul_would_be']:,} — untick "
+            f"\u201cSet base pool manually\u201d to go back to the sheet."
+        )
     elif base_pool["needs_pick"]:
         spread = ", ".join(
             f"{value:,} ${key}" for key, value in base_pool["limits"].items()
@@ -456,6 +474,8 @@ def bw_advisory(
             "base_pool": int(base_pool["base_pool"]),
             "base_pool_source": base_pool["source"],
             "base_pool_typed": base_pool["typed"],
+            "base_pool_manual": bool(base_pool["manual"]),
+            "limroul_would_be": base_pool["limroul_would_be"],
             "limroul_pool": base_pool["roulette"],
             "limroul_pool_used": base_pool["roulette_used"],
             "limroul_limit": base_pool["limit"],

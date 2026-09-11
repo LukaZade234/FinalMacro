@@ -301,3 +301,70 @@ def test_a_smaller_pool_concentrates_the_wishlist_and_moves_the_optimum():
         limroul=_limroul(wa=20000, ha=20000, wg=20000, hg=20000),
     )
     assert small["optimum"] < large["optimum"]
+
+
+def test_the_typed_pool_can_be_taken_over_the_sheet():
+    """`$limroul` is the better default, not a lock.
+
+    The sheet reports the server's ceiling as of the moment it was read, which
+    is not always the pool being rolled against — a read taken before an
+    unlock, a server mid-change, or a deliberate "what if" comparison all need
+    a figure it cannot supply. Before this the field was simply disabled once
+    the sheet arrived, with no way back.
+    """
+    out = bw_advisory(
+        _bonus(),
+        wishlist=_wishlist(4),
+        limroul=_limroul(),
+        options={"base_pool": 6500, "base_pool_manual": True},
+    )
+    assert out["options"]["base_pool"] == 6500
+    assert out["options"]["base_pool_source"] == "manual"
+    assert out["options"]["base_pool_manual"] is True
+    # What is being overridden stays visible rather than being hidden.
+    assert out["options"]["limroul_would_be"] == 2000
+    assert any("set manually over $limroul's 2,000" in note for note in out["notes"])
+
+
+def test_the_manual_pool_actually_moves_the_curve():
+    """Not just a reported number: the sweep runs on the typed figure."""
+    sheet = bw_advisory(
+        _bonus(),
+        wishlist=_wishlist(),
+        limroul=_limroul(wa=20000, ha=20000, wg=20000, hg=20000),
+    )
+    manual = bw_advisory(
+        _bonus(),
+        wishlist=_wishlist(),
+        limroul=_limroul(wa=20000, ha=20000, wg=20000, hg=20000),
+        options={"base_pool": 500, "base_pool_manual": True},
+    )
+    # A smaller pool concentrates the wishlist, so less $bw is worth buying --
+    # the same relationship the sheet-driven pool shows.
+    assert manual["optimum"] < sheet["optimum"]
+
+
+def test_a_manual_pool_answers_the_question_the_page_would_have_asked():
+    """Four disagreeing roulettes normally demand a pick; a typed pool is a
+    pick, so the page must stop asking for one."""
+    limroul = _limroul(wa=7000, ha=4000, wg=5000, hg=1500)
+    out = bw_advisory(
+        _bonus(),
+        wishlist=_wishlist(),
+        limroul=limroul,
+        options={"base_pool": 3000, "base_pool_manual": True},
+    )
+    assert out["options"]["base_pool"] == 3000
+    assert out["options"]["limroul_needs_pick"] is False
+    assert not any("differs by roulette" in note for note in out["notes"])
+
+
+def test_unticking_manual_hands_the_pool_straight_back_to_the_sheet():
+    options = {"base_pool": 6500, "base_pool_manual": False}
+    out = bw_advisory(
+        _bonus(), wishlist=_wishlist(4), limroul=_limroul(), options=options
+    )
+    assert out["options"]["base_pool"] == 2000
+    assert out["options"]["base_pool_source"] == "limroul"
+    # The typed figure is kept, so ticking it again restores what was there.
+    assert out["options"]["base_pool_typed"] == 6500
