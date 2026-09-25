@@ -31,7 +31,8 @@ _USER_AMOUNT_PATTERNS = (
 _DAILY_LIMIT_RE = re.compile(r"\((\d+)/(\d+)\)")
 # ``<:spD:1> turns into <:spW:2>`` / ``:spL: breaks down into :spB: + :spT:``.
 # The source has to sit directly before the verb: kakera lines and the ``$op 8``
-# note ("💎/2 turns into 2x 🔴") also say "turns into" and must not match.
+# note ("⚡/2 turns into 2x 🔴", previously 💎/2) also say "turns into" and
+# must not match.
 _TRANSFORM_RE = re.compile(
     rf"(?:<a?:(?P<src1>{SPHERE_EMOJI_NAME_PATTERN}):\d+>"
     rf"|(?<!<):(?P<src2>{SPHERE_EMOJI_NAME_PATTERN}):)"

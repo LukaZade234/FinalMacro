@@ -39,7 +39,7 @@ the field simply comes back `None` and the rule downstream quietly stops firing.
 
 | Field | Sheet | What goes blind if it is off |
 |---|---|---|
-| `setfooter` | `$ov` | `mudae/parsers/roll.py` reads the footer for **perk-8 detection** (`💎/2`), **ownership**, **sphere value on the roll**, and the **rolls-left warning**. All four rely on a footer being printed. |
+| `setfooter` | `$ov` | `mudae/parsers/roll.py` reads the footer for **perk-8 detection** (`⚡/2` before the daily 40, double spheres after; legacy `💎/2` still accepted), **ownership**, **sphere value on the roll**, and the **rolls-left warning**. All four rely on a footer being printed. Perk 6's footer `🟢` is display-only — that spawn is still the `[SPAWNED BY …]` line. |
 | `displaykeys` | `$ov` | Keys shown when you roll a character you don't own — the source `parse_keys` reads. Key log and Advisor › Key EV starve. |
 | `togglekakerarolls` | `$settings` | Kakera value on rolls → `total_kakera`. `rule_eval.py:205` feeds it straight into the `min_kakera` instant trigger, and `claim_best` ranks on it. |
 | `wishdm` | `$ov` | Private wishes. The wish-ping claim path keys on `wished_by`; if wishes are hidden from the channel, that path has nothing to match. |

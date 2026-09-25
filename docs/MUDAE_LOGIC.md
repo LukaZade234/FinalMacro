@@ -1323,6 +1323,21 @@ button still exists for an on-demand single play.
 
 
 
+## Perk 6 (wishlist spawn)
+
+Perk 6 is a 2% chance that rolling the carrier spawns a random wishlist
+character. The spawn is a **second embed**, not a spent roll: wishprotected
+if unclaimed, **3 omega keys** if already yours.
+
+**How the macro sees it:** the spawn description still ends with
+`[SPAWNED BY Name]` (often after `<:spG:…>`). That line is the only
+detector (`mudae/parsers/roll.py`). `$setfooter` also prints `🟢` on the
+spawn's footer — display only; a green circle must not be read as perk 8
+or as the spawn flag. `RollCycleEngine` waits for the follow-up and
+handles it without decrementing the roll pool.
+
+---
+
 ## Perk 8 (daily kakera budget)
 
 Perk 8 marks some characters and grants a **daily kakera-click budget**
@@ -1337,6 +1352,13 @@ equally with the main colour list; perk-8 characters keep the perk-8 colour
 list. With priority **off**, perk-8 colours still apply but other rolls are
 not skipped. Full click-order rules:
 [Kakera reaction rules](#kakera-reaction-rules).
+
+**How a perk-8 character is recognised:** `$setfooter` must be on. Before
+the daily 40, the footer leads with `⚡/2` (half power). After 40 it drops
+`/2` and shows **two of the same sphere emoji** next to each other
+(doubled perk-5 spheres). The parser still accepts the old `💎/2` marker
+from earlier captures. A lone `🟢` is perk 6, not this. Without a footer
+the roll is treated as a normal character.
 
 **Power /** `$dk` **reserve** (`macro/perk8_power.py`) is optional on the perk-8
 budget panel. Off keeps the old click and `$dk` rules. On keeps enough bar

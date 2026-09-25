@@ -478,13 +478,13 @@ def test_parse_sphere_click_light_keeps_its_fragments():
 def test_parse_sphere_click_plain_colour_has_no_transform():
     """A colour that pays as itself must not grow a resolved list.
 
-    The ``$op 8`` footer says "turns into" as well, so the transform rule only
+    The ``$op 8`` note says "turns into" as well, so the transform rule only
     fires on a sphere emoji sitting directly before the verb.
     """
     from mudae.parsers.sphere import parse_sphere_click
 
     parsed = parse_sphere_click(
-        ":spY: lukazade234 +292 (14/20) 💎/2 turns into 2x 🔴 for today."
+        ":spY: lukazade234 +292 (14/20) \u26a1/2 turns into 2x \U0001f534 for today."
     )
     assert parsed.fields["sphere_type"] == "spY"
     assert "sphere_resolved" not in parsed.fields
@@ -1598,7 +1598,7 @@ NAZUNA_PERK8_EMBED = {
         "Claims: #229\n"
         "Likes: #383"
     ),
-    "footer": "\U0001f48e/2 \u200b  (\U0001f51125)  \u00b7 Belongs to lukazade234",
+    "footer": "\u26a1/2 \u200b  (\U0001f51125)  \u00b7 Belongs to lukazade234",
     "image_url": "https://mudae.net/uploads/6633892/E0Pbvye~iC98YWr.png",
 }
 
@@ -1831,6 +1831,88 @@ def test_parse_nazuna_perk_8_and_sphere_button():
     assert buttons[0]["emoji"] == "spY"
     assert buttons[1]["is_kakera"] is True
     assert buttons[1]["is_sphere"] is False
+
+
+def test_has_perk_8_reads_lightning_and_legacy_diamond():
+    from mudae.parsers.roll import _has_perk_8
+
+    owns = " \u00b7 Belongs to lukazade234"
+    assert _has_perk_8("\u26a1/2 \u200b  (\U0001f51125)" + owns) is True
+    assert _has_perk_8("\u26a1\ufe0f/2" + owns) is True
+    assert _has_perk_8("\U0001f48e/2 \u200b  (\U0001f51125)" + owns) is True
+    assert _has_perk_8("/2 \u200b  (\U0001f51125)" + owns) is False
+
+
+def test_has_perk_8_reads_double_spheres_after_daily_40():
+    from mudae.parsers.roll import _has_perk_8
+
+    owns = " \u00b7 Belongs to lukazade234"
+    assert _has_perk_8("\U0001f534\U0001f534 \u200b  (\U0001f51125)" + owns) is True
+    assert _has_perk_8("23\U0001f534\U0001f534 \u2611\ufe0f  (\u2b50209)" + owns) is True
+    assert _has_perk_8("<:spY:1><:spY:2> \u200b  (\U0001f51125)" + owns) is True
+    assert _has_perk_8("23\U0001f534 \u2611\ufe0f  (\u2b50209)" + owns) is False
+    assert _has_perk_8("\U0001f7e2  (\ud83d\udd1154)" + owns) is False
+    assert _has_perk_8("23\U0001f534 \U0001f7e2" + owns) is False
+
+
+def test_parse_perk_8_after_40_keeps_sphere_count():
+    from mudae.parsers.roll import parse_roll
+
+    embed = dict(NAZUNA_PERK8_EMBED)
+    embed["footer"] = (
+        "23\U0001f534\U0001f534 \u2611\ufe0f  (\U0001f51125)  "
+        "\u00b7 Belongs to lukazade234"
+    )
+    snapshot = MudaeMessageSnapshot(
+        message_id=68,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[embed],
+        buttons=NAZUNA_PERK8_BUTTONS,
+        created_at="12:13:00",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["perk_8"] is True
+    assert result.fields["spheres"] == 23
+
+
+def test_parse_perk_6_footer_green_is_not_perk_8():
+    from mudae.parsers.pipeline import parse_mudae_message
+
+    embed = {
+        "title": "",
+        "author": "Han Ah-Reun",
+        "description": (
+            "My Bias Gets on the Last Train\n"
+            "<:spG:1437140664193126441> **[SPAWNED BY TRISSY]**"
+        ),
+        "footer": "\U0001f7e2  (\ud83d\udd1154)  \u00b7 Belongs to lukazade234",
+        "image_url": "",
+    }
+    snapshot = MudaeMessageSnapshot(
+        message_id=102,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[embed],
+        buttons=[],
+        created_at="23:36:34",
+    )
+    result = parse_mudae_message(snapshot)
+    assert result.fields["perk_6"] is True
+    assert result.fields["spawned_by"] == "TRISSY"
+    assert result.fields["perk_8"] is None
 
 
 def test_parse_nacchan_spheres_in_footer():

@@ -30,8 +30,30 @@ _NEW_SOULMATE_RE = re.compile(
     re.IGNORECASE,
 )
 _SPAWNED_BY_RE = re.compile(r"\[SPAWNED BY\s+([^\]]+)\]", re.IGNORECASE)
-_PERK8_HEAD_DIGIT_RE = re.compile(r"^\d")
-_PERK8_HALF_RE = re.compile(r"/\s*2(?:\s|\u200b|$)")
+# Half-power marker: ⚡/2 (current) or 💎/2 (pre-update captures).
+_PERK8_HALF_RE = re.compile(
+    r"(?:\u26a1\ufe0f?|\U0001f48e)\s*/\s*2(?:\s|\u200b|$)"
+)
+# After the daily 40, $setfooter drops /2 and doubles the sphere emoji.
+# Colored circles Mudae uses as sphere stand-ins; a single 🟢 is perk 6, not this.
+_PERK8_SPHERE_CIRCLES = (
+    "\U0001f534"  # 🔴
+    "\U0001f7e0"  # 🟠
+    "\U0001f7e1"  # 🟡
+    "\U0001f7e2"  # 🟢
+    "\U0001f535"  # 🔵
+    "\U0001f7e3"  # 🟣
+    "\U0001f7e4"  # 🟤
+    "\u26ab"  # ⚫
+    "\u26aa"  # ⚪
+)
+_PERK8_DOUBLE_UNICODE_RE = re.compile(
+    rf"([{_PERK8_SPHERE_CIRCLES}])(?:\ufe0f)?[\s\u200b]*\1(?:\ufe0f)?"
+)
+_PERK8_DOUBLE_CUSTOM_RE = re.compile(
+    r"<a?:(sp[A-Za-z]?\d*):\d+>[\s\u200b]*<a?:\1:\d+>",
+    re.IGNORECASE,
+)
 _MENTION_RE = re.compile(r"<@!?(\d+)>")
 _ROLLS_LEFT_WARNING_RE = re.compile(
     r"(\d{1,3}(?:,\d{3})*|\d+)\s+rolls?\s+left",
@@ -131,7 +153,12 @@ def _is_profile_embed(description: str) -> bool:
 
 
 def _parse_perk_6_spawn(description: str) -> tuple[bool, str | None]:
-    """Perk 6 extra spawn — ``[SPAWNED BY Name]`` in description (often after ``<:spG:...>``)."""
+    """Perk 6 extra spawn — ``[SPAWNED BY Name]`` in the description.
+
+    ``$setfooter`` also prints ``🟢`` on the spawn's footer. That mark is
+    visual only; detection stays on this spawn line so a missing footer
+    (or a normal roll that happens to show a green circle) cannot flip the flag.
+    """
     match = _SPAWNED_BY_RE.search(description)
     if not match:
         return False, None
@@ -153,14 +180,28 @@ def perk6_spawner_matches(spawned_by: str | None, parent_name: str | None) -> bo
     return bool(spawned and parent and spawned == parent)
 
 
+def _footer_prefix(footer: str) -> str:
+    """``$setfooter`` content before the ownership clause."""
+    belongs_split = _BELONGS_SPLIT_RE.split(footer, maxsplit=1)
+    if len(belongs_split) > 1:
+        return belongs_split[0]
+    return footer
+
+
 def _has_perk_8(footer: str) -> bool:
-    """Perk 8: half-power kakera — footer shows ``💎/2`` before belongs."""
+    """Perk 8: ``$setfooter`` shows ``⚡/2`` before the daily 40, or double spheres after.
+
+    ``💎/2`` is the pre-update marker and is still accepted. A single ``🟢``
+    (perk 6 spawn footer) is not perk 8.
+    """
     if not footer:
         return False
-    head = footer[:24]
-    if _PERK8_HEAD_DIGIT_RE.match(head):
-        return False
-    return bool(_PERK8_HALF_RE.search(head))
+    head = _footer_prefix(footer)
+    if _PERK8_HALF_RE.search(head):
+        return True
+    if _PERK8_DOUBLE_UNICODE_RE.search(head):
+        return True
+    return bool(_PERK8_DOUBLE_CUSTOM_RE.search(head))
 
 
 def _parse_wished_by(content: str) -> list[int]:
@@ -192,15 +233,15 @@ def _parse_rolls_left_warning(footer: str) -> int | None:
 
 
 def _parse_spheres_from_footer(footer: str) -> int | None:
-    """Custom footers often lead with sphere count, e.g. ``23🔴 ☑️ · Belongs to ...``."""
-    if not footer or _has_perk_8(footer):
+    """Custom footers often lead with sphere count, e.g. ``23🔴 ☑️ · Belongs to ...``.
+
+    ``⚡/2`` has no count. After 40 clicks a perk-8 footer can be ``23🔴🔴``
+    and still carry a real value, so perk 8 no longer skips this parse.
+    """
+    if not footer:
         return None
 
-    prefix = footer
-    belongs_split = _BELONGS_SPLIT_RE.split(footer, maxsplit=1)
-    if len(belongs_split) > 1:
-        prefix = belongs_split[0].strip()
-
+    prefix = _footer_prefix(footer).strip()
     match = _FOOTER_SPHERE_PREFIX_RE.match(prefix)
     if match:
         return int(match.group(1).replace(",", ""))
