@@ -20,6 +20,18 @@ from macro.rule_eval import passes_character_claim
 from macro.state import AccountState
 
 
+def _describe_roll_buttons(buttons: list[Any]) -> str:
+    """Emoji and kind of each button, for a reaction-claim log line."""
+    parts: list[str] = []
+    for button in buttons:
+        if not isinstance(button, dict):
+            continue
+        label = str(button.get("emoji") or button.get("label") or "?").strip() or "?"
+        kind = str(button.get("kind") or button.get("style") or "").strip()
+        parts.append(f"{label}/{kind}" if kind else label)
+    return ", ".join(parts)
+
+
 _RT_PAUSE_BEFORE_SEC = 1.0
 _RT_TICK_TIMEOUT_SEC = 8.0
 # Enough spacing that the claim does not land in the same instant as the reset,
@@ -216,14 +228,19 @@ class PostRollHandler:
             self._log(f"{prefix}claim timer expired (>{expire}s) — skipped")
             return False
 
-        needed_rt = allow_rt and self._state.claim_available is False
+        free_claim = bool(record.fields.get("free_claim"))
+        needed_rt = (
+            allow_rt
+            and self._state.claim_available is False
+            and not free_claim
+        )
         if needed_rt and not self._rt_can_still_pay_off(record, expire):
             self._log(
                 f"{prefix}claim timer has under {_RT_ROUND_TRIP_FLOOR_SEC:g}s left — "
                 "not spending $rt on a claim that would expire mid-round-trip"
             )
             return False
-        if not await self._ensure_claim_slot(
+        if not free_claim and not await self._ensure_claim_slot(
             prefix, allow_rt=allow_rt, character=record.character_name or ""
         ):
             self._log(f"{prefix}claim on cooldown — skipped")
@@ -291,8 +308,17 @@ class PostRollHandler:
             self._log(f"{len(records)} roll(s) this session; character claim off")
             return
         if self._state.claim_available is False:
-            self._log(f"{len(records)} roll(s) this session; claim on cooldown")
-            return
+            free = [
+                r
+                for r in records
+                if r.fields.get("free_claim")
+                and r.fields.get("can_claim")
+                and not r.fields.get("claimed")
+            ]
+            if not free:
+                self._log(f"{len(records)} roll(s) this session; claim on cooldown")
+                return
+            records = free
         # The open slot was bought with ``$rt`` for one specific character and
         # that claim did not land. Spending it on whoever happens to be worth
         # the most kakera this batch is not what the reset was for, and it also
@@ -460,6 +486,13 @@ class PostRollHandler:
         self._log("$rt OK — $tu confirms the claim slot is open")
         return True
 
+    def _spend_claim_slot(self, record: RollRecord) -> None:
+        """Mark the paid claim slot used, unless this was a free perk-6 claim."""
+        if record.fields.get("free_claim"):
+            return
+        self._state.claim_available = False
+        self._state.rt_claim_slot_for = ""
+
     def _claim_method(self, record: RollRecord) -> str:
         """``"button"`` / ``"reaction"`` / ``""`` for this record.
 
@@ -482,7 +515,9 @@ class PostRollHandler:
             # Buttons are off for this server or account: Mudae takes any emoji
             # on the roll as the claim. Same claim slot, same rules, different
             # transport — everything after this point is unchanged.
-            self._log(f"Claiming {name} by reaction ({CLAIM_REACTION_EMOJI})…")
+            listed = _describe_roll_buttons(record.fields.get("buttons") or [])
+            extra = f" — buttons on the roll: {listed}" if listed else ""
+            self._log(f"Claiming {name} by reaction ({CLAIM_REACTION_EMOJI}){extra}…")
             reacted = await self._actions.add_reaction(
                 record.message_id, CLAIM_REACTION_EMOJI
             )
@@ -499,7 +534,8 @@ class PostRollHandler:
         if not custom_id:
             self._log(f"Claim button on {name} has no id — skipped")
             return False
-        self._log(f"Claiming {name}…")
+        note = " (free)" if record.fields.get("free_claim") else ""
+        self._log(f"Claiming {name}{note}…")
         clicked = await self._actions.click_button(record.message_id, custom_id)
         if not clicked:
             self._log(f"Claim click failed for {name}")
@@ -584,14 +620,20 @@ class PostRollHandler:
             landed = await self._claim_landed_silently(record)
             if landed is True:
                 # The click was paid for; treat the slot as spent so nothing
-                # else in this batch tries to claim on top of it.
-                self._state.claim_available = False
-                self._state.rt_claim_slot_for = ""
+                # else in this batch tries to claim on top of it. A perk-6
+                # `:free:` claim does not use the slot.
+                self._spend_claim_slot(record)
                 return
             if landed is False:
                 return
             # Still claimable: the button was re-read, so its ids are current.
-            method = self._claim_method(record) or method
+            refreshed = self._claim_method(record) or method
+            if refreshed != method:
+                self._log(
+                    f"Claim on {name} switched from {method} to {refreshed} "
+                    "after re-reading the roll"
+                )
+            method = refreshed
 
         self._log(f"Gave up claiming {name} after {_CLAIM_ATTEMPTS} attempts")
 
@@ -617,11 +659,12 @@ class PostRollHandler:
         winner = parsed.fields.get("winner") or "?"
         character = parsed.fields.get("character") or record.character_name or "?"
         # The claim slot is now spent — stop further claim attempts this session
-        # (next $tu refreshes the real cooldown).
-        self._state.claim_available = False
-        self._state.rt_claim_slot_for = ""
+        # (next $tu refreshes the real cooldown). A perk-6 `:free:` claim is
+        # the daily green-button exception and leaves the slot open.
+        self._spend_claim_slot(record)
         record.fields["claimed"] = True
-        self._log(f"Claimed {character} ({winner})")
+        extra = " — free, slot kept" if record.fields.get("free_claim") else ""
+        self._log(f"Claimed {character} ({winner}){extra}")
         if self._on_claim is not None:
             try:
                 self._on_claim(character, dict(parsed.fields))

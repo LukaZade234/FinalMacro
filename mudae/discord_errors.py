@@ -38,6 +38,10 @@ _TRANSIENT_MARKERS = (
     # Our own waits and aiohttp's both surface as timeouts.
     "timeout",
     "timed out",
+    # The message the interaction pointed at is gone. Retrying (and, for a
+    # roll send, continuing the session) is safe; aborting the whole run is not.
+    "unknown message",
+    "error code: 10008",
 )
 
 

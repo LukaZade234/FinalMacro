@@ -12,7 +12,14 @@ MUDAE_BOT_IDS = frozenset({
     432610292342587392,
 })
 
-CLAIM_EMOJIS = frozenset({"💍", "💖", "💝", "\U0001f498"})
+CLAIM_EMOJIS = frozenset({
+    "💍",
+    "💖",
+    "💝",
+    "\U0001f498",  # 💘
+    "free",  # perk-6 once-a-day free wish (`:free:`)
+    "\U0001f193",  # 🆓
+})
 
 # Servers (or users) with claim buttons switched off claim by *reacting* to the
 # roll instead. Mudae accepts any emoji there, so the macro uses the green tick

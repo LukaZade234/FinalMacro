@@ -40,7 +40,11 @@ around 10–21). `$tu` reports how many are left and when the pool resets.
 
 **Macro:** `RollCycleEngine` sends `$tu`, then the configured roll command
 until the pool is empty or a stop rule fires. Delay between rolls is at least
-0.6s. If no embed arrives it retries, then reconnects.
+0.6s. If no embed arrives, the macro looks in the queue and then in recent
+channel history for a roll newer than the command it just sent before it
+resends `$wa`. A full miss does not end the hour while `$tu` still shows rolls
+left; it skips that attempt and continues, and stops the batch only after
+several misses in a row.
 
 ---
 
@@ -89,9 +93,14 @@ depends on `$settings` being parsed:
 
 | roll's components | mode | `claim_method` |
 | --- | --- | --- |
-| an **enabled** claim button | button | `"button"` |
+| an **enabled** claim button (💍 / green `:free:`) | button | `"button"` |
 | **no** claim button at all | reaction | `"reaction"` |
 | a **disabled** claim button | button, window shut | `None` |
+
+The perk-6 once-a-day free wish is the green `:free:` button. Kakera
+buttons on the same message must not hide it — that used to look like
+"no claim button", so the macro reacted instead of clicking. `free_claim`
+on the parse means the click does not spend the ordinary claim slot.
 
 `mudae.buttons.claim_method_from_buttons` owns that table; `parse_roll` adds the
 two roll-level vetoes (already claimed, or a profile embed rather than a roll)
@@ -440,9 +449,10 @@ Preset fields live on `KakeraReactionRules`.
 **Daily 40 (**`$ohu8`**):** only perk-8-character paid clicks use the quota.
 Red/rainbow on a perk-8 character count because they are on the perk-8
 list. The same colours on a normal character are bypass: still clicked
-while saving, not counted. After 40/40, non-perk-8 rolls use the main
-colour list (equal clicking); perk-8 characters **keep** the perk-8 list
-(orange/dark stay allowed).
+while saving, not counted. After 40/40, Mudae no longer prints `⚡/2`
+(double spheres instead), so those rolls are not perk 8 and use the main
+colour list. If a roll still shows `⚡/2` while the local count is already
+40 (desync), it keeps the perk-8 list until `$ohu8` catches up.
 
 `$ohu8` **timing:** sent at session start and when the daily refill is due.
 Saving is off (`inactive`) until that reply sets `active` / `done`. That
@@ -1336,6 +1346,14 @@ spawn's footer — display only; a green circle must not be read as perk 8
 or as the spawn flag. `RollCycleEngine` waits for the follow-up and
 handles it without decrementing the roll pool.
 
+**Unclaimed spawn / wishprotect:** the spawn can be an unclaimed wishlist
+character. A `$shop` upgrade makes that claim **free once per day**, shown
+as a **green** Discord button (`style=success`) with the `:free:` emoji.
+That is a claim *button* — click it; do not fall back to a reaction just
+because kakera buttons are also on the message. `free_claim` on the parse
+means: claim immediately, even on cooldown, and **do not spend** the
+ordinary claim slot.
+
 ---
 
 ## Perk 8 (daily kakera budget)
@@ -1347,18 +1365,20 @@ mode**: spend those clicks on perk-8 characters first (**Prioritize perk-8**,
 `perk_8_priority`, default on). Bypass colours (default purple; often also
 red/rainbow) still click on everyone else without using the 40; on a perk-8
 character they **do** use a slot. Purple is free power on every roll. Once
-the 40 are used or the roll pool is under 10, treat non-perk-8 characters
-equally with the main colour list; perk-8 characters keep the perk-8 colour
-list. With priority **off**, perk-8 colours still apply but other rolls are
+the 40 are used or the roll pool is under 10, treat remaining rolls with
+the main colour list — after 40 Mudae no longer marks them as perk 8.
+With priority **off**, perk-8 colours still apply but other rolls are
 not skipped. Full click-order rules:
 [Kakera reaction rules](#kakera-reaction-rules).
 
-**How a perk-8 character is recognised:** `$setfooter` must be on. Before
-the daily 40, the footer leads with `⚡/2` (half power). After 40 it drops
-`/2` and shows **two of the same sphere emoji** next to each other
-(doubled perk-5 spheres). The parser still accepts the old `💎/2` marker
-from earlier captures. A lone `🟢` is perk 6, not this. Without a footer
-the roll is treated as a normal character.
+**How a perk-8 character is recognised:** `$setfooter` must be on, and the
+footer must still show `⚡/2` (half power). That is the only active-perk-8
+mark; the parser still accepts the old `💎/2` from earlier captures. After
+the daily 40, Mudae drops `/2` and shows **double spheres** (doubled perk-5
+payout). That character's perk 8 is **spent** — treat the roll as a normal
+character (main colour list, full click cost, does not use the 40). A lone
+`🟢` is perk 6, not this. Without a footer the roll is treated as a normal
+character.
 
 **Power /** `$dk` **reserve** (`macro/perk8_power.py`) is optional on the perk-8
 budget panel. Off keeps the old click and `$dk` rules. On keeps enough bar
@@ -1943,6 +1963,22 @@ after the pause, `"stop"` when the ladder is spent or the user pressed Stop,
 and `""` when there is no outage, so the caller's ordinary failure handling
 still applies. It is checked wherever the loops used to stop outright — a
 failed `$tu` and a failed roll, in both the hourly and the `$us` cycle.
+
+**A dropped Discord message is not the end of the session.** `404 Unknown
+Message` (error code 10008) is treated like the other transient Discord
+errors: reconnect, drain the queue, and send `$tu` again. Notification-mode
+reconnects that used to stop the farm on the first failure retry with a short
+backoff (15s, then 45s) and stop only after three failures. The scheduled
+`$p` / `$daily` / minigame wake still defers on a single failure.
+
+**A kakera click with no reply is re-read before it is clicked again.** If
+the button is now disabled or gone, the click landed and is counted. A second
+click happens only while the button is still enabled. If the message cannot
+be read, the existing retry stands. `$ohu` is sent up to three times before
+play-all gives up. A refused `$oh` / `$oc` / `$oq` click refreshes the grid
+and continues, and stops only after three refusals — the same recovery `$ot`
+already used. A claim that falls back to a reaction logs the buttons that
+were on the roll, and switches to the button if a refresh shows one.
 
 ## What the macro does not do (yet)
 

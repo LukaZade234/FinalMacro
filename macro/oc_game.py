@@ -20,6 +20,7 @@ from macro.minigame_util import (
     empty_minigame_result,
     log_minigame_exhausted,
     minigame_command,
+    recover_refused_grid_click,
     snapshot_is_minigame_exhausted,
     wait_for_grid_or_exhausted,
 )
@@ -133,6 +134,8 @@ class OcSphereGame:
             clicks_budget = parse_clicks_allowed(grid.content)
             session_clicks: list[dict[str, Any]] = []
             self._observations = observations_from_buttons(buttons)
+            click_failures = 0
+            last_refused = ""
             self._log(
                 f"{label}: grid ready · {clicks_budget} clicks · "
                 f"{format_solver_stats(self._observations, clicks_left=clicks_budget)}"
@@ -162,8 +165,26 @@ class OcSphereGame:
 
                 ok = await self._actions.click_button(grid_id, custom_id)
                 if not ok:
-                    self._log("$oc: click failed — stopping")
-                    break
+                    buttons, click_failures, last_refused, stop = (
+                        await recover_refused_grid_click(
+                            actions=self._actions,
+                            grid_id=grid_id,
+                            custom_id=custom_id,
+                            buttons=buttons,
+                            click_failures=click_failures,
+                            last_refused=last_refused,
+                            label="$oc",
+                            log=self._log,
+                            disable_button=_disable_button,
+                        )
+                    )
+                    if stop:
+                        break
+                    self._observations.update(observations_from_buttons(buttons))
+                    await asyncio.sleep(self._click_delay)
+                    continue
+                click_failures = 0
+                last_refused = ""
 
                 clicks_spent += 1
                 self._log(

@@ -173,7 +173,10 @@ def passes_character_claim(
     ``immediate=True`` means interrupt the roll loop and claim now (wish ping or
     instant-trigger). ``immediate=False`` means defer to end-of-batch picker.
     """
-    if not rules.enabled and not (rules.claim_on_wish_ping and wished_pinged):
+    free_claim = bool(fields.get("free_claim"))
+    if not rules.enabled and not (
+        rules.claim_on_wish_ping and (wished_pinged or free_claim)
+    ):
         return ClaimDecision(False, False, "character claim block off")
 
     if fields.get("claimed"):
@@ -184,6 +187,9 @@ def passes_character_claim(
         # false here means the claim option is genuinely gone (a disabled
         # button, i.e. the window closed), not merely "buttons are off".
         return ClaimDecision(False, False, "claim window closed")
+
+    if free_claim:
+        return ClaimDecision(True, True, "free perk-6 claim")
 
     claim_blocked = state.claim_available is False
     if claim_blocked:

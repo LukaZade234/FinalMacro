@@ -60,6 +60,13 @@ def test_rate_limits_and_timeouts_are_retryable():
         assert is_transient_discord_error(Exception(text)) is True, text
 
 
+def test_unknown_message_is_retryable():
+    """A 10008 used to abort the whole farm (roll 609, 29 Sep 2026)."""
+    exc = Exception("404 Not Found (error code: 10008): Unknown Message")
+    assert is_transient_discord_error(exc) is True
+    assert is_fatal_runtime_error(exc) is False
+
+
 def test_a_missing_button_is_not_a_transport_problem():
     assert is_transient_discord_error(Exception("no button cmd s7")) is False
 
@@ -523,3 +530,103 @@ def test_force_reconnect_leaves_macro_inactive_when_it_was():
         assert monitor.macro_active is False
 
     asyncio.run(run())
+
+
+def test_late_roll_in_the_queue_is_used_instead_of_channel_history():
+    from macro.actions import DiscordActions
+    from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
+
+    def _snap(message_id: int) -> MudaeMessageSnapshot:
+        return MudaeMessageSnapshot(
+            message_id=message_id,
+            channel_id=1,
+            channel_name="mudae",
+            guild_id=1,
+            guild_name="srv",
+            author_id=1,
+            author_name="Mudae",
+            is_mudae=True,
+            content="",
+            embeds=[],
+            buttons=[],
+            created_at="12:00:00",
+        )
+
+    fetched = {"n": 0}
+
+    class _Monitor:
+        async def fetch_recent_snapshots(self, *, limit: int = 8):
+            fetched["n"] += 1
+            return []
+
+    async def _case() -> None:
+        actions = DiscordActions(_Monitor())
+        actions.feed(
+            _snap(10),
+            ParseResult(kind=MessageKind.ROLL, summary="", fields={"character_name": "Old"}),
+        )
+        actions.feed(
+            _snap(30),
+            ParseResult(kind=MessageKind.ROLL, summary="", fields={"character_name": "New"}),
+        )
+        found = await actions.find_recent_roll(
+            roll_command="wa",
+            after_id=20,
+            ignore_ids=set(),
+        )
+        assert found is not None
+        assert found[0].message_id == 30
+        assert found[1].fields["character_name"] == "New"
+        assert fetched["n"] == 0
+        assert actions.queue_size() == 1
+
+    asyncio.run(_case())
+
+
+def test_late_roll_is_read_from_channel_history_when_the_queue_is_empty():
+    from macro.actions import DiscordActions
+    from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
+
+    snap = MudaeMessageSnapshot(
+        message_id=40,
+        channel_id=1,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=1,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[],
+        buttons=[],
+        created_at="12:00:00",
+    )
+
+    class _Monitor:
+        async def fetch_recent_snapshots(self, *, limit: int = 8):
+            return [snap]
+
+    parsed = ParseResult(
+        kind=MessageKind.ROLL,
+        summary="Late",
+        fields={"character_name": "Late"},
+    )
+
+    async def _case() -> None:
+        actions = DiscordActions(_Monitor())
+        with patch("mudae.parsers.pipeline.parse_mudae_message", return_value=parsed):
+            found = await actions.find_recent_roll(
+                roll_command="wa",
+                after_id=20,
+                ignore_ids=set(),
+            )
+        assert found is not None
+        assert found[0].message_id == 40
+        missed = await actions.find_recent_roll(
+            roll_command="wa",
+            after_id=None,
+            ignore_ids=set(),
+        )
+        assert missed is None
+
+    asyncio.run(_case())

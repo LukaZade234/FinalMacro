@@ -439,3 +439,101 @@ def test_play_all_persists_ohu_totals(monkeypatch):
     assert perk9.last_clicked == 15
     assert perk9.last_click_max == 15
     assert perk9.clicks_exhausted is True
+
+
+def test_query_ohu_retries_then_uses_the_reply(monkeypatch):
+    class _Flaky(_FakeActions):
+        def __init__(self) -> None:
+            super().__init__({"oh_total": 1, "oc_total": 0, "oq_total": 0, "ot_total": 0})
+            self.waits = 0
+
+        async def wait_for_ohu(self, *, timeout: float = 12.0):
+            self.waits += 1
+            if self.waits < 3:
+                return None
+            return await super().wait_for_ohu(timeout=timeout)
+
+    async def _fast_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("macro.minigames.asyncio.sleep", _fast_sleep)
+    actions = _Flaky()
+    logs: list[str] = []
+    runner = PlayAllMinigames(actions, monitor=None, log=logs.append)
+    availability = asyncio.run(runner._query_ohu(prefix="$"))
+    assert availability is not None
+    assert availability["oh_total"] == 1
+    assert actions.waits == 3
+    assert len(actions.sent) == 3
+    assert any("retrying" in line for line in logs)
+    assert not any("cannot play all minigames" in line for line in logs)
+
+
+def test_refused_grid_click_refreshes_then_stops():
+    from types import SimpleNamespace
+
+    from macro.minigame_util import recover_refused_grid_click
+
+    logs: list[str] = []
+    fetches = {"n": 0}
+
+    async def _fetch(_message_id: int):
+        fetches["n"] += 1
+        return SimpleNamespace(
+            buttons=[
+                {"custom_id": "a", "disabled": False},
+                {"custom_id": "b", "disabled": False},
+            ]
+        )
+
+    def _disable(buttons, custom_id):
+        return [{**btn, "disabled": True} if btn.get("custom_id") == custom_id else btn for btn in buttons]
+
+    async def _case() -> None:
+        buttons, failures, refused, stop = await recover_refused_grid_click(
+            actions=SimpleNamespace(fetch_message_snapshot=_fetch, _monitor=None),
+            grid_id=1,
+            custom_id="a",
+            buttons=[{"custom_id": "a"}],
+            click_failures=0,
+            last_refused="",
+            label="$oh",
+            log=logs.append,
+            disable_button=_disable,
+            max_failures=3,
+        )
+        assert stop is False
+        assert failures == 1
+        assert {btn["custom_id"] for btn in buttons} == {"a", "b"}
+        buttons, failures, refused, stop = await recover_refused_grid_click(
+            actions=SimpleNamespace(fetch_message_snapshot=_fetch, _monitor=None),
+            grid_id=1,
+            custom_id="a",
+            buttons=buttons,
+            click_failures=failures,
+            last_refused=refused,
+            label="$oh",
+            log=logs.append,
+            disable_button=_disable,
+            max_failures=3,
+        )
+        assert stop is False
+        assert any(btn.get("disabled") for btn in buttons)
+        _buttons, failures, _refused, stop = await recover_refused_grid_click(
+            actions=SimpleNamespace(fetch_message_snapshot=_fetch, _monitor=None),
+            grid_id=1,
+            custom_id="a",
+            buttons=buttons,
+            click_failures=failures,
+            last_refused="a",
+            label="$oh",
+            log=logs.append,
+            disable_button=_disable,
+            max_failures=3,
+        )
+        assert stop is True
+        assert failures == 3
+
+    asyncio.run(_case())
+    assert fetches["n"] == 1
+    assert any("stopping" in line for line in logs)

@@ -306,6 +306,8 @@ class KakeraReactor:
                         f"need {cost:g}%)"
                     )
                     return _KakeraClickResult(False, wait_timed_out)
+                confirmed = False
+                outcome = None
                 for attempt in range(1, _MAX_KAKERA_CLICK_ATTEMPTS + 1):
                     ok = await self.actions.click_button(message_id, choice.custom_id)
                     if not ok:
@@ -333,16 +335,36 @@ class KakeraReactor:
                             f"{outcome.summary or '?'}"
                         )
                         break
+                    spent = await self._kakera_button_spent(
+                        message_id, choice.custom_id
+                    )
+                    if spent is True:
+                        self.log(
+                            f"kakera: {character} button already used — "
+                            "counting the click"
+                        )
+                        confirmed = True
+                        wait_timed_out = False
+                        break
                     wait_timed_out = True
                     self._drain_stale_kakera_outcomes()
                     if attempt < _MAX_KAKERA_CLICK_ATTEMPTS:
-                        self.log(
-                            f"kakera: retrying click on {character} "
-                            f"(attempt {attempt + 1}/{_MAX_KAKERA_CLICK_ATTEMPTS})"
-                        )
+                        if spent is False:
+                            self.log(
+                                f"kakera: {character} button still enabled — "
+                                f"retrying click "
+                                f"(attempt {attempt + 1}/{_MAX_KAKERA_CLICK_ATTEMPTS})"
+                            )
+                        else:
+                            self.log(
+                                f"kakera: retrying click on {character} "
+                                f"(attempt {attempt + 1}/{_MAX_KAKERA_CLICK_ATTEMPTS})"
+                            )
                 else:
                     self._log_kakera_timeout(character)
                     return _KakeraClickResult(False, True)
+                if confirmed:
+                    return _KakeraClickResult(True, False)
                 if outcome.kind == MessageKind.KAKERA_REACT_DENIED:
                     cooldown = int(outcome.fields.get("kakera_cooldown_minutes") or 0)
                     sync_reaction_power_from_denial(
@@ -556,6 +578,30 @@ class KakeraReactor:
         result = cb()
         if asyncio.iscoroutine(result):
             await result
+
+    async def _kakera_button_spent(self, message_id: int, custom_id: str) -> bool | None:
+        """Whether a timed-out click already consumed the button.
+
+        ``True`` when a fresh read shows it disabled or gone (count the click,
+        do not press it again). ``False`` when it is still enabled. ``None``
+        when the message cannot be read — the caller keeps the existing retry.
+        """
+        fetch = getattr(self.actions, "fetch_message_snapshot", None)
+        if fetch is None:
+            return None
+        try:
+            snapshot = await fetch(message_id)
+        except Exception:
+            return None
+        if snapshot is None:
+            return None
+        for button in getattr(snapshot, "buttons", None) or []:
+            if not isinstance(button, dict):
+                continue
+            if str(button.get("custom_id") or "") != str(custom_id):
+                continue
+            return bool(button.get("disabled"))
+        return True
 
     async def _wait_for_kakera_outcome(self, *, timeout: float) -> ParseResult | None:
         collect = getattr(self.actions, "collect_queued", None)

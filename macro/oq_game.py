@@ -18,6 +18,7 @@ from macro.minigame_util import (
     empty_minigame_result,
     log_minigame_exhausted,
     minigame_command,
+    recover_refused_grid_click,
     snapshot_is_minigame_exhausted,
     wait_for_grid_or_exhausted,
 )
@@ -154,6 +155,8 @@ class OqSphereGame:
             await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
 
             awaited_red = False
+            click_failures = 0
+            last_refused = ""
             while not is_oq_game_over(buttons):
                 try:
                     self._observations = merge_observations(
@@ -206,8 +209,32 @@ class OqSphereGame:
 
                 ok = await self._actions.click_button(grid_id, custom_id)
                 if not ok:
-                    self._log("$oq: click failed — stopping")
-                    break
+                    buttons, click_failures, last_refused, stop = (
+                        await recover_refused_grid_click(
+                            actions=self._actions,
+                            grid_id=grid_id,
+                            custom_id=custom_id,
+                            buttons=buttons,
+                            click_failures=click_failures,
+                            last_refused=last_refused,
+                            label="$oq",
+                            log=self._log,
+                            disable_button=_disable_button,
+                        )
+                    )
+                    if stop:
+                        break
+                    try:
+                        self._observations = merge_observations(
+                            self._observations,
+                            observations_from_buttons(buttons),
+                        )
+                    except ValueError:
+                        pass
+                    await asyncio.sleep(self._click_delay)
+                    continue
+                click_failures = 0
+                last_refused = ""
 
                 updated, reward_content = await self._wait_for_click_resolution(
                     grid_id,

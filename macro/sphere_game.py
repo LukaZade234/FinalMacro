@@ -47,6 +47,7 @@ from macro.minigame_util import (
     empty_minigame_result,
     log_minigame_exhausted,
     minigame_command,
+    recover_refused_grid_click,
     snapshot_is_minigame_exhausted,
     wait_for_grid_or_exhausted,
 )
@@ -833,6 +834,8 @@ class OhSphereGame:
             session_clicks: list[dict[str, Any]] = []
             self._log(f"{label}: grid ready · {clicks_budget} paid clicks allowed")
             await asyncio.sleep(FIRST_CLICK_DELAY_SEC)
+            click_failures = 0
+            last_refused = ""
 
             while not is_oh_game_over(buttons):
                 choice = choose_oh_click(
@@ -860,8 +863,25 @@ class OhSphereGame:
 
                 ok = await self._actions.click_button(grid_id, custom_id)
                 if not ok:
-                    self._log(f"$oh: click failed ({kind}) — stopping")
-                    break
+                    buttons, click_failures, last_refused, stop = (
+                        await recover_refused_grid_click(
+                            actions=self._actions,
+                            grid_id=grid_id,
+                            custom_id=custom_id,
+                            buttons=buttons,
+                            click_failures=click_failures,
+                            last_refused=last_refused,
+                            label="$oh",
+                            log=self._log,
+                            disable_button=_disable_button,
+                        )
+                    )
+                    if stop:
+                        break
+                    await asyncio.sleep(self._click_delay)
+                    continue
+                click_failures = 0
+                last_refused = ""
 
                 updated, reward_content = await self._wait_for_click_resolution(
                     grid_id,

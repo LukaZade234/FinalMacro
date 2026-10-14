@@ -8,6 +8,7 @@ from typing import Any
 from mudae.buttons import (
     claim_method_from_buttons,
     format_button,
+    is_free_claim_button,
     is_sphere_button,
 )
 from mudae.parsers.embed import (
@@ -31,28 +32,10 @@ _NEW_SOULMATE_RE = re.compile(
 )
 _SPAWNED_BY_RE = re.compile(r"\[SPAWNED BY\s+([^\]]+)\]", re.IGNORECASE)
 # Half-power marker: ⚡/2 (current) or 💎/2 (pre-update captures).
+# After the daily 40 Mudae shows double spheres instead — that is *spent*
+# perk 8, not an active half-power roll, so it is not this pattern.
 _PERK8_HALF_RE = re.compile(
     r"(?:\u26a1\ufe0f?|\U0001f48e)\s*/\s*2(?:\s|\u200b|$)"
-)
-# After the daily 40, $setfooter drops /2 and doubles the sphere emoji.
-# Colored circles Mudae uses as sphere stand-ins; a single 🟢 is perk 6, not this.
-_PERK8_SPHERE_CIRCLES = (
-    "\U0001f534"  # 🔴
-    "\U0001f7e0"  # 🟠
-    "\U0001f7e1"  # 🟡
-    "\U0001f7e2"  # 🟢
-    "\U0001f535"  # 🔵
-    "\U0001f7e3"  # 🟣
-    "\U0001f7e4"  # 🟤
-    "\u26ab"  # ⚫
-    "\u26aa"  # ⚪
-)
-_PERK8_DOUBLE_UNICODE_RE = re.compile(
-    rf"([{_PERK8_SPHERE_CIRCLES}])(?:\ufe0f)?[\s\u200b]*\1(?:\ufe0f)?"
-)
-_PERK8_DOUBLE_CUSTOM_RE = re.compile(
-    r"<a?:(sp[A-Za-z]?\d*):\d+>[\s\u200b]*<a?:\1:\d+>",
-    re.IGNORECASE,
 )
 _MENTION_RE = re.compile(r"<@!?(\d+)>")
 _ROLLS_LEFT_WARNING_RE = re.compile(
@@ -92,6 +75,7 @@ ROLL_FIELD_KEYS: tuple[str, ...] = (
     "claimed",
     "owner",
     "can_claim",
+    "free_claim",
     "claim_method",
     "claim_rank",
     "like_rank",
@@ -189,19 +173,15 @@ def _footer_prefix(footer: str) -> str:
 
 
 def _has_perk_8(footer: str) -> bool:
-    """Perk 8: ``$setfooter`` shows ``⚡/2`` before the daily 40, or double spheres after.
+    """Perk 8 is active only while ``$setfooter`` shows ``⚡/2`` (or legacy ``💎/2``).
 
-    ``💎/2`` is the pre-update marker and is still accepted. A single ``🟢``
-    (perk 6 spawn footer) is not perk 8.
+    Double spheres after the daily 40 mean this character's perk 8 is already
+    spent — half-power is gone, so the roll is not flagged. A single ``🟢``
+    (perk 6 spawn footer) is not perk 8 either.
     """
     if not footer:
         return False
-    head = _footer_prefix(footer)
-    if _PERK8_HALF_RE.search(head):
-        return True
-    if _PERK8_DOUBLE_UNICODE_RE.search(head):
-        return True
-    return bool(_PERK8_DOUBLE_CUSTOM_RE.search(head))
+    return bool(_PERK8_HALF_RE.search(_footer_prefix(footer)))
 
 
 def _parse_wished_by(content: str) -> list[int]:
@@ -235,8 +215,8 @@ def _parse_rolls_left_warning(footer: str) -> int | None:
 def _parse_spheres_from_footer(footer: str) -> int | None:
     """Custom footers often lead with sphere count, e.g. ``23🔴 ☑️ · Belongs to ...``.
 
-    ``⚡/2`` has no count. After 40 clicks a perk-8 footer can be ``23🔴🔴``
-    and still carry a real value, so perk 8 no longer skips this parse.
+    ``⚡/2`` has no count. After 40 clicks a spent perk-8 footer can be
+    ``23🔴🔴`` and still carry a real value.
     """
     if not footer:
         return None
@@ -405,6 +385,9 @@ def parse_roll(
         is_profile=bool(fields.get("is_profile")),
     )
     fields["can_claim"] = fields["claim_method"] is not None
+    fields["free_claim"] = True if any(
+        is_free_claim_button(btn) for btn in (buttons or snapshot.buttons)
+    ) else None
 
     name = character_name or "Unknown"
     summary = f"$roll · {name}"
@@ -412,6 +395,8 @@ def parse_roll(
         summary += f" · claimed by {owner}"
     elif fields["can_claim"]:
         summary += " · unclaimed"
+        if fields.get("free_claim"):
+            summary += " (free)"
     if fields["total_kakera"] is not None:
         summary += f" · {fields['total_kakera']} kakera"
     if fields.get("spheres") is not None:

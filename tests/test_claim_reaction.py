@@ -116,6 +116,22 @@ def test_claim_method_from_buttons_covers_the_three_cases():
     assert claim_method_from_buttons([{**_CLAIM_BUTTON, "disabled": True}]) == ""
 
 
+def test_free_claim_button_next_to_kakera_is_button_mode_not_reaction():
+    from mudae.buttons import is_free_claim_button
+
+    kakera = {"label": "", "emoji": "kakeraY", "kind": "kakera", "disabled": False}
+    free = {
+        "label": "",
+        "emoji": "free",
+        "custom_id": "idf0",
+        "kind": "other",
+        "disabled": False,
+        "style": "success",
+    }
+    assert is_free_claim_button(free) is True
+    assert claim_method_from_buttons([free, kakera]) == "button"
+
+
 def test_claim_rules_accept_a_reaction_only_roll():
     """`passes_character_claim` gated on `can_claim`, so this was the blocker."""
     fields = parse_roll(_snapshot(buttons=[])).fields
@@ -211,6 +227,73 @@ def test_a_failed_reaction_is_retried_while_the_roll_is_still_there():
     assert any("Retrying claim" in line for line in logs)
 
 
+_FREE_CLAIM_BUTTON = {
+    "label": "",
+    "emoji": "free",
+    "custom_id": "1506031651548037344f1473101129184186552f0",
+    "kind": "other",
+    "disabled": False,
+    "style": "success",
+}
+
+
+def test_free_perk6_button_is_clicked_not_reacted_to_and_keeps_the_slot():
+    """Wishprotect perk-6 spawn: green `:free:` button, claim does not spend the slot."""
+    actions = AsyncMock()
+    actions.click_button = AsyncMock(return_value=True)
+    actions.add_reaction = AsyncMock(return_value=True)
+    actions.wait_for_claim = AsyncMock(return_value=_claim_reply())
+
+    handler, state, logs = _handler(actions)
+    state.claim_available = True
+    record = RollRecord(
+        message_id=77,
+        character_name="Akame",
+        fields=dict(
+            parse_roll(
+                _snapshot(
+                    buttons=[
+                        _FREE_CLAIM_BUTTON,
+                        {"label": "", "emoji": "kakeraL", "kind": "kakera", "disabled": False},
+                    ]
+                )
+            ).fields
+        ),
+    )
+    record.fields["character_name"] = "Akame"
+    assert record.fields["free_claim"] is True
+    assert record.fields["claim_method"] == "button"
+
+    assert asyncio.run(handler.claim_record(record, reason="free perk-6 claim")) is True
+
+    actions.click_button.assert_awaited_once_with(77, _FREE_CLAIM_BUTTON["custom_id"])
+    actions.add_reaction.assert_not_awaited()
+    assert state.claim_available is True
+    assert any("free" in line.lower() for line in logs)
+
+
+def test_free_perk6_claim_still_clicks_when_the_slot_is_on_cooldown():
+    actions = AsyncMock()
+    actions.click_button = AsyncMock(return_value=True)
+    actions.add_reaction = AsyncMock(return_value=True)
+    actions.wait_for_claim = AsyncMock(return_value=_claim_reply())
+
+    handler, state, _logs = _handler(actions)
+    state.claim_available = False
+    record = RollRecord(
+        message_id=77,
+        character_name="Akame",
+        fields=dict(
+            parse_roll(_snapshot(buttons=[_FREE_CLAIM_BUTTON])).fields
+        ),
+    )
+
+    assert asyncio.run(handler.claim_record(record, reason="free perk-6 claim")) is True
+    actions.click_button.assert_awaited_once()
+    actions.add_reaction.assert_not_awaited()
+    assert state.claim_available is False
+
+
 def test_button_rolls_are_still_clicked_not_reacted_to():
     actions = AsyncMock()
     actions.click_button = AsyncMock(return_value=True)
@@ -268,3 +351,20 @@ def test_add_reaction_is_a_no_op_on_a_monitor_that_cannot_react():
 
     actions = DiscordActions(SimpleNamespace())
     assert asyncio.run(actions.add_reaction(1, CLAIM_REACTION_EMOJI)) is False
+
+
+def test_reaction_claim_logs_the_buttons_that_were_on_the_roll():
+    actions = AsyncMock()
+    actions.add_reaction = AsyncMock(return_value=True)
+    actions.wait_for_claim = AsyncMock(return_value=_claim_reply())
+
+    handler, _state, logs = _handler(actions)
+    record = _react_record()
+    record.fields["buttons"] = [
+        {"emoji": "kakeraR", "kind": "kakera", "custom_id": "k1"},
+    ]
+
+    assert asyncio.run(handler.claim_record(record, reason="test")) is True
+
+    actions.add_reaction.assert_awaited_once()
+    assert any("buttons on the roll: kakeraR/kakera" in line for line in logs)

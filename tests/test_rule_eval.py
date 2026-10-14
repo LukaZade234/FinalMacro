@@ -174,6 +174,32 @@ def test_character_claim_skips_on_cooldown():
     assert "cooldown" in decision.reason
 
 
+def test_character_claim_free_perk6_is_immediate_even_on_cooldown():
+    fields = _claim_fields(free_claim=True, perk_6=True)
+    rules = CharacterClaimRules(enabled=True, claim_on_wish_ping=True)
+    state = AccountState(claim_available=False)
+    decision = passes_character_claim(
+        fields, rules, state, final_hour=False, wished_pinged=False
+    )
+    assert decision.should_claim is True
+    assert decision.immediate is True
+    assert "free" in decision.reason.lower()
+
+
+def test_evaluate_claim_trigger_interrupts_for_free_perk6():
+    from macro.roll_interrupts import RollInterruptContext, evaluate_claim_trigger
+
+    fields = _claim_fields(free_claim=True, perk_6=True, can_claim=True)
+    interrupt = evaluate_claim_trigger(
+        RollInterruptContext(fields=fields, own_user_ids=[]),
+        CharacterClaimRules(enabled=True),
+        AccountState(claim_available=False),
+        final_hour=False,
+    )
+    assert interrupt is not None
+    assert "free" in interrupt.reason.lower()
+
+
 # ---------------------------------------------------------------------------
 # Kakera reaction
 

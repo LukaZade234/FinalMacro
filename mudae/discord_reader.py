@@ -440,6 +440,26 @@ class ChannelMonitor:
             self._remember_message(message)
         return snapshot_from_message(message, edited=True)
 
+    async def fetch_recent_snapshots(self, *, limit: int = 8) -> list[MudaeMessageSnapshot]:
+        """Recent Mudae messages in the watched channel, newest first.
+
+        Used when a roll embed never arrives on the gateway but is already
+        sitting in the channel, so the macro does not send the command twice.
+        """
+        try:
+            channel = await self._get_text_channel()
+        except Exception:
+            return []
+        snapshots: list[MudaeMessageSnapshot] = []
+        try:
+            async for message in channel.history(limit=max(1, limit)):
+                if not is_mudae_message(message):
+                    continue
+                snapshots.append(snapshot_from_message(message))
+        except Exception:
+            return snapshots
+        return snapshots
+
     async def _get_text_channel(self) -> discord.TextChannel:
         if not self._client:
             raise RuntimeError("Not connected")

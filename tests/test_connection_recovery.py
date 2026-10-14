@@ -280,3 +280,44 @@ def test_recoveries_are_isolated_per_account():
     asyncio.run(run())
     monitor_a.force_reconnect.assert_not_called()
     monitor_b.force_reconnect.assert_awaited_once()
+
+
+def test_notification_reconnect_retries_before_stopping():
+    from macro.roll_cycle import RollCycleEngine
+
+    class _Engine:
+        def __init__(self) -> None:
+            self.logs: list[str] = []
+            self.restores = 0
+            self._stop = asyncio.Event()
+
+        def _log(self, message: str) -> None:
+            self.logs.append(message)
+
+        async def _restore_connection_for_notifications(self) -> bool:
+            self.restores += 1
+            return self.restores >= 2
+
+        async def _sleep_interruptible(self, _seconds: float) -> bool:
+            return True
+
+    engine = _Engine()
+    ok = asyncio.run(RollCycleEngine._restore_connection_or_retry(engine, where="test"))
+    assert ok is True
+    assert engine.restores == 2
+    assert any("retrying in" in line for line in engine.logs)
+    assert not any("stopping" in line for line in engine.logs)
+
+
+def test_hourly_batch_continues_after_an_embed_timeout_while_rolls_remain():
+    from macro.roll_cycle import RollCycleEngine, _RollOutcome
+
+    engine = SimpleNamespace(_state=SimpleNamespace(rolls_left=4))
+    missed = _RollOutcome(ok=False, embed_timeout=True)
+    assert RollCycleEngine._should_continue_after_embed_timeout(engine, missed, 0)
+    assert not RollCycleEngine._should_continue_after_embed_timeout(engine, missed, 4)
+    engine._state.rolls_left = 0
+    assert not RollCycleEngine._should_continue_after_embed_timeout(engine, missed, 0)
+    limited = _RollOutcome(ok=False, roll_limit=True)
+    engine._state.rolls_left = 4
+    assert not RollCycleEngine._should_continue_after_embed_timeout(engine, limited, 0)

@@ -490,3 +490,69 @@ class DiscordActions:
             if item not in matches:
                 self._queue.put_nowait(item)
         return matches
+
+    async def find_recent_roll(
+        self,
+        *,
+        roll_command: str,
+        after_id: int | None,
+        ignore_ids: set[int],
+    ) -> tuple[MudaeMessageSnapshot, ParseResult] | None:
+        """A roll that landed after ``after_id`` but was missed by the waiter.
+
+        Checks the in-memory queue first, then a short channel history fetch.
+        History is skipped when the command's own message id is unknown, so an
+        older character in the channel cannot be treated as this roll.
+        """
+        queued = self.collect_queued(
+            lambda snapshot, parsed: self._is_unseen_roll(
+                snapshot,
+                parsed,
+                roll_command=roll_command,
+                after_id=after_id,
+                ignore_ids=ignore_ids,
+            )
+        )
+        if queued:
+            for extra in queued[1:]:
+                self._queue.put_nowait(extra)
+            return queued[0]
+
+        fetch = getattr(self._monitor, "fetch_recent_snapshots", None)
+        if fetch is None or after_id is None:
+            return None
+        try:
+            snapshots = await fetch(limit=8)
+        except Exception:
+            return None
+        from mudae.parsers.pipeline import parse_mudae_message
+
+        for snapshot in snapshots or []:
+            try:
+                parsed = parse_mudae_message(snapshot)
+            except Exception:
+                continue
+            if self._is_unseen_roll(
+                snapshot,
+                parsed,
+                roll_command=roll_command,
+                after_id=after_id,
+                ignore_ids=ignore_ids,
+            ):
+                return snapshot, parsed
+        return None
+
+    @staticmethod
+    def _is_unseen_roll(
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+        *,
+        roll_command: str,
+        after_id: int | None,
+        ignore_ids: set[int],
+    ) -> bool:
+        if snapshot.edited or snapshot.message_id in ignore_ids:
+            return False
+        if after_id is not None and snapshot.message_id <= after_id:
+            return False
+        return is_roll_parse_result(parsed, roll_command=roll_command)

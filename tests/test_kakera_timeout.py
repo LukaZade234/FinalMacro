@@ -355,3 +355,35 @@ def test_no_resync_when_there_were_no_free_kakera_to_click():
         assert called == []
 
     asyncio.run(_case())
+
+
+def test_kakera_counts_a_click_when_the_button_is_already_spent():
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(
+            prefix="$",
+            kakera_reaction=KakeraReactionRules(
+                enabled=True,
+                types_allowed=["kakeraR"],
+            ),
+        )
+        actions = _FakeActionsWithQueue()
+        actions._outcomes.append(None)
+
+        async def _fetch(_message_id: int):
+            snap = _snapshot(_message_id)
+            snap.buttons = [{"custom_id": "btn1", "disabled": True, "kind": "kakera"}]
+            return snap
+
+        actions.fetch_message_snapshot = _fetch  # type: ignore[attr-defined]
+        logs: list[str] = []
+        reactor = KakeraReactor(actions, config, state, log=logs.append)
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            clicks = await reactor.react(message_id=2, fields=_fields())
+
+        assert clicks == 1
+        assert actions.clicks == ["btn1"]
+        assert any("already used" in line for line in logs)
+        assert not any("retrying click" in line for line in logs)
+
+    asyncio.run(_case())

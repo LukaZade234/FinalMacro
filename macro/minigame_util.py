@@ -84,3 +84,51 @@ def empty_minigame_result(
 
 def log_minigame_exhausted(log: Any, fields: dict[str, Any]) -> None:
     log(format_exhausted_activity(fields))
+
+
+MAX_GRID_CLICK_FAILURES = 3
+
+
+def transport_error_detail(monitor: Any) -> str:
+    detail = str(getattr(monitor, "last_transport_error", "") or "").strip()
+    return f" ({detail})" if detail else ""
+
+
+async def recover_refused_grid_click(
+    *,
+    actions: Any,
+    grid_id: int,
+    custom_id: str,
+    buttons: list[Any],
+    click_failures: int,
+    last_refused: str,
+    label: str,
+    log: Any,
+    disable_button: Any,
+    max_failures: int = MAX_GRID_CLICK_FAILURES,
+) -> tuple[list[Any], int, str, bool]:
+    """Refresh the grid or skip a cell after a refused minigame click.
+
+    Returns ``(buttons, click_failures, last_refused, stop)``. Stop only after
+    ``max_failures`` refusals; a cell that refuses twice is disabled locally so
+    the rest of the board can still be played.
+    """
+    click_failures += 1
+    why = transport_error_detail(getattr(actions, "_monitor", None))
+    if click_failures >= max_failures:
+        log(f"{label}: click refused {click_failures}x{why} — stopping")
+        return buttons, click_failures, custom_id, True
+    if custom_id and custom_id == last_refused:
+        buttons = disable_button(buttons, custom_id)
+        log(f"{label}: same cell keeps refusing — skipping it")
+    else:
+        log(
+            f"{label}: click refused{why} — refreshing the grid "
+            f"({click_failures}/{max_failures})"
+        )
+        fetch = getattr(actions, "fetch_message_snapshot", None)
+        fresh = await fetch(grid_id) if fetch is not None else None
+        fresh_buttons = list(getattr(fresh, "buttons", None) or [])
+        if fresh_buttons:
+            buttons = fresh_buttons
+    return buttons, click_failures, custom_id, False

@@ -11,11 +11,20 @@ _SPHERE_CUSTOM_ID_RE = re.compile(r"\d+s\d+$")
 _CLAIM_CUSTOM_ID_RE = re.compile(r"\d+p\d+p\d+$", re.IGNORECASE)
 
 
+def button_emoji_name(btn: dict[str, Any]) -> str:
+    """Custom-emoji name or unicode character from a snapshot / formatted button."""
+    emoji = btn.get("emoji") or ""
+    if isinstance(emoji, dict):
+        return str(emoji.get("name") or "").strip()
+    return str(emoji).strip()
+
+
 def classify_button_kind(
     *,
     emoji: str = "",
     label: str = "",
     custom_id: str = "",
+    style: str = "",
 ) -> str:
     """Return ``claim``, ``kakera``, ``sphere``, or ``other`` for a component button."""
     emoji_key = (emoji or "").strip()
@@ -34,13 +43,16 @@ def classify_button_kind(
     ):
         return "sphere"
 
-    if emoji_key in CLAIM_EMOJIS:
+    if emoji_key in CLAIM_EMOJIS or emoji_key.lower() == "free":
         return "claim"
     if emoji_key in KAKERA_EMOJIS or emoji_key.startswith("kakera"):
         return "kakera"
 
     lower_label = (label or "").lower()
     if "claim" in lower_label or "marry" in lower_label or "casar" in lower_label:
+        return "claim"
+    # Perk-6 once-a-day free wish: Discord success (green) on a non-kakera button.
+    if normalize_button_style(style) == "success":
         return "claim"
     return "other"
 
@@ -125,12 +137,25 @@ def is_claim_button(btn: dict[str, Any]) -> bool:
         return True
     return (
         classify_button_kind(
-            emoji=btn.get("emoji") or "",
+            emoji=button_emoji_name(btn),
             label=btn.get("label") or "",
             custom_id=btn.get("custom_id") or "",
+            style=btn.get("style") or "",
         )
         == "claim"
     )
+
+
+def is_free_claim_button(btn: dict[str, Any]) -> bool:
+    """Perk-6 once-a-day free wish: ``:free:`` / 🆓 and/or a green success button."""
+    if btn.get("disabled"):
+        return False
+    if not is_claim_button(btn):
+        return False
+    emoji = button_emoji_name(btn)
+    if emoji.lower() == "free" or emoji == "\U0001f193":
+        return True
+    return normalize_button_style(btn.get("style")) == "success"
 
 
 def claim_method_from_buttons(buttons: list[dict[str, Any]]) -> str:
@@ -190,13 +215,14 @@ def format_button(btn: dict[str, Any]) -> dict[str, Any]:
     emoji = btn.get("emoji") or ""
     label = btn.get("label") or ""
     custom_id = btn.get("custom_id") or None
+    disabled = bool(btn.get("disabled", False))
+    style = normalize_button_style(btn.get("style"))
     kind = classify_button_kind(
         emoji=emoji,
         label=label,
         custom_id=custom_id or "",
+        style=style,
     )
-    disabled = bool(btn.get("disabled", False))
-    style = normalize_button_style(btn.get("style"))
 
     return {
         "label": label or None,

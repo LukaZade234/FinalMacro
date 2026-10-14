@@ -1843,19 +1843,20 @@ def test_has_perk_8_reads_lightning_and_legacy_diamond():
     assert _has_perk_8("/2 \u200b  (\U0001f51125)" + owns) is False
 
 
-def test_has_perk_8_reads_double_spheres_after_daily_40():
+def test_has_perk_8_ignores_double_spheres_after_daily_40():
+    """Double spheres mean perk 8 is already spent — not an active half-power roll."""
     from mudae.parsers.roll import _has_perk_8
 
     owns = " \u00b7 Belongs to lukazade234"
-    assert _has_perk_8("\U0001f534\U0001f534 \u200b  (\U0001f51125)" + owns) is True
-    assert _has_perk_8("23\U0001f534\U0001f534 \u2611\ufe0f  (\u2b50209)" + owns) is True
-    assert _has_perk_8("<:spY:1><:spY:2> \u200b  (\U0001f51125)" + owns) is True
+    assert _has_perk_8("\U0001f534\U0001f534 \u200b  (\U0001f51125)" + owns) is False
+    assert _has_perk_8("23\U0001f534\U0001f534 \u2611\ufe0f  (\u2b50209)" + owns) is False
+    assert _has_perk_8("<:spY:1><:spY:2> \u200b  (\U0001f51125)" + owns) is False
     assert _has_perk_8("23\U0001f534 \u2611\ufe0f  (\u2b50209)" + owns) is False
     assert _has_perk_8("\U0001f7e2  (\ud83d\udd1154)" + owns) is False
     assert _has_perk_8("23\U0001f534 \U0001f7e2" + owns) is False
 
 
-def test_parse_perk_8_after_40_keeps_sphere_count():
+def test_parse_spent_perk_8_footer_is_not_perk_8_but_keeps_sphere_count():
     from mudae.parsers.roll import parse_roll
 
     embed = dict(NAZUNA_PERK8_EMBED)
@@ -1878,7 +1879,7 @@ def test_parse_perk_8_after_40_keeps_sphere_count():
         created_at="12:13:00",
     )
     result = parse_roll(snapshot)
-    assert result.fields["perk_8"] is True
+    assert result.fields["perk_8"] is None
     assert result.fields["spheres"] == 23
 
 
@@ -1913,6 +1914,60 @@ def test_parse_perk_6_footer_green_is_not_perk_8():
     assert result.fields["perk_6"] is True
     assert result.fields["spawned_by"] == "TRISSY"
     assert result.fields["perk_8"] is None
+
+
+def test_parse_perk_6_free_wish_button_is_a_claim_not_a_reaction():
+    """Once-a-day perk-6 wishprotect: `:free:` on a green button, plus kakera."""
+    from mudae.parsers.roll import parse_roll
+
+    embed = {
+        "title": "",
+        "author": "Akame",
+        "description": (
+            "Akame ga Kill!\n"
+            "**100**<:kakera:1>\n"
+            "<:spG:1> **[SPAWNED BY POWER]**"
+        ),
+        "footer": "\U0001f7e2",
+    }
+    free_btn = {
+        "label": "",
+        "emoji": "free",
+        "custom_id": "1506078075027193967f1473101129184186552f0",
+        "kind": "other",
+        "disabled": False,
+        "style": "success",
+    }
+    kakera_btn = {
+        "label": "",
+        "emoji": "kakeraL",
+        "custom_id": "1506078075027193967wk1473101129184186552k0",
+        "kind": "kakera",
+        "disabled": False,
+    }
+    snapshot = MudaeMessageSnapshot(
+        message_id=103,
+        channel_id=99,
+        channel_name="mudae",
+        guild_id=1,
+        guild_name="srv",
+        author_id=MUDAE_ALT_ID,
+        author_name="Mudae",
+        is_mudae=True,
+        content="",
+        embeds=[embed],
+        buttons=[free_btn, kakera_btn],
+        created_at="20:00:00",
+    )
+    result = parse_roll(snapshot)
+    assert result.fields["perk_6"] is True
+    assert result.fields["claim_method"] == "button"
+    assert result.fields["can_claim"] is True
+    assert result.fields["free_claim"] is True
+    assert result.fields["has_claim_button"] is True
+    assert result.fields["buttons"][0]["kind"] == "claim"
+    assert result.fields["buttons"][0]["is_claim"] is True
+    assert "free" in result.summary
 
 
 def test_parse_nacchan_spheres_in_footer():

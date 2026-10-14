@@ -30,6 +30,7 @@ from macro.sphere_game import OhSphereGame
 
 _OHU_SETTLE_SEC = 2.0
 _OHU_TIMEOUT_SEC = 12.0
+_OHU_ATTEMPTS = 3
 _BETWEEN_GAMES_SEC = 1.5
 
 
@@ -265,17 +266,25 @@ class PlayAllMinigames:
             self._on_game_reward(game, reward, clicks)
 
     async def _query_ohu(self, *, prefix: str) -> dict[str, int] | None:
-        self._actions.drain_queue()
-        self._log("Sent $ohu")
-        await self._actions.send_command("ohu", prefix=prefix)
-        await asyncio.sleep(_OHU_SETTLE_SEC)
-        parsed = await self._actions.wait_for_ohu(timeout=_OHU_TIMEOUT_SEC)
-        if parsed is None:
-            self._log("$ohu timeout — cannot play all minigames")
-            return None
-        fields = dict(parsed.fields or {})
-        self._persist_ohu_fields(fields)
-        return _availability_from_fields(fields)
+        for attempt in range(1, _OHU_ATTEMPTS + 1):
+            self._actions.drain_queue()
+            if attempt == 1:
+                self._log("Sent $ohu")
+            else:
+                self._log(f"Sent $ohu (attempt {attempt}/{_OHU_ATTEMPTS})")
+            await self._actions.send_command("ohu", prefix=prefix)
+            await asyncio.sleep(_OHU_SETTLE_SEC)
+            parsed = await self._actions.wait_for_ohu(timeout=_OHU_TIMEOUT_SEC)
+            if parsed is not None:
+                fields = dict(parsed.fields or {})
+                self._persist_ohu_fields(fields)
+                return _availability_from_fields(fields)
+            if attempt < _OHU_ATTEMPTS:
+                self._log(
+                    f"$ohu: no reply (attempt {attempt}/{_OHU_ATTEMPTS}) — retrying"
+                )
+        self._log("$ohu timeout — cannot play all minigames")
+        return None
 
     def _load_refreshed_record(self):
         if not self._daily_get:

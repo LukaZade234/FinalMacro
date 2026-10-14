@@ -76,6 +76,7 @@ def _button_kind(button: discord.Button) -> str:
         emoji=emoji_key,
         label=button.label or "",
         custom_id=button.custom_id or "",
+        style=normalize_button_style(getattr(button, "style", None)),
     )
 
 

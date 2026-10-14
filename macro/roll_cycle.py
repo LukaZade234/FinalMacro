@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from macro.actions import DiscordActions, is_perk6_spawn_parse_result
+from macro.actions import DiscordActions, is_perk6_spawn_parse_result, is_roll_parse_result
 from macro.activity_log import ActivityLog, ActivitySeverity
 from macro.connection_recovery import ConnectionRecovery
 from macro.roll_context import RollContext
@@ -92,6 +92,10 @@ _COMMAND_SETTLE_SEC = 2.5  # pause after $tu before polling for the reply
 _RESPONSE_TIMEOUT_SEC = 12.0  # max wait for a $tu / $ohu8 / $us text reply
 # Progressive waits for a missed roll embed; resend the roll command between stages.
 _ROLL_EMBED_TIMEOUTS_SEC = (5.0, 10.0, 25.0)
+# Notification-mode reconnect after an hourly wait. One failure used to end
+# the farm; try again before stopping.
+_NOTIFY_RECONNECT_ATTEMPTS = 3
+_NOTIFY_RECONNECT_BACKOFF_SEC = (15.0, 45.0)
 _ROLL_EMBED_TIMEOUT_SEC = _ROLL_EMBED_TIMEOUTS_SEC[-1]  # used in timeout log text
 _RESET_POLL_SEC = 30.0  # $tu poll interval while paused for the rolls reset ($us mode)
 _PERK6_SPAWN_WAIT_SEC = 0.5  # brief poll; queue drain catches late spawns
@@ -129,6 +133,7 @@ class _RollOutcome:
     claimed: bool = False  # a claim was made on this roll via the interrupt path
     stop: bool = False  # caller should stop the *normal* roll loop (interrupt claim)
     roll_limit: bool = False  # Mudae hourly roll limit (no embed)
+    embed_timeout: bool = False  # no character embed after the resend ladder
 
 
 class RollCycleEngine:
@@ -185,6 +190,8 @@ class RollCycleEngine:
         self._maintenance_fallback = MaintenanceWatch()
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        # Roll message ids already handled, so a history lookup cannot replay them.
+        self._seen_roll_message_ids: set[int] = set()
         self._roll_stop = RollStopTracker()
         self._us_stop = UsModeStopOptions()
         self._us_rolls_done = 0
@@ -297,6 +304,32 @@ class RollCycleEngine:
 
     async def _restore_connection_for_notifications(self) -> bool:
         return await self._recovery.restore_for_notifications()
+
+    async def _restore_connection_or_retry(self, *, where: str) -> bool:
+        """Reconnect for the next roll session, backing off before giving up.
+
+        A single failed reconnect after the hourly wait used to end the farm.
+        Scheduled work already defers; this is the same idea on the path that
+        was stopping.
+        """
+        for attempt in range(1, _NOTIFY_RECONNECT_ATTEMPTS + 1):
+            if self._stop.is_set():
+                return False
+            if await self._restore_connection_for_notifications():
+                if attempt > 1:
+                    self._log(f"Notification mode: reconnected ({where})")
+                return True
+            if attempt >= _NOTIFY_RECONNECT_ATTEMPTS:
+                self._log("Notification mode: reconnect failed — stopping")
+                return False
+            pause = _NOTIFY_RECONNECT_BACKOFF_SEC[attempt - 1]
+            self._log(
+                f"Notification mode: reconnect failed — retrying in {pause:g}s "
+                f"({attempt}/{_NOTIFY_RECONNECT_ATTEMPTS}, {where})"
+            )
+            if not await self._sleep_interruptible(pause):
+                return False
+        return False
 
     def _log(self, text: str) -> None:
         self._activity.write(text)
@@ -1368,8 +1401,7 @@ class RollCycleEngine:
             self._actions.drain_queue()
             self._reset_roll_stop_tracker()
 
-            if not await self._restore_connection_for_notifications():
-                self._log("Notification mode: reconnect failed — stopping")
+            if not await self._restore_connection_or_retry(where="startup"):
                 return
 
             await self._refresh_perk8_status(at_startup=True)
@@ -1393,8 +1425,7 @@ class RollCycleEngine:
             transient_recoveries = 0
             while not self._stop.is_set():
                 try:
-                    if not await self._restore_connection_for_notifications():
-                        self._log("Notification mode: reconnect failed — stopping")
+                    if not await self._restore_connection_or_retry(where="hourly loop"):
                         break
 
                     await self._run_priority_pause()
@@ -1523,6 +1554,36 @@ class RollCycleEngine:
             self._notify()
             self._task = None
 
+    async def _lookup_late_roll(
+        self,
+        cmd: str,
+        command_id: int | None,
+    ) -> tuple[Any, Any] | None:
+        """A roll embed that arrived after the wait gave up."""
+        finder = getattr(self._actions, "find_recent_roll", None)
+        if finder is None:
+            return None
+        try:
+            return await finder(
+                roll_command=cmd,
+                after_id=command_id,
+                ignore_ids=self._seen_roll_message_ids,
+            )
+        except Exception:
+            return None
+
+    def _should_continue_after_embed_timeout(
+        self,
+        outcome: _RollOutcome,
+        embed_timeouts: int,
+    ) -> bool:
+        """Keep the hourly batch going when $tu still has rolls to spend."""
+        if not outcome.embed_timeout:
+            return False
+        if embed_timeouts + 1 >= _MAX_ROLL_TIMEOUT_RETRIES:
+            return False
+        return int(self._state.rolls_left or 0) > 0
+
     async def _perform_roll(
         self,
         cmd: str,
@@ -1546,7 +1607,9 @@ class RollCycleEngine:
         qsize = getattr(self._actions, "queue_size", lambda: 0)()
         self._log(f"Roll {roll_index}: ${cmd}")
         self._log_debug(f"roll {roll_index}: sending ${cmd} · queue={qsize}")
-        await self._send_command_with_reconnect(cmd, label=f"Roll {roll_index}")
+        command_id = await self._send_command_with_reconnect(
+            cmd, label=f"Roll {roll_index}"
+        )
         result = None
         waited = 0.0
         for stage, timeout in enumerate(_ROLL_EMBED_TIMEOUTS_SEC, start=1):
@@ -1558,6 +1621,14 @@ class RollCycleEngine:
                 break
             waited += timeout
             if stage < len(_ROLL_EMBED_TIMEOUTS_SEC):
+                late = await self._lookup_late_roll(cmd, command_id)
+                if late is not None:
+                    self._log(
+                        f"Roll {roll_index}: embed was already in the channel "
+                        f"— not resending ${cmd}"
+                    )
+                    result = late
+                    break
                 self._log(
                     f"Roll {roll_index}: no embed after {timeout:g}s — "
                     f"resending ${cmd}"
@@ -1566,19 +1637,22 @@ class RollCycleEngine:
                     f"roll {roll_index}: no embed after {waited:g}s — "
                     f"resending ${cmd} before {_ROLL_EMBED_TIMEOUTS_SEC[stage]:g}s wait"
                 )
-                await self._send_command_with_reconnect(
+                resent_id = await self._send_command_with_reconnect(
                     cmd,
                     label=f"Roll {roll_index} retry",
                 )
+                if resent_id is not None:
+                    command_id = resent_id
         if result is None:
             self._log("Roll embed timeout")
             self._log_debug(
                 f"roll {roll_index}: embed timeout after {waited:g}s · "
                 f"queue={getattr(self._actions, 'queue_size', lambda: 0)()}"
             )
-            return _RollOutcome(ok=False)
+            return _RollOutcome(ok=False, embed_timeout=True)
 
         snapshot, parsed = result
+        self._seen_roll_message_ids.add(snapshot.message_id)
         if parsed.kind == MessageKind.ROLL_LIMIT:
             fields = parsed.fields
             self._state.rolls_left = 0
@@ -2155,6 +2229,7 @@ class RollCycleEngine:
 
         claimed_via_interrupt = False
         done = 0
+        embed_timeouts = 0
         stop_rolling = False
         roll_limit_hit = False
         granted_before = int(getattr(self._state, "chaos_rolls_granted", 0) or 0)
@@ -2181,8 +2256,18 @@ class RollCycleEngine:
                 stop_on_interrupt=self._force_divorce is None,
             )
             if not outcome.ok:
+                if self._should_continue_after_embed_timeout(outcome, embed_timeouts):
+                    embed_timeouts += 1
+                    left = int(self._state.rolls_left or 0)
+                    self._log(
+                        f"Roll embed missing — skipping this attempt "
+                        f"({embed_timeouts}/{_MAX_ROLL_TIMEOUT_RETRIES}, "
+                        f"{left} roll(s) left)"
+                    )
+                    continue
                 roll_limit_hit = outcome.roll_limit
                 break
+            embed_timeouts = 0
             done += 1
             if outcome.stop:
                 claimed_via_interrupt = outcome.claimed
@@ -2968,8 +3053,7 @@ class RollCycleEngine:
             if not await self._wait_for_minigame_to_finish("Hourly refill"):
                 return False
 
-            if not await self._restore_connection_for_notifications():
-                self._log("Notification mode: reconnect failed — stopping")
+            if not await self._restore_connection_or_retry(where="hourly refill"):
                 return False
 
             await self._maybe_refresh_perk8_status()
