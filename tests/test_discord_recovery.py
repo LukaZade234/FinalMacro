@@ -389,6 +389,28 @@ def test_click_button_gives_up_loudly_rather_than_silently():
     assert any("429" in line for line in statuses), statuses
 
 
+def test_click_button_counts_a_missing_ack_as_sent():
+    """discord.py waits 12s for interaction_finish, then raises.
+
+    The interact POST has already succeeded. A live kakera click (Patchouli,
+    16 Oct 2026) showed the reward and then 'kakera click failed' once this
+    wait gave up. Retrying would press the button again.
+    """
+    button = _FakeButton(
+        "cmd s7",
+        failures=1,
+        error="Did not receive a response from Discord",
+    )
+    monitor = _monitor_with_button(button)
+
+    async def run() -> None:
+        with patch("mudae.discord_reader.asyncio.sleep", new=AsyncMock()):
+            assert await monitor.click_button(999, "cmd s7") is True
+
+    asyncio.run(run())
+    assert button.clicks == 1
+
+
 def test_click_button_does_not_retry_a_permanent_error():
     button = _FakeButton("cmd s7", failures=99, error="Unknown interaction")
     monitor = _monitor_with_button(button)

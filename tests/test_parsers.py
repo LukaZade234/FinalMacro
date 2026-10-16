@@ -593,6 +593,21 @@ def test_parse_marriage():
     assert "spheres" not in result.fields
 
 
+def test_parse_free_wishprotect_marriage_drops_the_free_marker():
+    """Mudae announces a free perk-6 claim as '(Free) Lucy'.
+
+    Keeping the marker made the force-divorce farm miss the name, leave the
+    session hunting, and burn $us rolls on a character it had just married.
+    """
+    content = (
+        "\U0001f496 lukazade234 and (Free) Lucy are now married! \U0001f496 "
+        "+5,017,908:kakera:(Emerald IV bonus)"
+    )
+    result = parse_marriage(content)
+    assert result.fields["winner"] == "lukazade234"
+    assert result.fields["character"] == "Lucy"
+
+
 def test_parse_custom_claim_arbitrary_text_sums_kakera():
     from mudae.parsers.claim import parse_claim
     from mudae.parsers.classify import classify_message

@@ -947,7 +947,12 @@ class RollCycleEngine:
         read rather than estimated.
         """
         session = self._force_divorce
-        if session is None or not session.is_target(character):
+        if session is None:
+            return
+        from mudae.parsers.claim import strip_free_claim_marker
+
+        character = strip_free_claim_marker(character) or character
+        if not session.is_target(character):
             return
         session.note_claimed(
             kakera=fields.get("kakera") or 0,

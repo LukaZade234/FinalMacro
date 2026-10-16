@@ -45,6 +45,17 @@ _TRANSIENT_MARKERS = (
 )
 
 
+def interaction_ack_missing(exc: BaseException) -> bool:
+    """The interact POST succeeded, but ``interaction_finish`` never arrived.
+
+    ``button.click`` waits up to 12 seconds for that gateway event and then
+    raises ``InvalidData: Did not receive a response from Discord``. The click
+    was already sent — Mudae's kakera line is often already in the channel —
+    and retrying it presses the button a second time.
+    """
+    return "did not receive a response from discord" in str(exc).lower()
+
+
 def is_fatal_runtime_error(exc: BaseException) -> bool:
     """True for shutdown / closed-loop errors that must not be retried."""
     text = f"{type(exc).__name__}: {exc}".lower()

@@ -38,6 +38,18 @@ _MARRIAGE_RE = re.compile(
     r"(?:💖\s*)?(.*?)\s+and\s+(.*?)\s+are now married",
     re.IGNORECASE,
 )
+# A once-a-day free wishprotect claim is announced as "(Free) Lucy".
+# The marker is not part of the name; leaving it on made the force-divorce
+# farm miss its own target and keep hunting a character it had just married.
+_FREE_CLAIM_PREFIX_RE = re.compile(r"^\(\s*free\s*\)\s*", re.IGNORECASE)
+
+
+def strip_free_claim_marker(name: str | None) -> str | None:
+    """Drop a leading ``(Free)`` so the name matches the roll."""
+    if not name:
+        return name
+    stripped = _FREE_CLAIM_PREFIX_RE.sub("", name).strip()
+    return stripped or name
 
 
 def parse_claim_kakera(content: str) -> tuple[int | None, list[dict[str, Any]]]:
@@ -112,12 +124,12 @@ def _parse_claim_participants(content: str) -> tuple[str | None, str | None]:
     if marriage:
         return (
             strip_markdown(marriage.group(1)).strip(),
-            strip_markdown(marriage.group(2)).strip(),
+            strip_free_claim_marker(strip_markdown(marriage.group(2)).strip()),
         )
 
     names = extract_claim_names(content)
     if len(names) >= 2:
-        return names[0], names[1]
+        return names[0], strip_free_claim_marker(names[1])
     return None, None
 
 

@@ -70,6 +70,25 @@ class _KakeraClickResult:
     wait_timed_out: bool
 
 
+def _yield_to_loop() -> asyncio.Future[None]:
+    """Let other tasks run even when ``asyncio.sleep`` has been patched out."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[None] = loop.create_future()
+    loop.call_soon(future.set_result, None)
+    return future
+
+
+async def _pause(seconds: float) -> None:
+    """Wait without using ``asyncio.sleep``, which tests replace with a no-op."""
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[None] = loop.create_future()
+    handle = loop.call_later(max(0.0, seconds), future.set_result, None)
+    try:
+        await future
+    finally:
+        handle.cancel()
+
+
 @dataclass
 class KakeraReactor:
     actions: DiscordActions
@@ -309,14 +328,6 @@ class KakeraReactor:
                 confirmed = False
                 outcome = None
                 for attempt in range(1, _MAX_KAKERA_CLICK_ATTEMPTS + 1):
-                    ok = await self.actions.click_button(message_id, choice.custom_id)
-                    if not ok:
-                        self._debug(
-                            f"kakera: button click failed {character} "
-                            f"(msg {message_id})"
-                        )
-                        return _KakeraClickResult(False, wait_timed_out)
-                    await asyncio.sleep(_KAKERA_CLICK_SETTLE_SEC)
                     wait_timeout = (
                         _KAKERA_OUTCOME_TIMEOUT_SEC
                         if attempt == 1
@@ -328,13 +339,23 @@ class KakeraReactor:
                         f"attempt {attempt}/{_MAX_KAKERA_CLICK_ATTEMPTS} "
                         f"timeout={wait_timeout:g}s queue={qsize}"
                     )
-                    outcome = await self._wait_for_kakera_outcome(timeout=wait_timeout)
+                    outcome, ok = await self._click_watching_for_outcome(
+                        message_id,
+                        choice.custom_id,
+                        timeout=wait_timeout,
+                    )
                     if outcome is not None:
                         self._debug(
                             f"kakera: outcome {character} · {outcome.kind.value} · "
                             f"{outcome.summary or '?'}"
                         )
                         break
+                    if not ok:
+                        self._debug(
+                            f"kakera: button click failed {character} "
+                            f"(msg {message_id})"
+                        )
+                        return _KakeraClickResult(False, wait_timed_out)
                     spent = await self._kakera_button_spent(
                         message_id, choice.custom_id
                     )
@@ -578,6 +599,92 @@ class KakeraReactor:
         result = cb()
         if asyncio.iscoroutine(result):
             await result
+
+    def _kakera_outcome_queued(self) -> bool:
+        count = getattr(self.actions, "count_queued_outcomes", None)
+        if count is None:
+            return False
+        try:
+            _total, matches = count(is_kakera_outcome_message)
+        except Exception:
+            return False
+        return matches > 0
+
+    def _detach_click_task(self, task: asyncio.Task[bool]) -> None:
+        """Let a click finish in the background without a second press.
+
+        discord.py's ``button.click`` can sit for 12s after the interact POST
+        waiting for an ack the selfbot gateway never sends. The kakera line is
+        already in the queue by then. Cancelling the wait makes that library
+        raise and the click helper retry, which presses the button again.
+        """
+
+        def _done(finished: asyncio.Task[bool]) -> None:
+            try:
+                finished.result()
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        task.add_done_callback(_done)
+
+    async def _click_watching_for_outcome(
+        self,
+        message_id: int,
+        custom_id: str,
+        *,
+        timeout: float,
+    ) -> tuple[ParseResult | None, bool]:
+        """Click, and take a reward that arrives before the click ack.
+
+        Returns ``(outcome, click_accepted)``. ``click_accepted`` is True when
+        the button press was sent, including the case where the ack never
+        came but the reward message did.
+        """
+        click_task = asyncio.create_task(
+            self.actions.click_button(message_id, custom_id)
+        )
+        outcome: ParseResult | None = None
+        try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + max(0.0, timeout)
+            # A sleep patched out by tests does not yield, so give the click a
+            # real turn before looking for its reward.
+            await _yield_to_loop()
+            await asyncio.sleep(_KAKERA_CLICK_SETTLE_SEC)
+            while not click_task.done():
+                if self._kakera_outcome_queued():
+                    outcome = await self._wait_for_kakera_outcome(timeout=0.2)
+                    if outcome is not None:
+                        break
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                await _pause(min(0.05, remaining))
+            if outcome is None and click_task.done():
+                remaining = deadline - loop.time()
+                outcome = await self._wait_for_kakera_outcome(
+                    timeout=remaining if remaining > 0 else 0.0
+                )
+            if click_task.done():
+                try:
+                    ok = bool(click_task.result())
+                except Exception:
+                    ok = False
+            else:
+                self._detach_click_task(click_task)
+                ok = outcome is not None
+            if outcome is not None:
+                ok = True
+            elif not ok:
+                # The ack gave up in the same moment the reward landed.
+                outcome = await self._wait_for_kakera_outcome(timeout=0.0)
+                if outcome is not None:
+                    ok = True
+            return outcome, ok
+        except BaseException:
+            if not click_task.done():
+                self._detach_click_task(click_task)
+            raise
 
     async def _kakera_button_spent(self, message_id: int, custom_id: str) -> bool | None:
         """Whether a timed-out click already consumed the button.

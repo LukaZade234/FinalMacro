@@ -387,3 +387,58 @@ def test_kakera_counts_a_click_when_the_button_is_already_spent():
         assert not any("retrying click" in line for line in logs)
 
     asyncio.run(_case())
+
+
+def test_kakera_counts_a_reward_that_arrives_before_the_click_ack():
+    """The reward is in the channel while button.click is still waiting.
+
+    Patchouli Knowledge, 16 Oct 2026: the +11,592 line was logged, then twelve
+    seconds later 'kakera click failed', and the next roll threw the reward
+    away as a stale response.
+    """
+
+    class _SlowClick(_FakeActionsWithQueue):
+        def __init__(self) -> None:
+            super().__init__()
+            self.finished = False
+            self.gate: asyncio.Future[None] | None = None
+
+        async def click_button(self, message_id: int, custom_id: str) -> bool:
+            self.clicks.append(custom_id)
+            self.feed(
+                _snapshot(message_id),
+                ParseResult(
+                    kind=MessageKind.KAKERA_CLAIM,
+                    summary="Kakera claim",
+                    fields={"amount": 11592},
+                ),
+            )
+            # Not asyncio.sleep: the reactor tests patch that, and this has to
+            # stay pending so we can see the reward win the race.
+            self.gate = asyncio.get_running_loop().create_future()
+            await self.gate
+            self.finished = True
+            return False
+
+    async def _case() -> None:
+        state = AccountState(power_percent=100.0, power_max_percent=155.0)
+        config = MacroConfig(
+            prefix="$",
+            kakera_reaction=KakeraReactionRules(
+                enabled=True,
+                types_allowed=["kakeraR"],
+            ),
+        )
+        actions = _SlowClick()
+        logs: list[str] = []
+        reactor = KakeraReactor(actions, config, state, log=logs.append)
+        with patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep):
+            clicks = await reactor.react(message_id=2, fields=_fields())
+        assert clicks == 1
+        assert actions.clicks == ["btn1"]
+        assert actions.finished is False
+        assert not any("click failed" in line for line in logs)
+        assert actions.gate is not None
+        actions.gate.set_result(None)
+
+    asyncio.run(_case())

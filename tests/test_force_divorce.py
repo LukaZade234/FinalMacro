@@ -583,6 +583,25 @@ def test_the_farm_banks_what_the_claim_actually_paid():
     assert session.kakera_banked == 641_734
 
 
+def test_a_free_claim_still_ends_the_hunt():
+    """'(Free) Lucy' is Lucy. The 11:02 run claimed her and kept hunting."""
+    from macro.force_divorce import HUNTING
+
+    session = ForceDivorceSession()
+    session.set_target("Lucy", 1_794_897, day=_today())
+    session.note_divorced()
+    assert session.phase == HUNTING
+    actions = _FarmActions()
+    engine, _ = _farm_engine(actions)
+    engine._force_divorce = session
+
+    engine._note_claim_payout("(Free) Lucy", {"kakera": 5_017_908, "spheres": 158})
+
+    assert session.phase != HUNTING
+    assert session.cycles == 1
+    assert session.kakera_banked == 5_017_908
+
+
 def test_rt_is_spent_when_there_is_time_to_hunt_with_it():
     session = ForceDivorceSession()
     session.set_target("Lucy", 271_065, day=_today())

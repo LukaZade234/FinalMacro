@@ -101,6 +101,9 @@ The perk-6 once-a-day free wish is the green `:free:` button. Kakera
 buttons on the same message must not hide it — that used to look like
 "no claim button", so the macro reacted instead of clicking. `free_claim`
 on the parse means the click does not spend the ordinary claim slot.
+The marriage line is `lukazade234 and (Free) Lucy are now married`; the
+`(Free)` is a marker, not part of the name, and is stripped before the
+farm decides the target was claimed.
 
 `mudae.buttons.claim_method_from_buttons` owns that table; `parse_roll` adds the
 two roll-level vetoes (already claimed, or a profile embed rather than a roll)
@@ -1974,7 +1977,11 @@ backoff (15s, then 45s) and stop only after three failures. The scheduled
 **A kakera click with no reply is re-read before it is clicked again.** If
 the button is now disabled or gone, the click landed and is counted. A second
 click happens only while the button is still enabled. If the message cannot
-be read, the existing retry stands. `$ohu` is sent up to three times before
+be read, the existing retry stands. discord.py also waits up to 12 seconds
+for an `interaction_finish` event after the click has already been sent, and
+raises when that event never comes. The reward message is often already in
+the channel by then, so the macro takes that reward and does not report the
+click as failed, and it does not press the button again. `$ohu` is sent up to three times before
 play-all gives up. A refused `$oh` / `$oc` / `$oq` click refreshes the grid
 and continues, and stops only after three refusals — the same recovery `$ot`
 already used. A claim that falls back to a reaction logs the buttons that
