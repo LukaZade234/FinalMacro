@@ -28,6 +28,19 @@ the usual `$` prefix; servers can change it with `$prefix`.
 
 
 
+## Spacing commands
+
+**General rule for every feature:** leave a short delay between two
+*different* commands. Mudae struggles to process two commands that arrive too
+close together, and the second one is liable to be dropped or answered wrongly.
+A very slight pause is enough. **1 second** is the default for a new feature
+(e.g. `$ku` → 1 s → `$kl`). This is on top of any cooldown Mudae
+enforces for repeating the *same* command, such as `$kl`'s 5 s / 20 s.
+
+---
+
+
+
 ## Rolls
 
 A roll command (`$wa`, `$ha`, `$wg`, `$hg`, `$ma`, …) asks Mudae to spawn a
@@ -979,6 +992,55 @@ net rolls landing on a wishlist character), 15 for starwishes (12.3 keys/hour,
 looks plausible but drifts from an independent implementation of the same
 published method fails loudly. The residual is a consistent ~0.8 of pool weight
 out of ~2,900 — far below the precision of the base-pool guess feeding both.
+
+---
+
+
+
+## `$kl` — kakera loots
+
+`$kl N` spends `N` loots of kakera for random rewards; the rarer rewards come
+with bigger spends. One loot costs **500** kakera unless the loot value has
+been changed, and `N` is capped at **12,000** — so `$kl 12000` spends 6,000,000.
+Mudae limits it to one use per **5 s** from `$kl 100` and one per **20 s** from
+`$kl 1000`. A bare `$kl` fails; the Kakeraloots profile (rewards so far,
+quantity/quality levels, total `$kl` usage) is `$lk`, which the macro does not
+read.
+
+The reply is one line per reward:
+
+```
+:rollstack: +9,628.8 rolls stacked (Stock: 3,469,817.8)
+:morekakera: +1,195,387 kakera
+:disablemore: $limroul limits pushed away by 66 $wa, 66 $ha, 44 $wg, 44 $hg
+:wishprotect: +5,742 LVL of wish protection!
+:bku: +32% bku reset on starwishes
+```
+
+Now and then Mudae asks first — `Do you want to spend 6,000,000:kakera:?
+(y/n/yes/no)` — and spends only once `y` is sent. A refused attempt (e.g. one
+sent inside the cooldown) gets a red ❌ reaction on the command.
+
+`$ku` ends with the account's balance: `Stock: 190,748,290:kakera:`.
+
+**Macro:** the **`$kl`** button in the Run page's Minigames group
+(`macro/kakera_loot.py`). The **Kakera loots** card on the preset's Expert page
+sets the loot value and the loots per command. It reads the balance with `$ku`,
+waits 1 s (see [Spacing commands](#spacing-commands)), then sends `$kl
+<batch>` until the next whole batch is unaffordable, keeping the balance locally
+as `balance − loot_value × batch + refund`. The refund is the `:morekakera:`
+line, about 20% of the spend on average; no other reward is tracked. A smaller
+last batch is never sent. Batches are spaced by Mudae's cooldown plus a second.
+The confirm prompt is answered `y` only when its amount is the batch cost —
+anything else means the preset's loot value is wrong, so it answers `n` and
+stops. A ❌ or a missing result re-reads `$ku` (a missed result may still have
+spent) and retries once after the cooldown; a second failure in a row stops the
+run. Clicking the button again mid-run stops it after the batch in flight.
+
+A loot result is classified **before** `$bonus` and `$us`: `<:morekakera:`
+alone satisfied `is_bonus_response`, so a hand-typed `$kl` result used to parse
+as a `$bonus` sheet. A chaos claim's loot lines carry `($k)` and stay a kakera
+claim.
 
 ---
 

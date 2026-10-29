@@ -285,6 +285,40 @@ class ForceDivorceRules:
         return {"target_override": self.target_override}
 
 
+# Mudae's own ceiling on one ``$kl`` command.
+KL_MAX_BATCH = 12_000
+
+
+@dataclass
+class KakeraLootRules:
+    """``$kl`` settings for the Run page's kakera-loot button.
+
+    ``loot_value`` is the kakera one loot costs (500 unless Mudae's loot value
+    has been changed); ``batch`` is how many loots each ``$kl`` command buys.
+    The run stops once the balance cannot pay for a whole batch.
+    """
+
+    loot_value: int = 500
+    batch: int = KL_MAX_BATCH
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> KakeraLootRules:
+        if not data:
+            return cls()
+        value = _coerce_int_or_none(data.get("loot_value"))
+        batch = _coerce_int_or_none(data.get("batch"))
+        return cls(
+            loot_value=max(1, value) if value is not None else 500,
+            batch=max(1, min(KL_MAX_BATCH, batch)) if batch is not None else KL_MAX_BATCH,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def batch_cost(self) -> int:
+        return self.loot_value * self.batch
+
+
 @dataclass
 class SphereReactionRules:
     """When to click sphere buttons (perk 9).
@@ -364,6 +398,7 @@ class MacroConfig:
     notification_mode: bool = False
     us_roll_kakera: UsRollKakeraRules = field(default_factory=UsRollKakeraRules)
     force_divorce: ForceDivorceRules = field(default_factory=ForceDivorceRules)
+    kakera_loot: KakeraLootRules = field(default_factory=KakeraLootRules)
     character_claim: CharacterClaimRules = field(default_factory=CharacterClaimRules)
     kakera_reaction: KakeraReactionRules = field(default_factory=KakeraReactionRules)
     sphere_reaction: SphereReactionRules = field(default_factory=SphereReactionRules)
@@ -509,6 +544,7 @@ class MacroConfig:
             notification_mode=bool(data.get("notification_mode", False)),
             us_roll_kakera=us_roll_kakera,
             force_divorce=ForceDivorceRules.from_dict(data.get("force_divorce")),
+            kakera_loot=KakeraLootRules.from_dict(data.get("kakera_loot")),
             character_claim=character_claim,
             kakera_reaction=kakera_reaction,
             sphere_reaction=sphere_reaction,
@@ -538,6 +574,7 @@ class MacroConfig:
             "notification_mode": self.notification_mode,
             "us_roll_kakera": self.us_roll_kakera.to_dict(),
             "force_divorce": self.force_divorce.to_dict(),
+            "kakera_loot": self.kakera_loot.to_dict(),
             "character_claim": self.character_claim.to_dict(),
             "kakera_reaction": self.kakera_reaction.to_dict(),
             "sphere_reaction": self.sphere_reaction.to_dict(),

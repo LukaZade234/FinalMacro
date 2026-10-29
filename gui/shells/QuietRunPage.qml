@@ -279,6 +279,7 @@ Item {
                 enabled: run.canPlayMinigame
                 onClicked: App.playAllMinigames()
             }
+            QuietAction { text: run.klLabel; enabled: run.canUseKl; onClicked: run.toggleKl() }
         }
 
         Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Theme.line }

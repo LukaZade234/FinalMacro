@@ -14,6 +14,7 @@ from mudae.parsers.classify import classify_message
 from mudae.parsers.embed import is_character_embed, parse_character_embed, parse_ownership_update
 from mudae.parsers.force_divorce import parse_force_divorce
 from mudae.parsers.harem import parse_harem
+from mudae.parsers.kakeraloot import parse_kakeraloot
 from mudae.parsers.claim_interval import parse_claim_interval
 from mudae.parsers.kakera import parse_kakera_claim
 from mudae.parsers.claim import parse_claim
@@ -52,6 +53,7 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "ohu8": parse_ohu8,
     "p": parse_p,
     "daily": parse_daily,
+    "kakeraloot": parse_kakeraloot,
 }
 _KNOWN_PARSERS = frozenset(
     {*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop", "wishlist", "harem"}
@@ -77,6 +79,8 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.WISHLIST: "$wl",
     MessageKind.P: "$p",
     MessageKind.DAILY: "$daily",
+    MessageKind.KAKERALOOT_PROMPT: "$kl confirm",
+    MessageKind.KAKERALOOT_RESULT: "$kl",
 }
 
 
@@ -239,6 +243,8 @@ def parse_mudae_message(
         return parse_harem(visible or snapshot.content)
     if kind in {MessageKind.FORCE_DIVORCE_PROMPT, MessageKind.FORCE_DIVORCE_RESULT}:
         return parse_force_divorce(snapshot.content)
+    if kind in {MessageKind.KAKERALOOT_PROMPT, MessageKind.KAKERALOOT_RESULT}:
+        return parse_kakeraloot(visible or snapshot.content)
     if kind == MessageKind.SETTINGS:
         result = parse_settings(snapshot.content)
         _store_settings_cache(snapshot, result)

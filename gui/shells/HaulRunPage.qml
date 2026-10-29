@@ -164,6 +164,11 @@ Item {
                     enabled: run.canPlayMinigame
                     onClicked: App.playAllMinigames()
                 }
+                HaulButton {
+                    text: run.klLabel
+                    enabled: run.canUseKl
+                    onClicked: run.toggleKl()
+                }
             }
         }
 

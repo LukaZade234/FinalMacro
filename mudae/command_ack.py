@@ -40,6 +40,32 @@ def is_mudae_command_ack_emoji(emoji: object) -> bool:
     return key.lower() in _MUDAE_ACK_NAMES
 
 
+# Mudae reacts with a red cross on a command it refused (e.g. a ``$kl`` sent
+# inside its cooldown).
+_MUDAE_DENY_UNICODE = frozenset({
+    "\u274c",  # cross mark
+    "\u2716",  # heavy multiplication x
+})
+_MUDAE_DENY_NAMES = frozenset({"x", "cross_mark", "muda_cross", "mudacross"})
+
+
+def is_mudae_command_deny_emoji(emoji: object) -> bool:
+    """True when ``emoji`` is Mudae's refusal mark."""
+    key = mudae_ack_emoji_key(emoji)
+    if not key:
+        return False
+    if key.rstrip("\ufe0f") in _MUDAE_DENY_UNICODE:
+        return True
+    return key.lower() in _MUDAE_DENY_NAMES
+
+
+def reaction_is_mudae_command_deny(reaction: object, user_id: int | None) -> bool:
+    """True when Mudae added a refusal reaction."""
+    if user_id not in MUDAE_BOT_IDS:
+        return False
+    return is_mudae_command_deny_emoji(getattr(reaction, "emoji", None))
+
+
 def reaction_is_mudae_command_ack(reaction: object, user_id: int | None) -> bool:
     """True when Mudae added an acknowledgement reaction."""
     if user_id not in MUDAE_BOT_IDS:
@@ -72,6 +98,17 @@ async def message_has_mudae_command_ack(message: object) -> bool:
     reactions = getattr(message, "reactions", None) or []
     for reaction in reactions:
         if not is_mudae_command_ack_emoji(getattr(reaction, "emoji", None)):
+            continue
+        if await _reaction_has_mudae_user(reaction):
+            return True
+    return False
+
+
+async def message_has_mudae_command_deny(message: object) -> bool:
+    """True when a message already has Mudae's refusal reaction."""
+    reactions = getattr(message, "reactions", None) or []
+    for reaction in reactions:
+        if not is_mudae_command_deny_emoji(getattr(reaction, "emoji", None)):
             continue
         if await _reaction_has_mudae_user(reaction):
             return True

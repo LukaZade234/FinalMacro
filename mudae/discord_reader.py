@@ -11,7 +11,12 @@ from typing import Any
 import discord
 from discord import Client as DiscordClient
 
-from mudae.command_ack import message_has_mudae_command_ack, reaction_is_mudae_command_ack
+from mudae.command_ack import (
+    message_has_mudae_command_ack,
+    message_has_mudae_command_deny,
+    reaction_is_mudae_command_ack,
+    reaction_is_mudae_command_deny,
+)
 from mudae.discord_errors import (
     interaction_ack_missing,
     is_fatal_runtime_error,
@@ -85,6 +90,7 @@ class ChannelMonitor:
         self.macro_active = False
         self._connect_task: asyncio.Task[None] | None = None
         self._tick_waiters: dict[int, asyncio.Future[bool]] = {}
+        self._cross_waiters: dict[int, asyncio.Future[bool]] = {}
 
     async def start_background(self) -> bool:
         """Connect in a background task; return True when the gateway is ready."""
@@ -240,10 +246,11 @@ class ChannelMonitor:
         whatever the user last typed by hand.
         """
         self._messages.clear()
-        for future in self._tick_waiters.values():
-            if not future.done():
-                future.set_result(False)
-        self._tick_waiters.clear()
+        for waiters in (self._tick_waiters, self._cross_waiters):
+            for future in waiters.values():
+                if not future.done():
+                    future.set_result(False)
+            waiters.clear()
         self._pending_macro_command = None
         self._commands = CommandContextTracker()
         self._claims = ClaimContextTracker()
@@ -308,6 +315,33 @@ class ChannelMonitor:
             return await message_has_mudae_command_ack(message)
         finally:
             self._tick_waiters.pop(message_id, None)
+
+    async def wait_for_mudae_cross(
+        self,
+        message_id: int,
+        *,
+        timeout: float = 5.0,
+    ) -> bool:
+        """Wait until Mudae reacts with a red cross on ``message_id``, or time out."""
+        cached = self._messages.get(message_id)
+        if cached is not None and await message_has_mudae_command_deny(cached):
+            return True
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[bool] = loop.create_future()
+        self._cross_waiters[message_id] = future
+        try:
+            return bool(await asyncio.wait_for(future, timeout=max(0.0, timeout)))
+        except asyncio.TimeoutError:
+            try:
+                channel = await self._get_text_channel()
+                message = await channel.fetch_message(message_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False
+            self._remember_message(message)
+            return await message_has_mudae_command_deny(message)
+        finally:
+            self._cross_waiters.pop(message_id, None)
 
     async def _message_for_click(
         self, message_id: int, *, refresh: bool
@@ -573,9 +607,17 @@ class ChannelMonitor:
         message = reaction.message
         if message.channel.id != self.channel_id:
             return
+        user_id = getattr(user, "id", None)
+        if message.id in self._cross_waiters and reaction_is_mudae_command_deny(
+            reaction, user_id
+        ):
+            future = self._cross_waiters.pop(message.id)
+            if not future.done():
+                future.set_result(True)
+            return
         if message.id not in self._tick_waiters:
             return
-        if not reaction_is_mudae_command_ack(reaction, getattr(user, "id", None)):
+        if not reaction_is_mudae_command_ack(reaction, user_id):
             return
         self._resolve_tick_waiter(message.id, acknowledged=True)
 

@@ -240,6 +240,21 @@ class DiscordActions:
             return bool(await result)
         return bool(result)
 
+    async def wait_for_mudae_cross(
+        self,
+        message_id: int,
+        *,
+        timeout: float = 5.0,
+    ) -> bool:
+        """Mudae's red cross on a command it refused (``False`` on timeout)."""
+        wait = getattr(self._monitor, "wait_for_mudae_cross", None)
+        if wait is None:
+            return False
+        result = wait(message_id, timeout=timeout)
+        if asyncio.iscoroutine(result):
+            return bool(await result)
+        return bool(result)
+
     async def click_button(self, message_id: int, custom_id: str) -> bool:
         return await self._monitor.click_button(message_id, custom_id)
 

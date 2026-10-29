@@ -25,6 +25,7 @@ from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
 from mudae.parsers.wishlist import is_wishlist_message
+from mudae.parsers.kakeraloot import is_kakeraloot_prompt, is_kakeraloot_result
 from mudae.parsers.force_divorce import (
     is_force_divorce_prompt,
     is_force_divorce_result,
@@ -77,6 +78,12 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
         if is_ownership_footer(footer) and not is_character_embed(embed):
             return MessageKind.OWNERSHIP_UPDATE
 
+    # Before ``$bonus``: a loot result prints ``<:morekakera:``, which is all
+    # ``is_bonus_response`` asks for.
+    if is_kakeraloot_prompt(content):
+        return MessageKind.KAKERALOOT_PROMPT
+    if is_kakeraloot_result(content):
+        return MessageKind.KAKERALOOT_RESULT
     if is_bonus_response(content):
         return MessageKind.BONUS
     if is_settings_response(content):

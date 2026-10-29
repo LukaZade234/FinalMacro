@@ -67,6 +67,8 @@ COMMAND_ALIASES: dict[str, str] = {
     # account's whole collection, with the page arrows typed as claim buttons.
     "mm": "harem",
     "mmk": "harem",
+    # ``$kl 12000`` arrives as "kl 12000"; the leading word resolves it.
+    "kl": "kakeraloot",
     **ROLL_COMMAND_ALIASES,
 }
 
@@ -107,6 +109,12 @@ def is_bonus_response(content: str) -> bool:
         or "additional bonus for kakera buttons" in lower
         or "<:morekakera:" in lower
     )
+
+
+def is_kakeraloot_response(content: str) -> bool:
+    from mudae.parsers.kakeraloot import is_kakeraloot_message
+
+    return is_kakeraloot_message(content)
 
 
 def is_ov_response(content: str) -> bool:
@@ -187,6 +195,9 @@ def is_roll_response(snapshot: MudaeMessageSnapshot) -> bool:
 
 
 RESPONSE_DETECTORS: list[tuple[str, ResponseDetector]] = [
+    # Ahead of ``bonus`` and ``us``: a loot result prints ``<:morekakera:`` and
+    # "rolls stacked", which each of those matches on its own.
+    ("kakeraloot", is_kakeraloot_response),
     ("bonus", is_bonus_response),
     ("settings", is_settings_response),
     ("ov", is_ov_response),

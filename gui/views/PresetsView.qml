@@ -753,6 +753,61 @@ Item {
                             }
                         }
                     }
+
+                    PanelCard {
+                        id: klCard
+                        Layout.fillWidth: true
+                        title: "Kakera loots ($kl)"
+                        titleSize: 13
+
+                        readonly property var kl: rules.kakera_loot || ({ loot_value: 500, batch: 12000 })
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Started from the Run page. Reads the balance with $ku, then sends "
+                                + "$kl in batches of this size until the next batch is unaffordable. "
+                                + "Batch cost: " + (klCard.kl.loot_value * klCard.kl.batch).toLocaleString(Qt.locale(), "f", 0)
+                                + " kakera."
+                            color: Theme.fgSecondary
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 10
+                            rowSpacing: 8
+
+                            Label {
+                                text: "Loot value (kakera)"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.preferredWidth: 180
+                            }
+                            ThemedTextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                placeholderText: "500"
+                                text: getField("kakera_loot", "loot_value")
+                                onEditingFinished: patch("kakera_loot", "loot_value", parseIntOrNull(text))
+                            }
+
+                            Label {
+                                text: "Loots per $kl (1–12,000)"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.preferredWidth: 180
+                            }
+                            ThemedTextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                placeholderText: "12000"
+                                text: getField("kakera_loot", "batch")
+                                onEditingFinished: patch("kakera_loot", "batch", parseIntOrNull(text))
+                            }
+                        }
+                    }
                 }
             }
         }

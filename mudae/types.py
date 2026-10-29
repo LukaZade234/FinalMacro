@@ -37,6 +37,8 @@ class MessageKind(str, Enum):
     HAREM = "harem"
     FORCE_DIVORCE_PROMPT = "force_divorce_prompt"
     FORCE_DIVORCE_RESULT = "force_divorce_result"
+    KAKERALOOT_PROMPT = "kakeraloot_prompt"
+    KAKERALOOT_RESULT = "kakeraloot_result"
     P = "p"
     DAILY = "daily"
     CHANNEL = "channel"

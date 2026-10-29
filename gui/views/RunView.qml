@@ -331,6 +331,8 @@ Item {
                             onPlayOqClicked: App.playOqSphere()
                             onPlayOtClicked: App.playOtSphere()
                             onPlayAllMinigamesClicked: App.playAllMinigames()
+                            onKakeraLootClicked: App.runKakeraLoot()
+                            onStopKakeraLootClicked: App.stopKakeraLoot()
                             onPlayUsClicked: App.startUsMode()
                             onForceDivorceClicked: App.startForceDivorce()
                         }

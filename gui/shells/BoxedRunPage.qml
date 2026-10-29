@@ -187,6 +187,11 @@ Item {
                     enabled: run.canPlayMinigame
                     onClicked: App.playAllMinigames()
                 }
+                BoxedButton {
+                    text: run.klLabel
+                    enabled: run.canUseKl
+                    onClicked: run.toggleKl()
+                }
             }
         }
 

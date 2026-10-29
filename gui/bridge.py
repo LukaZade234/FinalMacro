@@ -60,6 +60,7 @@ from macro.oc_game import OcSphereGame
 from macro.oq_game import OqSphereGame
 from macro.ot_game import OtSphereGame
 from macro.minigames import PlayAllMinigames
+from macro.kakera_loot import KakeraLootRunner
 from macro.state import AccountState, MacroPhase
 from mudae.discord_reader import ChannelMonitor
 from mudae.parsers.bonus_catalog import fields_to_bonus_display_dict
@@ -271,6 +272,7 @@ class AppBridge(QObject):
         self._oq_running = False
         self._ot_running = False
         self._minigames_running = False
+        self._kl_runner: KakeraLootRunner | None = None
         self._minigame_availability: dict[str, int] = {}
         self._settings_apply_running = False
         self._settings_apply_log: list[str] = []
@@ -1329,6 +1331,10 @@ class AppBridge(QObject):
             self._tu_pending_active = False
 
     def _on_run_action_timeout(self) -> None:
+        # A $kl run lasts as many 20 s cooldowns as the balance allows; its
+        # own ``finally`` clears the pending action.
+        if self._run_action_pending == "kl" and self._kl_runner is not None:
+            return
         if self._run_action_pending:
             self._set_run_action_pending("")
 
@@ -1359,6 +1365,8 @@ class AppBridge(QObject):
         elif pending == "ot" and not self._ot_running:
             self._set_run_action_pending("")
         elif pending == "minigames" and not self._minigames_running:
+            self._set_run_action_pending("")
+        elif pending == "kl" and self._kl_runner is None:
             self._set_run_action_pending("")
 
     def _notify_macro(self) -> None:
@@ -1760,6 +1768,7 @@ class AppBridge(QObject):
                 "sphere_reaction": data["sphere_reaction"],
                 "us_roll_kakera": data["us_roll_kakera"],
                 "force_divorce": data["force_divorce"],
+                "kakera_loot": data["kakera_loot"],
                 "us_mode": {
                     "us_batch_size": data["us_batch_size"],
                     "us_reset_margin_minutes": data["us_reset_margin_minutes"],
@@ -1937,6 +1946,7 @@ class AppBridge(QObject):
             "sphere_reaction",
             "us_roll_kakera",
             "force_divorce",
+            "kakera_loot",
         ):
             block_patch = patch.get(block)
             if isinstance(block_patch, dict):
@@ -3504,6 +3514,7 @@ class AppBridge(QObject):
             or self._oq_running
             or self._ot_running
             or self._minigames_running
+            or self._kl_runner is not None
         )
 
     def _manual_minigame_blocked_status(self, *, game: str | None) -> str | None:
@@ -4289,6 +4300,63 @@ class AppBridge(QObject):
                 )
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def runKakeraLoot(self) -> None:
+        """Spend kakera on ``$kl`` batches until the next one is unaffordable."""
+        if not self._loop or not self._actions or not self._monitor:
+            self._set_status("Connect first")
+            return
+        if self._minigames_busy():
+            self._set_status("Wait for the running minigame or $kl to finish")
+            return
+        if self._engine and self._engine.is_running:
+            self._set_status("Stop the macro before using $kl")
+            return
+
+        activity, recorder = self._begin_minigame_session("kl")
+        runner = KakeraLootRunner(
+            self._actions,
+            self._monitor,
+            rules=self._macro_config.kakera_loot,
+            log=activity.write,
+        )
+        self._kl_runner = runner
+        self._set_run_action_pending("kl")
+
+        async def _run() -> None:
+            reason = "finished"
+            try:
+                if not self._monitor.is_connected:
+                    reason = "error"
+                    activity.write("Connect first")
+                    return
+                result = await runner.run(prefix=self._macro_config.prefix)
+                if result.get("reason") in {"ku failed", "failed", "wrong cost"}:
+                    reason = "error"
+                elif result.get("reason") == "stopped":
+                    reason = "stopped"
+            except Exception as exc:  # noqa: BLE001 - surface to the activity log
+                reason = "error"
+                activity.write(f"$kl error: {exc}")
+            finally:
+                self._finish_minigame_session(activity, recorder, reason)
+                self._kl_runner = None
+                QMetaObject.invokeMethod(
+                    self,
+                    "_clear_run_action_pending",
+                    Qt.ConnectionType.QueuedConnection,
+                )
+
+        asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    @Slot()
+    def stopKakeraLoot(self) -> None:
+        runner = self._kl_runner
+        if runner is None or not self._loop:
+            return
+        self._loop.call_soon_threadsafe(runner.request_stop)
+        self._set_status("$kl stops after the batch in flight")
 
     def _notify_mudae_settings_presets(self) -> None:
         self.mudaeSettingsPresetsChanged.emit()

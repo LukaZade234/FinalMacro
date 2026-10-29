@@ -16,8 +16,9 @@ ColumnLayout {
     readonly property bool showConnection: !bar.actionsOnly
     readonly property bool showActions: !bar.connectionOnly
 
-    readonly property bool minigameBusy:
-        App.runActionPending === "oh"
+    readonly property bool klBusy: App.runActionPending === "kl"
+    readonly property bool minigameBusy: bar.klBusy
+        || App.runActionPending === "oh"
         || App.runActionPending === "oc"
         || App.runActionPending === "oq"
         || App.runActionPending === "ot"
@@ -38,6 +39,8 @@ ColumnLayout {
     signal playOqClicked()
     signal playOtClicked()
     signal playAllMinigamesClicked()
+    signal kakeraLootClicked()
+    signal stopKakeraLootClicked()
     signal playUsClicked()
     signal forceDivorceClicked()
 
@@ -253,10 +256,22 @@ ColumnLayout {
         onClicked: bar.playAllMinigamesClicked()
     }
 
+    ActionButton {
+        visible: bar.showActions
+        text: bar.klBusy ? "Stop $kl" : "Kakera loots ($kl)"
+        enabled: bar.connected && !bar.macroEngineRunning && !bar.checkBusy
+                 && (bar.klBusy || !bar.minigameBusy)
+        Layout.fillWidth: true
+        buttonHeight: 32
+        fillColor: Theme.bgLight
+        textColor: Theme.fgPrimary
+        onClicked: bar.klBusy ? bar.stopKakeraLootClicked() : bar.kakeraLootClicked()
+    }
+
     Label {
         visible: bar.showActions
         Layout.fillWidth: true
-        text: "Single play buttons run one minigame each. Play all uses every minigame you have available, including $ot."
+        text: "Single play buttons run one minigame each. Play all uses every minigame you have available, including $ot. $kl spends kakera on loots in the preset's batch size until the next batch is unaffordable."
         color: Theme.fgMuted
         font.pixelSize: 10
         wrapMode: Text.WordWrap

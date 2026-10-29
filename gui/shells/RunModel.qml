@@ -43,8 +43,9 @@ Item {
         || phase === "Post-roll"
         || phase === "Stopping"
 
-    readonly property bool minigameBusy:
-        App.runActionPending === "oh"
+    readonly property bool klBusy: App.runActionPending === "kl"
+    readonly property bool minigameBusy: klBusy
+        || App.runActionPending === "oh"
         || App.runActionPending === "oc"
         || App.runActionPending === "oq"
         || App.runActionPending === "minigames"
@@ -61,6 +62,13 @@ Item {
         && !checkBusy && !minigameBusy
     readonly property bool canPlayMinigame: connected && !engineRunning
         && !minigameBusy && !checkBusy
+    // The $kl button doubles as its own stop while a run is going.
+    readonly property bool canUseKl: klBusy || canPlayMinigame
+    readonly property string klLabel: klBusy ? "Stop $kl" : "$kl"
+    function toggleKl() {
+        if (klBusy) App.stopKakeraLoot()
+        else App.runKakeraLoot()
+    }
 
     readonly property string connectLabel: {
         if (connecting) return "Connecting…"

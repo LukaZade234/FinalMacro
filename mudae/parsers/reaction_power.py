@@ -13,8 +13,16 @@ _KAKERA_REACT_DENIED_RE = re.compile(
     re.IGNORECASE,
 )
 _POWER_PERCENT_RE = re.compile(r"power:\s*\*\*(\d+)%\*\*", re.IGNORECASE)
+# Mudae now says "Each kakera button consumes"; "reaction" is the older wording.
 _POWER_CONSUMPTION_RE = re.compile(
-    r"(?:each kakera reaction consumes|cada reação de kakera consume)\s*(\d+)%",
+    r"(?:each kakera (?:reaction|button) consumes|cada reação de kakera consume)"
+    r"\s*\*{0,2}(\d+)%",
+    re.IGNORECASE,
+)
+# ``$ku``'s last line, "Stock: **190,748,290**<:kakera:…>". The emoji is what
+# tells it apart from ``$ohu``'s sphere stock and ``$us``'s roll stock.
+_KAKERA_STOCK_RE = re.compile(
+    r"stock:\s*\*{0,2}([\d,]+)\*{0,2}\s*(?:<:kakera:|:kakera:)",
     re.IGNORECASE,
 )
 _DENIED_USER_RE = re.compile(r"\*\*([^*]+)\*\*")
@@ -56,11 +64,24 @@ def is_ku_response(content: str) -> bool:
     return "power:" in lower or "can't react to kakera" in lower
 
 
+def parse_kakera_stock(content: str) -> int | None:
+    """The account's kakera balance from a ``$ku`` reply."""
+    match = _KAKERA_STOCK_RE.search(content or "")
+    if not match:
+        return None
+    return int(match.group(1).replace(",", ""))
+
+
 def parse_ku(content: str) -> ParseResult:
     fields = parse_reaction_power_fields(content)
+    stock = parse_kakera_stock(content)
+    if stock is not None:
+        fields["kakera_stock"] = stock
     summary_parts = ["$ku"]
     if (power := fields.get("power_percent")) is not None:
         summary_parts.append(f"power {power}%")
+    if stock is not None:
+        summary_parts.append(f"stock {stock:,}")
     if fields.get("kakera_react_available") is True:
         summary_parts.append("can react")
     elif fields.get("kakera_cooldown_minutes") is not None:
