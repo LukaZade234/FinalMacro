@@ -131,6 +131,10 @@ _HAREM_TIMEOUT_SEC = 12.0
 # past this is a stuck game, not a slow one — and the rolls reset only every
 # hour, so waiting a little costs nothing.
 MINIGAME_OVERLAP_MAX_SEC = 180.0
+# Notification mode keeps the gateway up when the rolls reset is this close:
+# a disconnect only to reconnect seconds later for the roll session saves
+# nothing and costs a fresh login.
+NOTIFICATION_STAY_CONNECTED_SEC = 120.0
 MINIGAME_OVERLAP_POLL_SEC = 1.0
 
 
@@ -314,6 +318,12 @@ class RollCycleEngine:
         if result.applied:
             self._sync_claim_window_from_tu()
         return result
+
+    def _rolls_reset_is_near(self) -> bool:
+        """The hourly rolls reset is too close to be worth disconnecting for."""
+        if self._state.rolls_reset_minutes is None:
+            return False
+        return self._seconds_until_rolls_reset() <= NOTIFICATION_STAY_CONNECTED_SEC
 
     async def _release_connection_for_notifications(self) -> bool:
         return await self._recovery.release_for_notifications()
@@ -1119,7 +1129,7 @@ class RollCycleEngine:
             cb = self._notification_connection_held
             if cb is not None:
                 held = bool(cb())
-            if self._waiting_for_hourly_refill and not held:
+            if self._waiting_for_hourly_refill and not held and not self._rolls_reset_is_near():
                 await self._release_connection_for_notifications()
 
     async def _maybe_refresh_perk8_status(self) -> None:
@@ -3139,7 +3149,7 @@ class RollCycleEngine:
                 self._log("No rolls reset time from $tu — stopping")
                 return False
 
-            if not await self._release_connection_for_notifications():
+            if not self._rolls_reset_is_near() and not await self._release_connection_for_notifications():
                 self._log("Notification mode: disconnect failed — stopping")
                 return False
 

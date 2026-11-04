@@ -30,12 +30,31 @@ Item {
     id: root
     clip: true
 
-    // Mudae's emoji marks. Qt's own font fallback finds no emoji glyphs under
-    // the bundled Plex faces, so each mark names Twemoji outright; where that
-    // is missing Qt falls back as before.
-    component Mark: Label {
-        font.family: "Twemoji"
-        font.pixelSize: Theme.sizeSmall
+    // Mudae's emoji marks, drawn from bundled images (gui/assets/emoji/,
+    // Twemoji artwork) rather than a font: a system emoji font cannot be
+    // relied on — one machine had Twemoji installed and another showed empty
+    // boxes. ``glyph`` is the emoji Mudae prints; anything else draws nothing.
+    component Mark: Image {
+        property string glyph: ""
+        property int size: Theme.sizeSmall + 3
+        readonly property var files: ({
+            "⭐": "starwish.png",
+            "🔐": "locked.png",
+            "✅": "owned.png",
+            "🚫": "server_disabled.png"
+        })
+        // An Image's implicit size is its source's; size it explicitly, both
+        // for anchoring and inside layouts.
+        width: size
+        height: size
+        Layout.preferredWidth: size
+        Layout.preferredHeight: size
+        sourceSize.width: 64
+        sourceSize.height: 64
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
+        source: files[glyph] ? Qt.resolvedUrl("../assets/emoji/" + files[glyph]) : ""
     }
 
     property string channelProfileId: ""
@@ -209,7 +228,7 @@ Item {
         Mark {
             visible: !flag.kakera
             anchors.centerIn: parent
-            text: flag.glyph
+            glyph: flag.glyph
         }
         Image {
             visible: flag.kakera
@@ -614,7 +633,7 @@ Item {
 
             Label {
                 Layout.fillWidth: true
-                text: "⚠  This server runs gamemode 2"
+                text: "This server runs gamemode 2"
                 color: Theme.warn
                 font.pixelSize: Theme.sizeXLarge
                 font.weight: Font.DemiBold
@@ -791,12 +810,6 @@ Item {
 
             RowLayout {
                 spacing: 10
-                Label {
-                    visible: !!root.commandPlan.split
-                    text: "⚠"
-                    color: Theme.warn
-                    font.pixelSize: Theme.sizeXLarge
-                }
                 Label {
                     Layout.fillWidth: true
                     text: root.commandPlan.split
@@ -1543,8 +1556,8 @@ Item {
                     }
                     Mark {
                         visible: root.kind === "wl"
-                        text: "⭐"
-                        font.pixelSize: Theme.sizeTiny
+                        glyph: "⭐"
+                        size: Theme.sizeTiny + 3
                     }
                     Label {
                         visible: root.kind === "wl"
@@ -1554,8 +1567,8 @@ Item {
                     }
                     Mark {
                         visible: root.kind === "wl"
-                        text: "🔐"
-                        font.pixelSize: Theme.sizeTiny
+                        glyph: "🔐"
+                        size: Theme.sizeTiny + 3
                     }
                     Label {
                         visible: root.kind === "wl"
@@ -1639,12 +1652,29 @@ Item {
 
                                 // Drag handle (edit mode). The row is moved on
                                 // release; while dragging, a line marks the drop.
-                                Label {
+                                // Three bars, drawn rather than typed: "≡" is not in
+                                // the bundled fonts and showed as a box elsewhere.
+                                Item {
+                                    id: grip
                                     visible: root.editing
-                                    text: "≡"
-                                    color: gripMouse.containsMouse || root.dragFrom === row.index ? Theme.accent : Theme.mute
-                                    font.pixelSize: Theme.sizeLarge
                                     Layout.preferredWidth: 14
+                                    Layout.preferredHeight: 12
+                                    readonly property color barColor: gripMouse.containsMouse || root.dragFrom === row.index
+                                        ? Theme.accent : Theme.mute
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 2
+                                        Repeater {
+                                            model: 3
+                                            delegate: Rectangle {
+                                                width: 10
+                                                height: 2
+                                                radius: 1
+                                                color: grip.barColor
+                                            }
+                                        }
+                                    }
 
                                     MouseArea {
                                         id: gripMouse
@@ -1683,7 +1713,7 @@ Item {
                                 Mark {
                                     visible: root.kind === "wl" && !root.editing
                                     Layout.preferredWidth: 16
-                                    text: row.isWish && row.modelData.starwish ? "⭐" : ""
+                                    glyph: row.isWish && row.modelData.starwish ? "⭐" : ""
                                 }
                                 FlagToggle {
                                     visible: root.kind === "wl" && root.editing
@@ -1772,7 +1802,7 @@ Item {
 
                                 Mark {
                                     visible: row.isWish && !!row.modelData.locked && !root.editing
-                                    text: "🔐"
+                                    glyph: "🔐"
                                     ToolTip.visible: lockHover.hovered
                                     ToolTip.text: "Locked wish — kept by $wp and $wpx"
                                     HoverHandler { id: lockHover }
@@ -1793,12 +1823,12 @@ Item {
 
                                 Mark {
                                     visible: row.isWish && !!row.modelData.owned
-                                    text: "✅"
+                                    glyph: "✅"
                                 }
 
                                 Mark {
                                     visible: row.isWish && !!row.modelData.server_disabled
-                                    text: "🚫"
+                                    glyph: "🚫"
                                     ToolTip.visible: sdHover.hovered
                                     ToolTip.text: "Disabled on this server ($serverdisable)"
                                     HoverHandler { id: sdHover }
