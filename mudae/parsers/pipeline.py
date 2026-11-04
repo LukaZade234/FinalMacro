@@ -23,6 +23,9 @@ from mudae.parsers.settings import parse_settings
 from mudae.parsers.shop import parse_shop, parse_shop_snapshot
 from mudae.parsers.sphere import is_sphere_click_message, parse_sphere_click
 from mudae.parsers.wishlist import parse_wishlist_result, parse_wishlist_text_result
+from mudae.parsers.disablelist import parse_disablelist
+from mudae.parsers.antidisablelist import parse_antidisablelist
+from mudae.parsers.list_prompts import is_list_prompt, parse_list_prompt
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.maintenance import is_maintenance_message, parse_maintenance
@@ -56,7 +59,16 @@ _COMMAND_PARSERS: dict[str, Callable[[str], ParseResult]] = {
     "kakeraloot": parse_kakeraloot,
 }
 _KNOWN_PARSERS = frozenset(
-    {*_COMMAND_PARSERS.keys(), "bonus", "roll", "shop", "wishlist", "harem"}
+    {
+        *_COMMAND_PARSERS.keys(),
+        "bonus",
+        "roll",
+        "shop",
+        "wishlist",
+        "harem",
+        "disablelist",
+        "antidisablelist",
+    }
 )
 
 # GUI kind column — human-readable names for non-command message types.
@@ -77,6 +89,9 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.LIMROUL: "$limroul",
     MessageKind.SHOP: "$shop",
     MessageKind.WISHLIST: "$wl",
+    MessageKind.DISABLELIST: "$dl",
+    MessageKind.ANTIDISABLELIST: "$adl",
+    MessageKind.LIST_PROMPT: "list confirm",
     MessageKind.P: "$p",
     MessageKind.DAILY: "$daily",
     MessageKind.KAKERALOOT_PROMPT: "$kl confirm",
@@ -119,6 +134,16 @@ def _run_command_parser(
         if snapshot is not None:
             return parse_wishlist_result(snapshot)
         return parse_wishlist_text_result(content)
+    if parser_id in {"disablelist", "antidisablelist"}:
+        # Embed-only replies, like the harem: the visible text is the page.
+        text = content
+        if snapshot is not None:
+            from mudae.parsers.classify import snapshot_text
+
+            text = snapshot_text(snapshot)
+        if parser_id == "disablelist":
+            return parse_disablelist(text)
+        return parse_antidisablelist(text)
     if parser_id == "harem":
         # The listing lives entirely in the embed, so the plain content is
         # empty and the visible text is the only thing worth parsing.
@@ -194,6 +219,14 @@ def parse_mudae_message(
     if is_minigame_exhausted_message(content):
         return parse_minigame_exhausted(content)
 
+    # A list clear / starwish-limit question answers the command just sent
+    # (`$eall`, `$sw …`), so pairing would hand it to that command's parser —
+    # `$sw` is not a list parser, and the question must be seen as one.
+    from mudae.message_text import snapshot_visible_text
+
+    if is_list_prompt(snapshot_visible_text(snapshot)):
+        return parse_list_prompt(snapshot_visible_text(snapshot))
+
     from mudae.parsers.classify import snapshot_is_kakera_claim, snapshot_text
 
     visible = snapshot_text(snapshot)
@@ -239,6 +272,12 @@ def parse_mudae_message(
         return parse_shop_snapshot(snapshot)
     if kind == MessageKind.WISHLIST:
         return parse_wishlist_result(snapshot)
+    if kind == MessageKind.LIST_PROMPT:
+        return parse_list_prompt(visible or snapshot.content)
+    if kind == MessageKind.DISABLELIST:
+        return parse_disablelist(visible or snapshot.content)
+    if kind == MessageKind.ANTIDISABLELIST:
+        return parse_antidisablelist(visible or snapshot.content)
     if kind == MessageKind.HAREM:
         return parse_harem(visible or snapshot.content)
     if kind in {MessageKind.FORCE_DIVORCE_PROMPT, MessageKind.FORCE_DIVORCE_RESULT}:

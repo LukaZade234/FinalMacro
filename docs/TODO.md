@@ -8,7 +8,7 @@ Follow **Unlock path** unless you specifically want a quick win or a single high
 
 ## Next up
 
-Per **By ease**, the cheapest open item is the **`$dl`/`$adl`/`$wl` one-click switch** (GUI + send, no optimizer — still greenfield: no alias, parser, or stored list contents, and the current lists are never read back from Mudae). Per **By importance**, the two things actually worth doing are wiring *behavioural* rules off the already-parsed `$settings`/`$bonus` fields, and **full daily autonomy** (one connect covers rolls, reacts, minigames, dailies, and skips minigames already exhausted). The **auto sphere/kakera investor** is now unblocked (stock tracking shipped) and is the next real feature in Wave 5. Phase D and achievements only matter if multi-account or a leaderboard is actually wanted.
+The **`$dl`/`$adl`/`$wl` lists** are half done: parsers, paged fetch, presets and the **Advisor › Lists** page shipped (2026-11-04); what is left is **sending** a preset back, which needs the `$dl`/`$adl` edit commands captured first (the wish commands are in `MUDAE_LOGIC.md`). Per **By importance**, the two things actually worth doing are wiring *behavioural* rules off the already-parsed `$settings`/`$bonus` fields, and **full daily autonomy** (one connect covers rolls, reacts, minigames, dailies, and skips minigames already exhausted). The **auto sphere/kakera investor** needs one hand-typed invest exchange captured first — stock tracking and the `$ku` balance (from `$kl`) are in, but the invest command's syntax and reply are still undocumented. Phase D and achievements only matter if multi-account or a leaderboard is actually wanted.
 
 ---
 
@@ -23,7 +23,8 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 5. ~~**Timezones**~~ — UTC for Mudae dailies / stats “today”; live feed stays local.
 6. ~~**`$p` / `$daily`**~~ — account-global, designated channel, priority over rolls.
 7. ~~**Chaos parser**~~ — `mudae/parsers/chaos.py`: extra rolls spent, free kakera/wish acted on, power discount applied, omega keys logged.
-8. **`$dl` / `$adl` / `$wl` one-click** — GUI + send; no optimizer. Note the scopes differ — `$dl`/`$adl` are server rule lists, `$wl` is the account wishlist.
+8. **`$dl` / `$adl` / `$wl` one-click** — ~~parse + paged fetch + presets + Advisor › Lists~~ shipped. Copy command (the rebuild commands, `macro/list_commands.py`) shipped. ~~Send~~ shipped too (clear + `confirm` + tick, adds with ticks, starwish-limit question, toggles from a fresh `$dld`, re-read and compare). **Open:** first live sends — check that `$sw` appends to the end and `i <n>` inserts at *n* (the compare will say if not), and that every add really is ticked.
+8b. ~~**`$kl` kakera loots**~~ — Run-page button, `$ku` balance then `$kl <batch>` until unaffordable (`macro/kakera_loot.py`).
 9. ~~**Perk 8 power save / `$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain/schedule on the preset. Run page is only the Roll `$us` button.
 10. ~~**Sphere tracking audit**~~ — perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted, no overlap between SP sources; Statistics “today” matches hand tally.
 11. ~~**`$oc` leftover-click lookahead**~~ — remaining-need-aware EV + widened hunt threshold. +1.25 SP/board on 100 real boards, not significant; blocked on sample size, not ideas.
@@ -49,7 +50,7 @@ Highest first. What makes an overnight run correct and complete.
 8. ~~**Overnight completeness**~~ — chaos parser + follow-up wired end to end.
 9. ~~**More SP from games we already play**~~ — `$oh` DP confirms the shipped heuristic, `$oc` lookahead measured (+1.25 SP/board, n.s.), `$oq` MIXED matches Colblitz. Nothing obvious left in this line.
 10. ~~**App-only wishlist**~~ and ~~**`$bw` advisory**~~ both shipped, including the base pool — no longer a guessed input, it now comes from `$limroul`.
-11. **`$dl` switch**, shell Run parity.
+11. **`$dl` switch** (Send step), shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
 
 ---
@@ -63,7 +64,7 @@ Do this order. Early waves make later ones cheaper; items in the same wave can r
 **Wave 5 — after one account is boringly reliable**
 
 - ~~App-only wishlist → `$bw` advisory~~ — both shipped. Never auto-send `$bw`; the page prints the command.
-- **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click. Wave-3 stock tracking (its prerequisite) is done, so this is now open to start.
+- **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click. Stock tracking and the `$ku` balance are in; **blocked on one captured invest exchange** (command syntax and reply).
 - **Phase D**.
 - **Daily report / session row / achievements** — daily report shipped (`Statistics › Report`); session row and achievements still open.
 - Split `bridge.py`, GUI polish. (Leftover regexes done.)
@@ -100,7 +101,10 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 ## Accounts and servers
 
 - **Multi account / server runtime (Phase D)** — config already has accounts, channels, presets, and `targets[]`. Runtime is still one Discord connection. Coordinator must resolve `(account, channel) → preset` per target (never “first preset on the account”). See Phase D in `ARCHITECTURE.md`.
-- **`$dl` / `$adl` / `$wl` one-click switch** — swap those lists from the GUI without typing the commands. Not the same as Colblitz's disablelist *optimizer* (needs a bundle database we do not have).
+- **`$dl` / `$adl` / `$wl` one-click switch** — ~~read side~~ shipped: `Advisor › Lists` fetches all three, shows toggles apart from disables and wish types per row, and saves named presets. **Open:** Send (clear, then bulk add; `$wl` per wish type in an order that keeps positions). Not the same as Colblitz's disablelist *optimizer* (needs a bundle database we do not have).
+  - First live `$dld` fetch: check pages 2–3 parse (only page 1 has ever been seen) and whether the `42/62` count includes toggles (`count_matches`).
+  - No kakera-wish row has been captured; the parser's `:kakera:` match is from a hand-made row.
+  - First live `$wlsz+z!z-`: check how the no-sphere rows print in the DM.
 
 ---
 

@@ -132,9 +132,9 @@ Item {
                     Layout.fillWidth: true
                     visible: !root.captured
                     text: root.listing.allow_dms
-                        ? "Mudae will DM the whole list in one go ($wlsz+z!)."
+                        ? "Mudae will DM the whole list in one go ($wlsz+z!z-)."
                         : "Mudae direct messages are off, so the macro will page through the "
-                          + "channel reply instead ($wlz+z!) — slower, and a slow page can "
+                          + "channel reply instead ($wlz+z!z-) — slower, and a slow page can "
                           + "cut a long list short. Settings can change that."
                     color: Theme.mute
                     font.pixelSize: Theme.sizeMicro

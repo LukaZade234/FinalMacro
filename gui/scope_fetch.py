@@ -47,6 +47,13 @@ SCOPE_FETCH_COMMANDS: dict[str, str] = {
     "bonus": "$bonus",
     "shop": "$shop",
     "wishlist": "$wl",
+    "disablelist": "$dld",
+    "antidisablelist": "$adl",
+    # All three lists in one go, 1 s apart (see `MUDAE_LOGIC.md`, Spacing commands).
+    "lists": "$dld · $adl · $wl",
+    # Advisor › Lists › Send: clear a list and add a preset back. Not a fetch,
+    # but it needs the same routes (send / hop / temporary) and busy gate.
+    "listsend": "list send",
 }
 
 # How long to wait for a sheet after sending its command. Sheets are one big

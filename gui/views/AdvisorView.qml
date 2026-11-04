@@ -96,6 +96,12 @@ Item {
             accountId: scope.accountId
         }
     }
-    Component { id: listsSection; MudaeListsView {} }
+    Component {
+        id: listsSection
+        MudaeListsView {
+            channelProfileId: scope.channelProfileId
+            accountId: scope.accountId
+        }
+    }
     Component { id: formatterSection; ListFormatterView {} }
 }

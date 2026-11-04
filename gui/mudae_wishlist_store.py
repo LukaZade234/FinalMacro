@@ -100,6 +100,12 @@ def _clean_entry(raw: Any) -> dict[str, Any] | None:
     return {
         "name": name,
         "starwish": bool(raw.get("starwish")),
+        # Wish type and state, from the row's emoji. Listings captured before
+        # these were read lack them and read as False until the next fetch.
+        "locked": bool(raw.get("locked")),
+        "kakera_wish": bool(raw.get("kakera_wish")),
+        "owned": bool(raw.get("owned")),
+        "server_disabled": bool(raw.get("server_disabled")),
         "sphere_percent": percent,
         "spheres": spheres,
         "upgrades_full": bool(raw.get("upgrades_full")),

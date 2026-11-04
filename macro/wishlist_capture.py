@@ -19,43 +19,38 @@ Neither command is ever sent on its own — this runs when the user asks for it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from macro.listing_capture import CaptureResult as _CaptureResult
+from macro.listing_capture import (
+    PAGE_BACK_EMOJI,
+    PAGE_FORWARD_EMOJI,
+    capture_paged_listing,
+    forward_button,
+)
 from mudae.parsers.wishlist import merge_wishlist_pages
 from mudae.types import MessageKind
 
 # The command with and without the DM (``s``) flag.
-DM_COMMAND = "wlsz+z!"
-CHANNEL_COMMAND = "wlz+z!"
+#
+# ``z+`` / ``z!`` are the sphere flags (spheres and upgrades on each row), and
+# on their own they *hide* every character with no spheres invested — so a
+# listing taken with only them was silently short by every uninvested wish,
+# which also put the wrong neighbours beside each row for the perk-1 wrap.
+# ``z-`` brings those rows back.
+DM_COMMAND = "wlsz+z!z-"
+CHANNEL_COMMAND = "wlz+z!z-"
 
-# How long to wait for the first reply, and for each part/page after it.
+# How long to wait for the first reply, and for each DM part after it.
 FIRST_REPLY_TIMEOUT = 15.0
 # DM parts arrive "with virtually no delay", so a gap this long means Mudae
 # has finished rather than that the next part is slow.
 DM_PART_TIMEOUT = 6.0
-PAGE_TIMEOUT = 12.0
-# A listing is 8 pages today; the cap only exists so a paginator that wraps
-# around instead of stopping cannot spin forever.
-MAX_PAGES = 40
+# Page timing and the page cap live in `macro/listing_capture.py`.
 
 
-@dataclass
-class CaptureResult:
-    """What one capture attempt produced."""
-
-    ok: bool = False
-    route: str = ""
-    data: dict[str, Any] = field(default_factory=dict)
-    reason: str = ""
-
-    @property
-    def complete(self) -> bool:
-        return bool(self.data.get("complete"))
-
-    @property
-    def entries(self) -> list[dict[str, Any]]:
-        return list(self.data.get("entries") or [])
+# Shared with the $dl / $adl captures; re-exported for existing callers.
+CaptureResult = _CaptureResult
 
 
 def _is_wishlist(parsed: Any) -> bool:
@@ -91,7 +86,7 @@ async def capture_via_dm(
     *,
     log: Callable[[str], None] | None = None,
 ) -> CaptureResult:
-    """Send ``$wlsz+z!`` and collect the DM parts Mudae mails back.
+    """Send ``$wlsz+z!z-`` and collect the DM parts Mudae mails back.
 
     Mudae sends the parts back to back with no page numbers, so the end is
     found two ways: the header says how many characters to expect, and a gap
@@ -142,111 +137,33 @@ async def capture_via_pages(
     *,
     log: Callable[[str], None] | None = None,
 ) -> CaptureResult:
-    """Send ``$wlz+z!`` and click forward through every page.
+    """Send ``$wlz+z!z-`` and click forward through every page.
 
-    Mudae edits the one message in place, so this is the same click → wait for
-    the edit → read it loop the minigames already run on their boards. Paging
-    stops once every page number has been seen rather than when the forward
-    button goes quiet, because a paginator that wraps around never runs out of
-    clicks.
+    The loop itself is `macro.listing_capture.capture_paged_listing`, shared
+    with ``$dl`` and ``$adl``.
     """
-    say = log or (lambda _text: None)
-    await actions.send_command(CHANNEL_COMMAND)
-
-    found = await actions.wait_for(
-        lambda _s, parsed: _is_wishlist(parsed),
-        timeout=FIRST_REPLY_TIMEOUT,
-    )
-    if found is None:
-        return CaptureResult(
-            ok=False, route="pages", reason="Mudae did not answer $wlz+z! in the channel."
-        )
-
-    snapshot, parsed = found
-    message_id = snapshot.message_id
-    parts = [dict(parsed.fields)]
-    total = parsed.fields.get("pages")
-    seen = {parsed.fields.get("page")} - {None}
-    say(f"Wishlist page {parsed.fields.get('page')}/{total}")
-
-    if not total or total <= 1:
-        merged = merge_wishlist_pages(parts)
-        return CaptureResult(ok=True, route="pages", data=merged)
-
-    forward = _forward_button(snapshot)
-    if forward is None:
-        merged = merge_wishlist_pages(parts)
-        return CaptureResult(
-            ok=False,
-            route="pages",
-            data=merged,
-            reason="No page-forward button on the listing, so only page 1 could be read.",
-        )
-
-    for _ in range(min(int(total), MAX_PAGES)):
-        if len(seen) >= int(total):
-            break
-        clicked = await actions.click_button(message_id, forward)
-        if not clicked:
-            break
-        found = await actions.wait_for(
-            lambda s, parsed: (
-                s.message_id == message_id
-                and _is_wishlist(parsed)
-                and _page_of(parsed) not in seen
-            ),
-            timeout=PAGE_TIMEOUT,
-        )
-        if found is None:
-            break
-        snapshot, parsed = found
-        parts.append(dict(parsed.fields))
-        page = parsed.fields.get("page")
-        if page is not None:
-            seen.add(page)
-        say(f"Wishlist page {page}/{total}")
-        # The buttons are re-rendered with the edit, so the custom id is read
-        # again rather than reused from the first page.
-        forward = _forward_button(snapshot) or forward
-
-    merged = merge_wishlist_pages(parts)
-    missing = sorted(set(range(1, int(total) + 1)) - seen)
-    return CaptureResult(
-        ok=True,
-        route="pages",
-        data=merged,
-        reason="" if not missing else f"Missing page(s) {missing} — the listing is partial.",
+    return await capture_paged_listing(
+        actions,
+        command=CHANNEL_COMMAND,
+        label="Wishlist",
+        is_page=_is_wishlist,
+        merge=merge_wishlist_pages,
+        log=log,
     )
 
 
-# Mudae's own paging arrows, by custom-emoji name.
-PAGE_BACK_EMOJI = "wleft"
-PAGE_FORWARD_EMOJI = "wright"
-
-
-def _forward_button(snapshot: Any) -> str | None:
-    """Custom id of the page-forward button.
-
-    Matched on the **emoji name** rather than the button ``kind``: Mudae's
-    paging custom ids have the same ``<id>p<id>p<id>`` shape as a claim
-    button, so ``classify_button_kind`` calls both arrows ``claim``. Position
-    is the fallback for a future listing whose arrows are named differently —
-    first is back, second forward, which is how they read on screen.
-    """
-    buttons = [
-        button
-        for button in (getattr(snapshot, "buttons", None) or [])
-        if not button.get("disabled")
-    ]
-    for button in buttons:
-        if str(button.get("emoji") or "").strip().lower() == PAGE_FORWARD_EMOJI:
-            return str(button.get("custom_id") or "") or None
-    # Fallback for a renamed arrow. Deliberately requires *exactly* two
-    # buttons rather than filtering by kind: a listing page carries the two
-    # arrows and nothing else, and filtering on kind would discard them both.
-    if len(buttons) == 2:
-        return str(buttons[1].get("custom_id") or "") or None
-    return None
+# Kept under their old names for callers and tests.
+_forward_button = forward_button
+__all__ = [
+    "CHANNEL_COMMAND",
+    "DM_COMMAND",
+    "CaptureResult",
+    "PAGE_BACK_EMOJI",
+    "PAGE_FORWARD_EMOJI",
+    "capture_via_dm",
+    "capture_via_pages",
+    "capture_wishlist",
+]
 
 
 async def capture_wishlist(

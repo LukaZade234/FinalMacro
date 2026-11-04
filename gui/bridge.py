@@ -43,6 +43,7 @@ from gui.settings import SETTINGS_PATH, load_settings, save_app_settings
 from gui.targets import ResolvedRunTarget, TargetStore
 from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
 from gui.mudae_wishlist_store import MudaeWishlist, MudaeWishlistStore
+from gui.mudae_lists_store import KINDS as MUDAE_LIST_KINDS, MudaeListsStore
 from gui.wishlist_store import Wishlist, scope_key
 from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, ActivitySeverity, activity_log_text
@@ -94,6 +95,8 @@ _UPDATE_STARTUP_DELAY_MS = 4000
 _SETTINGS_RELOAD_DEBOUNCE_MS = 400
 _STATS_RELOAD_DEBOUNCE_MS = 800
 _RUN_SUMMARY_THROTTLE_MS = 1000
+# Between two different Mudae commands in one fetch (MUDAE_LOGIC.md › Spacing commands).
+_LIST_COMMAND_GAP_SEC = 1.0
 
 _DEFAULT_UI_LAYOUT = "classic"
 _DEFAULT_UI_PALETTE = "tokyonight"
@@ -227,6 +230,8 @@ class AppBridge(QObject):
     settingsApplyChanged = Signal()
     wishlistChanged = Signal()
     mudaeWishlistChanged = Signal()
+    mudaeListsChanged = Signal()
+    listSendChanged = Signal()
     scopeFetchChanged = Signal()
     bwOptionsChanged = Signal()
 
@@ -243,6 +248,10 @@ class AppBridge(QObject):
         self._targets = TargetStore()
         self._wishlist = Wishlist()
         self._mudae_wishlists = MudaeWishlistStore()
+        self._mudae_lists = MudaeListsStore()
+        # Advisor › Lists › Send: the request in flight and what the page shows.
+        self._list_send_request: dict[str, Any] = {}
+        self._list_send_state: dict[str, Any] = {"running": False}
         self._bw_options = BwOptionsStore()
         # A scope fetch borrows the connection; while it holds it, sheets that
         # arrive belong to *its* account rather than the Run target's.
@@ -1037,6 +1046,7 @@ class AppBridge(QObject):
         self._targets.load_from_settings(saved)
         self._wishlist = Wishlist.from_dict(saved.get("wishlist"))
         self._mudae_wishlists.load_from_settings(saved)
+        self._mudae_lists.load_from_settings(saved)
         self._bw_options.load_from_settings(saved)
         if not initial:
             self.wishlistChanged.emit()
@@ -1112,6 +1122,7 @@ class AppBridge(QObject):
             self.minimizeToTrayChanged.emit()
             self.allowMudaeDmsChanged.emit()
             self.mudaeWishlistChanged.emit()
+            self.mudaeListsChanged.emit()
             self.updateStatusChanged.emit()
 
     def _record_settings_file_mtime(self) -> None:
@@ -1969,6 +1980,7 @@ class AppBridge(QObject):
             servers=self._profiles.to_settings_fragment(),
             wishlist=self._wishlist.to_settings_fragment(),
             mudae_wishlists=self._mudae_wishlists.to_settings_fragment(),
+            mudae_lists=self._mudae_lists.to_settings_fragment(),
             bw_options=self._bw_options.to_settings_fragment(),
             run_ui={
                 "minimize_to_tray": self._minimize_to_tray,
@@ -4754,6 +4766,8 @@ class AppBridge(QObject):
         holding the gateway.
         """
         if self._scope_fetch_command:
+            if self._scope_fetch_command == "listsend":
+                return "Sending a list to Mudae"
             return f"Already fetching ${self._scope_fetch_command}"
         if self._connecting:
             return "Connecting — try again in a moment"
@@ -4830,6 +4844,13 @@ class AppBridge(QObject):
         )
 
     def _end_scope_fetch(self) -> None:
+        # A send whose route failed before it began (could not connect, …)
+        # must not leave the Lists page showing "sending" forever.
+        if self._scope_fetch_command == "listsend" and self._list_send_state.get("running"):
+            self._set_list_send_state(
+                running=False, ok=False,
+                message="The send did not start — could not reach that server (see the status line)",
+            )
         self._scope_fetch_command = ""
         self._scope_fetch_thread = None
         QMetaObject.invokeMethod(
@@ -4842,6 +4863,7 @@ class AppBridge(QObject):
     def _deliver_scope_fetch_done(self) -> None:
         self.scopeFetchChanged.emit()
         self.mudaeWishlistChanged.emit()
+        self.mudaeListsChanged.emit()
 
     async def _scope_fetch_on_live_session(
         self,
@@ -4932,6 +4954,29 @@ class AppBridge(QObject):
                     actions, resolved.account_id, channel_profile_id
                 )
                 return
+            if command in ("disablelist", "antidisablelist"):
+                await self._capture_mudae_list_for(
+                    actions, command, resolved, channel_profile_id
+                )
+                return
+            if command == "listsend":
+                await self._send_mudae_list_for(actions, resolved, channel_profile_id)
+                return
+            if command == "lists":
+                # Three different commands back to back: 1 s between each
+                # reply and the next send, on top of Mudae's own cooldowns.
+                await self._capture_mudae_list_for(
+                    actions, "disablelist", resolved, channel_profile_id
+                )
+                await asyncio.sleep(_LIST_COMMAND_GAP_SEC)
+                await self._capture_mudae_list_for(
+                    actions, "antidisablelist", resolved, channel_profile_id
+                )
+                await asyncio.sleep(_LIST_COMMAND_GAP_SEC)
+                await self._capture_wishlist_for(
+                    actions, resolved.account_id, channel_profile_id
+                )
+                return
             await actions.send_command(command)
             answered = await actions.wait_for(
                 lambda _snapshot, parsed: profile_kind_from_parse(parsed) == command,
@@ -4981,6 +5026,457 @@ class AppBridge(QObject):
             note += f" (incomplete: {result.reason})"
         self._append_activity_log(note)
         self._on_status(note)
+
+    async def _capture_mudae_list_for(
+        self,
+        actions: DiscordActions,
+        command: str,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        """Capture every page of ``$dld`` or ``$adl`` and store it for the pair.
+
+        Channel only: neither is known to answer by DM. A listing that lost a
+        page is stored *as partial* — the page says so — rather than dropped,
+        since the pages it did read are still the user's real list.
+        """
+        from macro.listing_capture import capture_paged_listing, page_matcher
+        from mudae.parsers.antidisablelist import merge_antidisablelist_pages
+        from mudae.parsers.disablelist import merge_disablelist_pages
+        from mudae.types import MessageKind
+
+        if command == "disablelist":
+            kind, sent, label = "dl", "dld", "Disablelist"
+            matcher = page_matcher("disablelist", MessageKind.DISABLELIST)
+            merge = merge_disablelist_pages
+        else:
+            kind, sent, label = "adl", "adl", "Antidisablelist"
+            matcher = page_matcher("antidisablelist", MessageKind.ANTIDISABLELIST)
+            merge = merge_antidisablelist_pages
+
+        result = await capture_paged_listing(
+            actions,
+            command=sent,
+            label=label,
+            is_page=matcher,
+            merge=merge,
+            log=self._append_activity_log,
+        )
+        if not result.data:
+            self._on_status(result.reason or f"${sent} capture failed")
+            return
+        self._mudae_lists.set(
+            kind,
+            resolved.account_id,
+            channel_profile_id,
+            result.data,
+            route=result.route,
+            reason=result.reason,
+        )
+        self._request_persist()
+        note = f"${sent} captured — {len(result.data.get('entries') or [])} entries"
+        if not result.complete or result.reason:
+            note += f" (partial: {result.reason or 'not every page was read'})"
+        self._append_activity_log(note)
+        self._on_status(note)
+
+    # --- Mudae lists › Send ------------------------------------------------
+
+    def _set_list_send_state(self, **values: Any) -> None:
+        """Update what the Lists page shows about a send, from any thread."""
+        self._list_send_state = {**self._list_send_state, **values}
+        QMetaObject.invokeMethod(
+            self, "_deliver_list_send_changed", Qt.ConnectionType.QueuedConnection
+        )
+
+    @Slot()
+    def _deliver_list_send_changed(self) -> None:
+        self.listSendChanged.emit()
+
+    @Property(str, constant=False, notify=listSendChanged)
+    def listSendJson(self) -> str:
+        return json.dumps(self._list_send_state)
+
+    @Slot(str, str, str, str, bool)
+    def sendMudaeListPreset(
+        self,
+        kind: str,
+        preset_id: str,
+        account_id: str,
+        channel_profile_id: str,
+        nitro: bool,
+    ) -> None:
+        """Replace Mudae's list with a saved preset: clear, confirm, add back.
+
+        Runs on the scope's pair through the same routes as a fetch. See
+        `macro/list_send.py` for each step and what stops it.
+        """
+        if kind not in MUDAE_LIST_KINDS or self._mudae_lists.find_preset(kind, preset_id) is None:
+            self._set_status("Pick a saved preset to send")
+            return
+        self._list_send_request = {
+            "kind": kind,
+            "preset_id": preset_id,
+            "nitro": bool(nitro),
+        }
+        self._list_send_state = {
+            "running": True,
+            "kind": kind,
+            "preset_id": preset_id,
+            "progress": "starting",
+            "ok": None,
+            "message": "",
+        }
+        self.listSendChanged.emit()
+        self.fetchForScope("listsend", account_id, channel_profile_id)
+        if self._scope_fetch_command != "listsend":
+            # The route refused it (busy, no token, …); the status line says why.
+            self._list_send_state = {"running": False}
+            self.listSendChanged.emit()
+
+    async def _send_mudae_list_for(
+        self,
+        actions: DiscordActions,
+        resolved: ResolvedRunTarget,
+        channel_profile_id: str,
+    ) -> None:
+        from macro.list_commands import plan_list_commands
+        from macro.list_send import (
+            COMMAND_GAP_SEC,
+            ListSender,
+            compare_list,
+            starwish_trade_rule,
+        )
+
+        request = dict(self._list_send_request)
+        kind = str(request.get("kind") or "")
+        account_id = resolved.account_id
+        preset = self._mudae_lists.find_preset(kind, str(request.get("preset_id") or ""))
+        if preset is None:
+            self._set_list_send_state(running=False, ok=False, message="That preset no longer exists")
+            return
+        wanted = json.loads(json.dumps(preset.data))
+        label = {"dl": "$dl", "adl": "$adl", "wl": "$wl"}[kind]
+        try:
+            current_toggles = None
+            if kind == "dl":
+                # Toggles survive $eall, so what must flip depends on what is on
+                # *now* — read it rather than trust an old fetch.
+                self._set_list_send_state(progress="reading the current $dld")
+                await self._capture_mudae_list_for(actions, "disablelist", resolved, channel_profile_id)
+                snap = self._mudae_lists.get("dl", account_id, channel_profile_id)
+                if not snap.fetched_at:
+                    self._set_list_send_state(
+                        running=False, ok=False,
+                        message="Could not read the current $dld, so the toggles cannot be set safely",
+                    )
+                    return
+                current_toggles = snap.data.get("toggles") or []
+                await asyncio.sleep(COMMAND_GAP_SEC)
+
+            plan = plan_list_commands(kind, wanted, current_toggles=current_toggles)
+            # The preset's toggles flip on; ones on but not in the preset flip off.
+            toggles = [{"text": t["text"], "on": True} for t in plan.get("toggles") or [] if t.get("send")]
+            toggles += [{"text": t["text"], "on": False} for t in plan.get("toggles_off") or [] if t.get("send")]
+            sender = ListSender(
+                actions,
+                log=self._append_activity_log,
+                progress=lambda text: self._set_list_send_state(progress=text),
+                # Mudae's offer to trade wishlist slots for starwish slots is
+                # accepted only while the wishlist keeps room for the preset.
+                starwish_trade=(
+                    starwish_trade_rule(
+                        self._mudae_wishlists.get(account_id, channel_profile_id).wl_max,
+                        len(wanted.get("entries") or []),
+                    )
+                    if kind == "wl"
+                    else None
+                ),
+            )
+            self._append_activity_log(f"Sending {label} preset “{preset.name}” to {resolved.label}")
+            outcome = await sender.run(
+                plan,
+                nitro=bool(request.get("nitro")),
+                toggles=toggles,
+            )
+            if not outcome.ok:
+                self._append_activity_log(f"{label} send stopped: {outcome.reason}")
+                self._set_list_send_state(
+                    running=False, ok=False,
+                    message=f"Stopped after {len(outcome.sent)} command(s): {outcome.reason}",
+                )
+                return
+
+            # The real check: read the list back and compare it with the preset.
+            await asyncio.sleep(COMMAND_GAP_SEC)
+            self._set_list_send_state(progress="re-reading the list to check")
+            if kind == "wl":
+                await self._capture_wishlist_for(actions, account_id, channel_profile_id)
+                got = self._mudae_wishlists.get(account_id, channel_profile_id).to_dict()
+            else:
+                await self._capture_mudae_list_for(
+                    actions, "disablelist" if kind == "dl" else "antidisablelist",
+                    resolved, channel_profile_id,
+                )
+                got = self._mudae_lists.get(kind, account_id, channel_profile_id).data
+            problems = compare_list(kind, wanted, got)
+            note = f"{len(outcome.sent)} command(s) sent"
+            if outcome.unconfirmed:
+                note += f", {len(outcome.unconfirmed)} without a tick"
+            if outcome.trades:
+                note += f", {len(outcome.trades)} $starwish slot trade(s)"
+            if outcome.warnings:
+                problems = list(problems) + outcome.warnings
+            if problems:
+                message = f"Sent, but the list on Mudae differs: {'; '.join(problems)} ({note})"
+            else:
+                message = f"Done — Mudae's {label} now matches “{preset.name}” ({note})"
+            self._append_activity_log(message)
+            self._on_status(message)
+            self._set_list_send_state(running=False, ok=not problems, message=message)
+        except Exception as exc:  # noqa: BLE001 - a send must not kill the loop
+            self._set_list_send_state(running=False, ok=False, message=f"Send failed: {exc}")
+            raise
+
+    # --- Mudae lists (Advisor › Lists) ------------------------------------
+
+    def _mudae_list_source_label(self, account_id: str, channel_profile_id: str) -> str:
+        resolved = resolve_scope_target(
+            self._accounts,
+            self._profiles,
+            self._presets,
+            self._targets,
+            account_id,
+            channel_profile_id,
+        )
+        return resolved.label if resolved is not None else ""
+
+    def _current_mudae_list(
+        self, kind: str, account_id: str, channel_profile_id: str
+    ) -> tuple[dict[str, Any], str]:
+        """The latest capture of ``kind`` for the pair, and when it was taken."""
+        if kind == "wl":
+            listing = self._mudae_wishlists.get(account_id, channel_profile_id)
+            return listing.to_dict(), listing.fetched_at
+        snap = self._mudae_lists.get(kind, account_id, channel_profile_id)
+        return snap.data, snap.fetched_at
+
+    @Slot(str, str, result=str)
+    def mudaeListsFor(self, account_id: str, channel_profile_id: str) -> str:
+        """Everything Advisor › Lists draws for one pair.
+
+        ``current`` is that pair's latest capture of each list; ``presets`` are
+        the saved copies, global per list type.
+        """
+        current: dict[str, Any] = {}
+        for kind in ("dl", "adl"):
+            snap = self._mudae_lists.get(kind, account_id, channel_profile_id)
+            current[kind] = {
+                **snap.data,
+                "fetched_at": snap.fetched_at,
+                "reason": snap.reason,
+                "captured": bool(snap.fetched_at),
+            }
+        listing = self._mudae_wishlists.get(account_id, channel_profile_id)
+        current["wl"] = {
+            "owner": listing.owner,
+            "wl_used": listing.wl_used,
+            "wl_max": listing.wl_max,
+            "sw_used": listing.sw_used,
+            "sw_max": listing.sw_max,
+            "complete": listing.complete,
+            "route": listing.route,
+            "fetched_at": listing.fetched_at,
+            "captured": bool(listing.fetched_at),
+            "entries": [
+                {
+                    "name": entry["name"],
+                    "starwish": bool(entry.get("starwish")),
+                    "locked": bool(entry.get("locked")),
+                    "kakera_wish": bool(entry.get("kakera_wish")),
+                    "owned": bool(entry.get("owned")),
+                    "server_disabled": bool(entry.get("server_disabled")),
+                    "sphere_percent": entry.get("sphere_percent"),
+                }
+                for entry in listing.entries
+            ],
+        }
+        presets = {
+            kind: [preset.to_dict() for preset in self._mudae_lists.presets.get(kind, [])]
+            for kind in MUDAE_LIST_KINDS
+        }
+        return json.dumps(
+            {
+                "current": current,
+                "presets": presets,
+                "gamemode": self._server_gamemode(channel_profile_id),
+                "fetching": self._scope_fetch_command,
+                "allow_dms": self._allow_mudae_dms,
+                "scoped_ready": bool(scope_key(account_id, channel_profile_id)),
+            }
+        )
+
+    def _server_gamemode(self, channel_profile_id: str) -> int | None:
+        """The channel's `$settings` gamemode, or ``None`` when never read.
+
+        Gamemode 2 changes what `$disable` / `$antidisable` do (disabling a
+        series enables as many characters, within `$limroul`), so the Lists
+        page warns before sending `$dl` / `$adl` there. Unknown means no warning.
+        """
+        found = self._profiles.find_channel_by_profile_id(channel_profile_id)
+        if found is None:
+            return None
+        try:
+            value = (found[1].settings or {}).get("gamemode")
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @Slot(str, str, str, str, result=str)
+    def saveMudaeListPreset(
+        self, kind: str, name: str, account_id: str, channel_profile_id: str
+    ) -> str:
+        """Save the pair's latest capture of ``kind`` as a named preset.
+
+        Returns the new preset's id, or "" when there was nothing to save.
+        """
+        if kind not in MUDAE_LIST_KINDS:
+            return ""
+        data, fetched_at = self._current_mudae_list(kind, account_id, channel_profile_id)
+        if not fetched_at:
+            self._set_status("Fetch the list first — there is nothing to save yet")
+            return ""
+        preset = self._mudae_lists.save_preset(
+            kind,
+            name,
+            data,
+            account_id=account_id,
+            channel_profile_id=channel_profile_id,
+            source_label=self._mudae_list_source_label(account_id, channel_profile_id),
+        )
+        if preset is None:
+            return ""
+        self._persist()
+        self.mudaeListsChanged.emit()
+        return preset.id
+
+    @Slot(str, str, result=str)
+    def createMudaeListPreset(self, kind: str, name: str) -> str:
+        """A blank preset of ``kind``, to be filled by hand. Returns its id."""
+        if kind not in MUDAE_LIST_KINDS:
+            return ""
+        preset = self._mudae_lists.save_preset(kind, name, {})
+        if preset is None:
+            return ""
+        self._mudae_list_edited()
+        return preset.id
+
+    def _mudae_list_edited(self) -> None:
+        self._persist()
+        self.mudaeListsChanged.emit()
+
+    @Slot(str, str, str, result=str)
+    def applyMudaeListInput(self, kind: str, preset_id: str, text: str) -> str:
+        """The Add box: names, `$toggle…` and `$wish…`/`$sw…` commands.
+
+        Returns ``{added, updated, toggles, ignored}`` as JSON for the note
+        under the box. See `macro/list_input.py` for what is understood.
+        """
+        summary = self._mudae_lists.apply_input(kind, preset_id, text)
+        if summary["added"] or summary["updated"] or summary["toggles"]:
+            self._mudae_list_edited()
+        return json.dumps(summary)
+
+    @Slot(str, str, int)
+    def removeMudaeListEntry(self, kind: str, preset_id: str, index: int) -> None:
+        if self._mudae_lists.remove_entry(kind, preset_id, index):
+            self._mudae_list_edited()
+
+    @Slot(str, str, int, str, result=bool)
+    def renameMudaeListEntry(self, kind: str, preset_id: str, index: int, name: str) -> bool:
+        ok = self._mudae_lists.rename_entry(kind, preset_id, index, name)
+        if ok:
+            self._mudae_list_edited()
+        return ok
+
+    @Slot(str, str, int, int)
+    def moveMudaeListEntryTo(self, kind: str, preset_id: str, source: int, target: int) -> None:
+        """Drag and drop: row ``source`` ends up at index ``target``."""
+        if self._mudae_lists.move_entry_to(kind, preset_id, source, target):
+            self._mudae_list_edited()
+
+    @Slot(str, str, str, bool)
+    def setMudaeListToggle(self, kind: str, preset_id: str, command: str, on: bool) -> None:
+        if self._mudae_lists.set_toggle(kind, preset_id, command, on):
+            self._mudae_list_edited()
+
+    @Slot(str, str, str, str)
+    def setMudaeListCount(self, kind: str, preset_id: str, field_name: str, text: str) -> None:
+        """An optional hand-typed figure (`$adl` characters, `$dl` totals); blank clears it."""
+        if self._mudae_lists.set_count(kind, preset_id, field_name, text):
+            self._mudae_list_edited()
+
+    @Slot(str, str, int, str, bool)
+    def setMudaeListEntryFlag(
+        self, kind: str, preset_id: str, index: int, flag: str, value: bool
+    ) -> None:
+        if self._mudae_lists.set_entry_flag(kind, preset_id, index, flag, value):
+            self._mudae_list_edited()
+
+    @Slot(str, str, int)
+    def removeMudaeListToggle(self, kind: str, preset_id: str, index: int) -> None:
+        if self._mudae_lists.remove_toggle(kind, preset_id, index):
+            self._mudae_list_edited()
+
+    @Slot(str, str, str, str, result=str)
+    def mudaeListCommands(
+        self, kind: str, preset_id: str, account_id: str, channel_profile_id: str
+    ) -> str:
+        """The commands that rebuild a list, for the Copy command popup.
+
+        ``preset_id`` "live" means the pair's latest capture. For a saved
+        `$dl` preset the toggle commands are worked out against the pair's last
+        fetch — a toggle flips, so only the ones that must change are sent —
+        and listed with a warning when there is no fetch to compare with.
+        See `macro/list_commands.py`; the macro will send these same commands.
+        """
+        from macro.list_commands import plan_list_commands
+
+        if kind not in MUDAE_LIST_KINDS:
+            return json.dumps({"error": "Unknown list", "regular": [], "nitro": []})
+        current_toggles = None
+        if preset_id == "live":
+            data, _fetched = self._current_mudae_list(kind, account_id, channel_profile_id)
+            # The capture *is* this server's state: its toggles are on.
+            if kind == "dl":
+                current_toggles = data.get("toggles") or []
+        else:
+            preset = self._mudae_lists.find_preset(kind, preset_id)
+            if preset is None:
+                return json.dumps({"error": "That preset no longer exists", "regular": [], "nitro": []})
+            data = preset.data
+            if kind == "dl":
+                snap = self._mudae_lists.get("dl", account_id, channel_profile_id)
+                if snap.fetched_at:
+                    current_toggles = snap.data.get("toggles") or []
+        payload = plan_list_commands(kind, data, current_toggles=current_toggles)
+        if kind == "dl" and current_toggles is not None:
+            payload.setdefault("notes", []).append(
+                "Toggles are compared with the last $dld fetch of this server."
+            )
+        return json.dumps(payload)
+
+    @Slot(str, str, str)
+    def renameMudaeListPreset(self, kind: str, preset_id: str, name: str) -> None:
+        if self._mudae_lists.rename_preset(kind, preset_id, name):
+            self._persist()
+            self.mudaeListsChanged.emit()
+
+    @Slot(str, str)
+    def deleteMudaeListPreset(self, kind: str, preset_id: str) -> None:
+        if self._mudae_lists.delete_preset(kind, preset_id):
+            self._persist()
+            self.mudaeListsChanged.emit()
 
     def _start_temporary_scope_fetch(
         self,

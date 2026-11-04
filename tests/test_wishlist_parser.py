@@ -48,6 +48,10 @@ def test_starwish_row():
     assert row == {
         "name": "Rebecca",
         "starwish": True,
+        "locked": True,
+        "kakera_wish": False,
+        "owned": True,
+        "server_disabled": False,
         "sphere_percent": 188,
         "spheres": 30000,
         "upgrades_full": True,

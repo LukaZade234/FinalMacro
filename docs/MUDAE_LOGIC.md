@@ -670,7 +670,7 @@ on hourly rolls.
 
 ## Mudae direct messages
 
-A few Mudae commands answer by **DM** rather than in the channel — `$wlsz+z!`
+A few Mudae commands answer by **DM** rather than in the channel — `$wlsz+z!z-`
 is the one this was built for, since it sends the whole wishlist (with the
 sphere upgrades on each character) in one message instead of a paged embed.
 
@@ -705,8 +705,15 @@ trade the setting exists to let the user make.
 
 ### `$wl` — the wishlist listing
 
-`$wlsz+z!` (DM) and `$wlz+z!` (channel) return the same body: the account's
-wishlist, one line per character. The `s` flag is what redirects a reply to
+`$wlsz+z!z-` (DM) and `$wlz+z!z-` (channel) return the same body: the account's
+wishlist, one line per character.
+
+**The `z-` matters.** `z+` and `z!` are the *sphere* flags — they add the
+`· N sp - <roster>` tail to each row — and on their own they **hide every
+character with no spheres invested**. A capture taken with only `z+z!` was
+silently short by every uninvested wish, which also put the wrong neighbours
+beside each row for the perk-1 wrap below. `z-` brings those rows back; they
+print without the sphere tail, the way plain `$wl` prints every row. The `s` flag is what redirects a reply to
 DMs and works on most commands; it is only worth using where the reply is long
 enough to be paged, which is why `$settings` / `$bonus` never need it. Mudae
 reacts to the command with a **mailbox** when it sent the DM and an **✕** when
@@ -729,6 +736,25 @@ that reproduces it), the `N sp` figure is spheres invested, and the tail is the
 **ouroperk roster** — `Full`, or perk numbers with `(xN)` multiplicity. That
 roster is the capture `macro/sphere_upgrades.py` abstains on for perk 1, the
 Spheres → Characters page needs, and `Advisor › $bw` weighs each character with.
+
+**Each row also says what kind of wish it is**, from the emoji after the name,
+and the parser keeps all of it in Mudae's order:
+
+| Mark | Field | Meaning |
+|---|---|---|
+| `⭐` | `starwish` | a starwish |
+| `🔐` | `locked` | a locked wish (`$wishl`) — not removed by `$wp` / `$wpx` |
+| `:kakera:` in the lock's place | `kakera_wish` | a kakera wish (`$wishk`) — +220 instead of +200 with Silver IV, no ping, not a wish for wishprotect. **No sample captured yet**; the parser takes `<:kakera:id>` or `:kakera:` |
+| `✅` | `owned` | the account owns the character |
+| `🚫 ($serverdisable)` | `server_disabled` | the server has disabled it |
+
+Plain `$wl` (and `$wlu` unclaimed only, `$wlt` details) prints the same rows with
+no sphere tail — `**Han Sooyoung** ✅ ⭐ 🔐 +63%` — so a row is recognised by
+shape instead: a bold name followed by nothing but those marks. A headerless
+DM part made only of such rows counts as a listing only when it has three or
+more lines and *every* line is one, so a claim line with a bold name and a ✅
+never qualifies. `$wlu` used to parse as a claimable **roll**; `wlu` / `wlt`
+are aliased to the wishlist parser now.
 
 Parsed by `mudae/parsers/wishlist.py`, one message at a time; `$wl` bolds
 rows inconsistently (and mid-row, `**7,000** sp`), so bold is stripped rather
@@ -779,7 +805,7 @@ an *edit* of the same message, and `ChannelMonitor._handle_message` drops
 edited Mudae messages whose embed looks like a character embed unless they are
 ownership confirmations. A listing embed does look like one, so page clicks
 were silently discarded before any parser saw them; the reader now lets a
-listing through that filter.
+listing through that filter (`_is_listing_page`: `$wl`, `$dl`, `$adl`).
 
 **The channel reply is an embed; the DM is plain text.** The channel form
 carries **no message content at all** — the header is the embed's `author`,
@@ -856,6 +882,319 @@ all 160 at once, silently, leaving the `$bw` sweep weighing every character as
 if perk 1 were absent. Readers accept both names; writers emit the legacy one.
 Any future rename of a persisted key needs the old name written alongside the
 new one for at least one release, or the same thing happens again.
+
+---
+
+
+
+## `$dl` and `$adl` — the disable lists
+
+Both are per **player per server**. Mudae notes that characters on the
+wishlist and wishserieslist are **not** disabled by the disablelist.
+
+### The list commands — Mudae's reference
+
+From Mudae's own help, confirmed by the account owner. The **short forms** are
+what the app copies (and what the macro will send).
+
+**Disablelist**
+
+| Command | Short | Does |
+|---|---|---|
+| `$disable <series>` | `$d` | Removes from your rolls every character whose **main** series it is. Several: separate with `$` |
+| `$disablelist` | `$dl` | Shows the list. Options: `d` details (`$dld`, the form the app fetches), `v` vanilla, `s` by DM |
+| `$enable <series>` | — | Removes one series from the disablelist |
+| `$enableall` | `$eall` | **Clears** the disablelist |
+| `$disabledel` | `$dd` | Like `$disable`, and auto-deletes your message |
+| `$disabletag <tag>` | — | Disables characters by tag: child, baby, child-like, animal, anthropomorphic animal, species, character class, spider, triggering content, disturbing imagery, clown, incestuous, fetus, irl |
+| `$togglewestern`, `$toggleirl` | — | Whole-category toggles, printed on `$dld` as "… are completely disabled". Each **flips** when sent |
+
+**Gamemode 2:** disabling a series *enables* the same number of disabled
+characters, and you cannot go below the limits `$limroul` reports — which is
+why `$dld` prints "Pool limit reached" and "Can't be reduced below …".
+
+**Antidisablelist**
+
+| Command | Short | Does |
+|---|---|---|
+| `$antidisable <character, series or bundle>` | `$ad` | Enables those characters **for your rolls only**, even if disabled by `$disable`, `$disabletag` or `$limroul`. Does **not** bypass `$togglensfw`, `$togglehorror` or `$serverdisable`. Several: separate with `$` |
+| `$antidisablelist` | `$adl` | Shows the list |
+| `$antienable <…>` | `$ae` | Removes entries from the antidisablelist |
+| `$antienableall` | `$aeall` | **Clears** the antidisablelist |
+| `$adc` / `$aec` | — | Name a **character** when a series shares its name |
+| `$antidisabledel` | `$add` | Like `$ad`, and auto-deletes your message |
+
+**Wishlist**
+
+| Command | Short | Does |
+|---|---|---|
+| `$wish <character>` | — | You are mentioned when it spawns. Spawn rate is like any character, boostable with kakera (`$k`, `$kt`). Several: separate with `$` |
+| `$wishlist` | `$wl` | Shows the list; `$wlt` details, and most `$s` flags (the app uses `$wlsz+z!z-`) |
+| `$wishremove <character>` | `$wr` | Removes one wish |
+| `$wishremoveall` | `$wrall` | **Clears** the wishlist |
+| `$wishi <position> $ <characters>` | — | Inserts at a position; or `$wishi <reference character> $ <characters>` to put them after it |
+| `$wishpurge` | `$wp` | Removes doubles and already-claimed characters; `$wpx` keeps wishes for characters claimed by yourself |
+| `$wishdm` | — | Ping options |
+| `$sw…` / `$starwish…` | — | The starwish family, same options (`$swl`, `$swli 9 $hatsune miku`) |
+
+Option letters after `$wish` (and `$sw`) **combine**, e.g. `$wishidlk`:
+
+- `d` — instantly deletes your message;
+- `=` — sorts the **whole** wishlist alphabetically;
+- `l` — **locks** the wish: not affected by `$wp` / `$wpx`;
+- `k` — **kakera wish**: +220 kakera instead of +200 with Silver IV, no
+  mention/DM when it spawns, and not a wish for the wishprotect feature;
+- `i` — insert (above).
+
+**Clearing asks for confirmation.** Each clear-all answers with a question and
+waits for the word `confirm`, then reacts with a **tick on the original clear
+command** (not on the `confirm`):
+
+```
+$eall
+Mudae: Type confirm to confirm the clean of your $disablelist.
+confirm            → Mudae ticks the $eall message
+
+$wrall
+Mudae: Type confirm to confirm the clean of all YOUR wishes (characters and series).
+```
+
+The wording differs per list, so only the shared opening — "Type confirm to
+confirm the clean of" — is matched.
+
+`$eall` **does not reset the toggles** — `$togglewestern` / `$toggleirl` stay as
+they were and must be flipped by hand.
+
+**A toggle is never ticked.** Mudae answers with a line saying which way it went
+— DISABLED means the toggle is now **on**:
+
+```
+$togglewestern
+Mudae: Western animanga series are now DISABLED for YOUR rolls! ($ima western)
+       Use $disable western INSTEAD OF $togglewestern if you want to be able to roll your wished/antidisabled western characters.
+$toggleirl
+Mudae: Real Life People series are now ENABLED for YOUR rolls!
+```
+
+(The IRL toggle's reply says "Real Life People"; `$dld` calls it "IRL series".)
+
+**Adds ask nothing** — `$d`, `$ad`, `$wish…` and `$sw…` are simply ticked —
+with one exception: a `$sw` when every starwish slot is used offers to trade
+wishlist slots for one more, and ticks the `$sw` once `y` is typed:
+
+```
+$sw rebecca
+Mudae: You reached your limit of 9 $starwish!
+       Would you like to sacrifice 8 wishlist slots to upgrade this limit by +1? (y/n/yes/no)
+```
+
+A batch asks for the whole upgrade at once: sending 62 starwishes to a server
+with a limit of 29 and a 1,324-slot wishlist gave "sacrifice **1,122** wishlist
+slots to upgrade this limit by **+33**" — exactly the 33 missing slots.
+
+These replies are parsed by `mudae/parsers/list_prompts.py`
+(`MessageKind.LIST_PROMPT`), recognised even when paired with the command that
+caused them, so neither is ever mistaken for a claim.
+
+**Rebuilding a list** — what the app copies and **Send** sends — is always: the
+short clear command first (`$eall`, `$aeall`, `$wrall`) and its `confirm`, then
+the adds, then the toggles. See *Copy command* and *Send to Mudae* below.
+
+### `$dl` / `$dld`
+
+```
+author:      lukazade234's Disablelist (42/62)
+description: **133,775** disabled (45,920 $wa, 47,768 $ha, 30,870 $wg, 25,315 $hg)
+             **Pool limits:** 46,309 $wa, 47,739 $ha, 34,887 $wg, 29,960 $hg
+
+             Can't be reduced below **3,052** characters available for $wa/$ha and **2,288** characters for $wg/$hg
+             ⚠️ Pool limit reached: **47,739 $ha** (series above this limit are not disabled)
+
+             **Western animanga series are completely disabled** ($togglewestern)
+
+             **Kadokawa Corporation** (13,449 ~ 8,300 $wa, 4,203 $ha, 2,175 $wg, 912 $hg)
+             **Shueisha** (10,925 ~ 4,538 $wa, 6,684 $ha, 171 $wg, 555 $hg)
+             …
+footer:      Page 1 / 3
+```
+
+Read by `mudae/parsers/disablelist.py`: the slot count, the **total disabled**
+and its split across the four pools, the pool limits, the floor line and any
+limit warning — and two kinds of entry, kept apart:
+
+- a **toggle** — "… are completely disabled (`$toggleX`)". A whole category
+  switched off by its own command; there can be several, and they are undone
+  by that command, not by removing a disable;
+- a **disable** — a bundle or series. Only the **name** is kept; the counts
+  beside it describe today's pool, not the choice.
+
+Paged 14 rows at a time with the `wleft` / `wright` arrows, like `$wl`. Only
+page 1 has been captured so far; later pages are assumed to carry the header
+and rows, and the merge does not depend on them repeating the summary.
+Whether the `42` counts rows alone or rows plus toggles is not known yet, so
+`complete` comes from the **pages read**, and the count is reported separately
+as `count_matches`.
+
+### `$adl`
+
+```
+author:      lukazade234's Antidisablelist (4/500)
+description: **134** antidisabled characters
+
+             **Cyberpunk: Edgerunners**
+             **Lord of Mysteries 2: Circle of Inevitability**
+             …
+```
+
+The header counts **series** (4 of 500); the first line counts the characters
+those series bring back (134). Every other line is one series, in order.
+`mudae/parsers/antidisablelist.py`; a footer is read if a long list pages.
+
+Without their aliases (`dl`, `dld`, `adl` in `mudae/commands.py`) both replies
+parsed as **rolls** — the `$dld` page came out as a character named
+"lukazade234's Disablelist (42/62)" — the same failure `$wl` and `$mmk=` had.
+
+### Advisor › Lists
+
+Three tabs, `$dl` / `$adl` / `$wl`. Each shows **Current on Mudae** — the
+scoped pair's latest capture — beside named **presets** saved from earlier
+captures (global per list type, each remembering the server it was saved
+from; `gui/mudae_lists_store.py`). Fetch clicks through every page
+(`macro/listing_capture.py`); `$wl` reuses the wishlist capture, so the same
+fetch refreshes `$bw` and Spheres › Characters. **Fetch all three** sends
+`$dld`, `$adl`, `$wl` one after another, 1 s apart. A listing that lost a page
+is stored and shown as **partial**. Copy puts the names on the clipboard joined
+with `$`.
+
+The `$dl` tab shows the totals per pool but **not the limits** (pool limits,
+the floor line, the limit warning): they differ per server and a list does not
+depend on them. They are still parsed and stored.
+
+Presets can also be **made by hand**. **Add new** creates a blank one, and
+**Edit** on any saved preset opens it for editing; "Current on Mudae" is never
+edited. In edit mode:
+
+- **The Add box** takes plain names (`A$B$C`, or one per line — split on `$`
+  and newlines only, since names contain commas) and the commands a user
+  already types, one per line (`macro/list_input.py`):
+  - `$togglewestern`, `$toggleirl` — tick that toggle (`$dl` only);
+  - `$wish…` / `$sw…` / `$starwish…` with Mudae's option letters in any
+    combination — `l` locked, `k` kakera wish, `i` insert at a position
+    (`$wishli 4$x$y`) or after a reference character (`$wishi Reze$x`), `d`
+    ignored. `$swl reze$lucy` adds both as locked starwishes. A name already
+    listed is not duplicated: the command's flags are set on it, and `i` moves
+    it. A `$` line not understood (`$wishremove …`) is reported, never added.
+- **Rows** are reordered by **drag and drop** (the `≡` grip), renamed
+  (double-click or *rename*), removed, and on `$wl` each row's **starwish /
+  locked / kakera wish** is toggled in place.
+- **Counts:** slot counts follow the rows — `$adl` series slots, `$dl` slots,
+  `$wl` / `$sw` sizes. The rest are optional and typed by hand: `$adl`
+  antidisabled characters, `$dl` total disabled and the four per-pool counts.
+  Only Mudae can compute them, so blank is a valid answer.
+- **Toggles:** checkboxes for the two Mudae prints today — `Western animanga
+  series … ($togglewestern)` and `IRL series … ($toggleirl)`.
+
+A saved preset shows **only its own counts** (`61 $wl`, not `61/64 $wl`): the
+maximum is the server's, and a preset can be sent to any server. Current on
+Mudae keeps the `x/max` form. A saved `$wl` preset keeps name, order and wish
+type only — the ✅ says the character is claimed today, which is not part of
+the list.
+
+### Copy command — the commands that rebuild a list
+
+**Copy command** opens the commands that rebuild the list on screen, in the
+order they must be sent (`macro/list_commands.py`). These are the commands the
+macro will send itself once **Send** lands, so the wishlist plans are tested by
+replaying them through a model of Mudae's list (`tests/test_list_commands.py`):
+300 random wishlists at three message limits all come out exactly as the
+preset, in order, with every wish's type.
+
+The popup — and the macro's send — has three steps, in this order:
+
+1. **Clear** with the short clear-all command: `$eall` (`$dl`), `$aeall`
+   (`$adl`), `$wrall` (`$wl`). The adds then land on an empty list, which is
+   what makes their order exact.
+2. **Add** it back:
+   - **`$adl`** — `$ad a$b$c`.
+   - **`$dl`** — `$d a$b$c` (`$dl` is `$d` plus the `l` list flag).
+   - **`$wl`** — see below.
+3. **Toggles** (`$dl` only): the preset's **own** toggles, always shown with a
+   copy button each, whatever the stored state says. **A toggle flips**, and
+   `$eall` leaves toggles alone, so each says whether it needs sending
+   (`send`), against the scoped server's last `$dld`: off there → send; already
+   on → shown, but sending would turn it off. With no fetch, each carries a
+   warning to send it only if it is off now. Toggles on the server but not on
+   the preset are not shown; **Send** flips them off.
+**`$wl` adds** — the command carries the wish type: `$sw` for a starwish or
+  `$wish`, then `k` kakera, `l` locked, `i` insert (`$swl`, `$wishkl`,
+  `$wishli 4$x$y`). Each wish type is one batch. The first is appended to the
+  empty list; each later type is inserted into the gaps it belongs in, one
+  `…i <position>$names` per gap (a gap at the end is a plain append). The order
+  the types are sent in is the one needing the fewest commands. Mudae's help
+  describes the behaviour this relies on, but the macro has not yet sent these
+  and seen the result: an add without `i` appends to the end (for `$sw` too),
+  `i <n>` puts the first name at position *n*, and option letters combine in any
+  order.
+
+Discord caps a message at **2,000** characters (**4,000** with Nitro). A batch
+over the cap is split, and a split insert continues at the position after the
+previous part. When the 2,000-character plan needs more messages than the
+Nitro one, the popup shows both side by side; otherwise one column.
+
+### Send to Mudae
+
+**Send to Mudae** (saved presets only, not while editing) asks first — it
+replaces the list on a live server — then runs through the scope's route like a
+fetch (`macro/list_send.py`, `AppBridge._send_mudae_list_for`).
+
+**Gamemode 2.** Before a `$dl` or `$adl` send to a server whose parsed
+`$settings` says `gamemode: 2`, a warning explains that `$disable` /
+`$antidisable` work differently there (disabling enables as many characters,
+within `$limroul`) and asks whether to proceed; **Proceed anyway** continues to
+the normal confirmation. A server whose gamemode has never been read gets no
+warning.
+
+**Pacing.** Every message the send makes — command, `confirm`, `n` — waits at
+least **1 s** after the previous one *and* after Mudae's answer to it, so two
+of the macro's messages never land back to back. Each answer's time is written
+to the activity log (`$wish …: ticked after 0.4s`).
+
+The steps:
+
+1. **`$dl` only:** read a fresh `$dld`, because the toggles that must flip
+   depend on what is on *now*. If it cannot be read, the send stops — flipping
+   blind could turn a toggle the wrong way.
+2. **Clear:** send `$eall` / `$aeall` / `$wrall`, wait for the confirm
+   question, type `confirm`, and wait for the tick on the clear command.
+   Nothing is added until that tick arrives; a ❌, no answer, or no tick stops
+   the send. Mudae ticks the clear almost at once — often while `confirm` is
+   still being sent — so the wait for the tick starts **before** `confirm` goes
+   out, and the reader also remembers recent Mudae ticks so a wait that starts
+   late still sees one. Even so, after `$wrall` the tick event did not arrive
+   and only a re-fetch of the message found it, after the full 12 s timeout. So
+   every tick wait in a send is now a series of **2 s checks**, each ending in a
+   re-fetch: a tick the gateway never delivers costs about 2 s, not 12.
+3. **Add** each command in order (the 4,000-character plan if the user ticks
+   *Nitro*), waiting for each tick. A ❌ stops the send. When Mudae offers to
+   trade wishlist slots for more starwish slots, the macro **accepts if the
+   wishlist still has room for every wish in the preset afterwards** (size from
+   the server's last `$wl` capture; 1,324 − 1,122 = 202 ≥ 168, so yes) and
+   remembers the smaller size in case Mudae asks again. Otherwise — or when the
+   size is unknown — it answers `n` and stops, saying why, since a missing
+   starwish would shift every later insert. The send dialog warns in advance
+   when the preset has more starwishes than the server's limit. An add with no
+   tick is noted and the send carries on — step 5 is the real check.
+4. **Toggles** (`$dl`): flip on the preset's toggles that are off, and flip off
+   any that are on but not on the preset. A toggle is not ticked, so the macro
+   waits only for Mudae's "… now DISABLED / ENABLED" reply (up to 5 s, then
+   carries on) and checks it went the intended way; the wrong way is reported
+   with the result.
+5. **Check:** read the list back (`$dld`, `$adl`, or the `$wl` capture) and
+   compare it with the preset — names (ignoring case), and for `$wl` the order
+   and each wish's type; for `$dl` the toggles. The page shows "matches", or
+   exactly what differs.
+
+Progress and the result appear under the list.
 
 ---
 
@@ -2056,7 +2395,9 @@ were on the roll, and switches to the button if a refresh shows one.
 bonus `$bonus` reports, and leaves the 1,440/hour bonus cap unmodelled; both
 become live in one branch if slash rolling is ever added.
 - Sending `$bw` or any list command. `Advisor › $bw` names a value and prints
-the command; setting it is manual on purpose. `$ov` is *read* on request (Fetch
+the command; setting it is manual on purpose. `Advisor › Lists` reads `$dl` /
+`$adl` / `$wl` and saves presets, but its **Send** is disabled until the edit
+commands are captured. `$ov` is *read* on request (Fetch
 `$ov` on the Mudae scope bar) and never sent on its own; nothing this app does
 edits it.
 - Multi-account concurrent connections (config supports it; runtime is

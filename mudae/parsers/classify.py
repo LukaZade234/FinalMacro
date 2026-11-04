@@ -25,6 +25,9 @@ from mudae.parsers.p_daily import is_daily_cooldown_response, is_p_response
 from mudae.parsers.roll_limit import is_roll_limit_message
 from mudae.parsers.sphere import is_sphere_click_message
 from mudae.parsers.wishlist import is_wishlist_message
+from mudae.parsers.disablelist import is_disablelist_message
+from mudae.parsers.antidisablelist import is_antidisablelist_message
+from mudae.parsers.list_prompts import is_list_prompt
 from mudae.parsers.kakeraloot import is_kakeraloot_prompt, is_kakeraloot_result
 from mudae.parsers.force_divorce import (
     is_force_divorce_prompt,
@@ -100,6 +103,16 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
     # bold names, which is exactly what ``is_custom_claim`` calls a claim.
     if is_wishlist_message(content):
         return MessageKind.WISHLIST
+    # Antidisablelist before disablelist only for readability: the two headers
+    # cannot both match ("'s Disablelist" vs "'s Antidisablelist").
+    # The clear / starwish-limit questions — before the claim heuristics,
+    # which call a line with a bold run a claim.
+    if is_list_prompt(content):
+        return MessageKind.LIST_PROMPT
+    if is_antidisablelist_message(content):
+        return MessageKind.ANTIDISABLELIST
+    if is_disablelist_message(content):
+        return MessageKind.DISABLELIST
     # Same reason again: a harem page is a wall of names and numbers, and it
     # arrives as an embed that ``is_character_embed`` happily calls a roll.
     if is_harem_message(content):

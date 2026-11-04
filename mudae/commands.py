@@ -61,12 +61,24 @@ COMMAND_ALIASES: dict[str, str] = {
     "wls": "wishlist",
     "wlz": "wishlist",
     "wlsz": "wishlist",
+    # ``$wlu`` (unclaimed only) and ``$wlt`` (details) print the same listing;
+    # ``$wlu`` parsed as a claimable roll before this.
+    "wlu": "wishlist",
+    "wlt": "wishlist",
     # The harem listing, for the same load-bearing reason. ``$mmk=`` arrives
     # here as ``mmk`` (flags are stripped above) and, without this, resolved to
     # "roll" — so a harem page parsed as a claimable character worth the
     # account's whole collection, with the page arrows typed as claim buttons.
     "mm": "harem",
     "mmk": "harem",
+    # The disablelist and antidisablelist, for the same load-bearing reason:
+    # without these a ``$dld`` page parsed as a roll whose character was
+    # "lukazade234's Disablelist (42/62)".
+    "dl": "disablelist",
+    "dld": "disablelist",
+    "disablelist": "disablelist",
+    "adl": "antidisablelist",
+    "antidisablelist": "antidisablelist",
     # ``$kl 12000`` arrives as "kl 12000"; the leading word resolves it.
     "kl": "kakeraloot",
     **ROLL_COMMAND_ALIASES,

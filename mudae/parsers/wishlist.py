@@ -55,8 +55,26 @@ _ROW_RE = re.compile(
 )
 
 # Flags that follow the name. The first one found ends the name.
-_FLAG_RE = re.compile(r"[✅⭐\U0001f510]|\+\d+%")
+#
+# ``✅`` owned · ``⭐`` starwish · ``🔐`` locked wish (``$wishl``) · a kakera
+# emoji in the lock's place is a kakera wish (``$wishk``) · ``🚫 ($serverdisable)``
+# a character the server has disabled · ``+N%`` the perk-1 spawn bonus.
+_KAKERA_EMOJI = r"<a?:kakera:\d+>|:kakera:"
+_FLAG_RE = re.compile(r"[✅⭐\U0001f510\U0001f6ab]|\+\d+%|" + _KAKERA_EMOJI)
 _PERCENT_RE = re.compile(r"\+(\d+)%")
+_KAKERA_RE = re.compile(_KAKERA_EMOJI)
+LOCK_EMOJI = "\U0001f510"
+OWNED_EMOJI = "✅"
+SERVER_DISABLED_EMOJI = "\U0001f6ab"
+# What may follow the name on a plain ``$wl`` row: flags, the bracketed command
+# that explains a 🚫, and spacing (Mudae pads with narrow no-break spaces).
+_FLAG_ONLY_RE = re.compile(
+    r"^(?:\s|\u202f|\ufe0f|[✅⭐\U0001f510\U0001f6ab]|\+\d+%|\(\$\w+\)|"
+    + _KAKERA_EMOJI
+    + r")*$"
+)
+# A plain ``$wl`` row: the bold name, then flags only.
+_PLAIN_BOLD_ROW_RE = re.compile(r"^\*\*(?P<name>[^*]+?)\*\*(?P<rest>.*)$")
 
 # "5 (x5)" / "6"
 _UPGRADE_RE = re.compile(r"^(?P<perk>\d+)(?:\s*\(x(?P<count>\d+)\))?$")
@@ -101,8 +119,58 @@ def parse_upgrades(text: str) -> dict[str, Any]:
     return {"full": False, "perks": perks}
 
 
+def _row_flags(flags: str) -> dict[str, Any]:
+    percent_match = _PERCENT_RE.search(flags)
+    return {
+        "starwish": STARWISH_EMOJI in flags,
+        "locked": LOCK_EMOJI in flags,
+        "kakera_wish": bool(_KAKERA_RE.search(flags)),
+        "owned": OWNED_EMOJI in flags,
+        "server_disabled": SERVER_DISABLED_EMOJI in flags,
+        "percent": _int(percent_match.group(1)) if percent_match else None,
+    }
+
+
+def parse_plain_wishlist_row(line: str) -> dict[str, Any] | None:
+    """A row of plain ``$wl``: ``**Han Sooyoung** ✅ ⭐ 🔐 +63%``.
+
+    No sphere tail, so the row is recognised by its shape instead: a bold name
+    followed by nothing but flags. Without bold, at least one flag is needed
+    to tell a row from any other line. ``$wlsz+z!z-`` prints these for the
+    characters with no spheres invested, beside the ``· N sp`` rows.
+    """
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+    bold = _PLAIN_BOLD_ROW_RE.match(raw)
+    if bold:
+        name, rest = bold.group("name").strip(), bold.group("rest")
+    else:
+        clean = strip_bold(raw)
+        flag_match = _FLAG_RE.search(clean)
+        if not flag_match:
+            return None
+        name, rest = clean[: flag_match.start()].strip(), clean[flag_match.start():]
+    rest = strip_bold(rest)
+    if not name or not _FLAG_ONLY_RE.match(rest):
+        return None
+    flags = _row_flags(rest)
+    return {
+        "name": name,
+        "starwish": flags["starwish"],
+        "locked": flags["locked"],
+        "kakera_wish": flags["kakera_wish"],
+        "owned": flags["owned"],
+        "server_disabled": flags["server_disabled"],
+        "sphere_percent": flags["percent"],
+        "spheres": None,
+        "upgrades_full": False,
+        "upgrades": {},
+    }
+
+
 def parse_wishlist_row(line: str) -> dict[str, Any] | None:
-    """One character row, or ``None`` when the line is not one."""
+    """One ``· N sp -`` character row, or ``None`` when the line is not one."""
     clean = strip_bold(line).strip()
     if not clean:
         return None
@@ -115,20 +183,24 @@ def parse_wishlist_row(line: str) -> dict[str, Any] | None:
     if not name:
         return None
     flags = head[flag_match.start():] if flag_match else ""
-    percent_match = _PERCENT_RE.search(flags)
+    flag_fields = _row_flags(flags)
     spheres = _int(match.group("spheres"))
     if spheres is None:
         return None
     upgrades = parse_upgrades(match.group("upgrades"))
     return {
         "name": name,
-        "starwish": STARWISH_EMOJI in flags,
+        "starwish": flag_fields["starwish"],
+        "locked": flag_fields["locked"],
+        "kakera_wish": flag_fields["kakera_wish"],
+        "owned": flag_fields["owned"],
+        "server_disabled": flag_fields["server_disabled"],
         # The `+N%` flag is the character's perk-1 spawn bonus: 125% from each
         # neighbour in wishlist order that has perk 1 maxed (the list wraps),
         # plus the `$shop` OP1 share of its own. It was read as a sphere-value
         # bonus and stored as `sphere_percent` for a long time; readers still
         # accept that key. See `MUDAE_LOGIC.md`'s ouroperk section.
-        "sphere_percent": _int(percent_match.group(1)) if percent_match else None,
+        "sphere_percent": flag_fields["percent"],
         "spheres": spheres,
         "upgrades_full": upgrades["full"],
         "upgrades": upgrades["perks"],
@@ -142,14 +214,24 @@ def is_wishlist_message(content: str) -> bool:
     but a bare row is a specific enough shape (``· N sp - …``) that this does
     not widen into other Mudae output.
     """
-    text = strip_bold(content or "")
-    for line in text.splitlines():
-        stripped = line.strip()
+    plain_rows = 0
+    other_lines = 0
+    for raw in (content or "").splitlines():
+        stripped = strip_bold(raw).strip()
+        if not stripped:
+            continue
         if _HEADER_RE.match(stripped):
             return True
         if parse_wishlist_row(stripped) is not None:
             return True
-    return False
+        if parse_plain_wishlist_row(raw) is not None:
+            plain_rows += 1
+        else:
+            other_lines += 1
+    # A headerless DM part made only of no-sphere rows (``z-``). Narrow on
+    # purpose: several lines, and *every* line a flagged row, so a claim or a
+    # roll card — a bold name or two among other text — never qualifies.
+    return plain_rows >= 3 and other_lines == 0
 
 
 def parse_wishlist_page(content: str) -> dict[str, Any]:
@@ -168,8 +250,8 @@ def parse_wishlist_page(content: str) -> dict[str, Any]:
         "pages": None,
         "entries": [],
     }
-    for raw_line in strip_bold(content or "").splitlines():
-        line = raw_line.strip()
+    for raw_line in (content or "").splitlines():
+        line = strip_bold(raw_line).strip()
         if not line:
             continue
 
@@ -188,7 +270,7 @@ def parse_wishlist_page(content: str) -> dict[str, Any]:
             fields["pages"] = _int(page.group("pages"))
             continue
 
-        row = parse_wishlist_row(line)
+        row = parse_wishlist_row(line) or parse_plain_wishlist_row(raw_line)
         if row is not None:
             fields["entries"].append(row)
 

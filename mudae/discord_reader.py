@@ -28,6 +28,8 @@ from mudae.parsers.embed import get_character_owner, is_character_embed, is_owne
 from mudae.parsers.pipeline import format_entry_for_gui, parse_message
 from mudae.message_text import snapshot_visible_text as snapshot_text
 from mudae.parsers.wishlist import is_wishlist_message
+from mudae.parsers.antidisablelist import is_antidisablelist_message
+from mudae.parsers.disablelist import is_disablelist_message
 from mudae.serialization import is_mudae_message, snapshot_from_message
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
@@ -47,6 +49,25 @@ _CLICK_RETRY_SEC = 1.5
 # How often `ensure_connected` re-checks while giving discord.py's own
 # resume a chance to land before a full reconnect.
 _RESUME_POLL_SEC = 0.25
+
+_RECENT_REACTIONS_MAX = 500
+
+
+def _remember_id(seen: dict[int, None], message_id: int) -> None:
+    """Add to a bounded insertion-ordered set, dropping the oldest."""
+    seen[message_id] = None
+    while len(seen) > _RECENT_REACTIONS_MAX:
+        seen.pop(next(iter(seen)))
+
+
+def _is_listing_page(text: str) -> bool:
+    """A paged Mudae listing, whose page clicks arrive as edits of one message."""
+    return (
+        is_wishlist_message(text)
+        or is_disablelist_message(text)
+        or is_antidisablelist_message(text)
+    )
+
 
 class ChannelMonitor:
     """Connect with a user token and capture every message in a channel.
@@ -90,6 +111,12 @@ class ChannelMonitor:
         self.macro_active = False
         self._connect_task: asyncio.Task[None] | None = None
         self._tick_waiters: dict[int, asyncio.Future[bool]] = {}
+        # Messages Mudae has ticked / crossed lately, so a wait that starts
+        # *after* the reaction landed still sees it. Without this, a tick that
+        # arrived while the macro was still sending (e.g. typing ``confirm``
+        # after ``$wrall``) was missed until the wait timed out and re-fetched.
+        self._recent_acks: dict[int, None] = {}
+        self._recent_crosses: dict[int, None] = {}
         self._cross_waiters: dict[int, asyncio.Future[bool]] = {}
 
     async def start_background(self) -> bool:
@@ -246,6 +273,8 @@ class ChannelMonitor:
         whatever the user last typed by hand.
         """
         self._messages.clear()
+        self._recent_acks.clear()
+        self._recent_crosses.clear()
         for waiters in (self._tick_waiters, self._cross_waiters):
             for future in waiters.values():
                 if not future.done():
@@ -296,6 +325,8 @@ class ChannelMonitor:
         timeout: float = 5.0,
     ) -> bool:
         """Wait until Mudae reacts with a tick on ``message_id``, or time out."""
+        if message_id in self._recent_acks:
+            return True
         cached = self._messages.get(message_id)
         if cached is not None and await message_has_mudae_command_ack(cached):
             return True
@@ -323,6 +354,8 @@ class ChannelMonitor:
         timeout: float = 5.0,
     ) -> bool:
         """Wait until Mudae reacts with a red cross on ``message_id``, or time out."""
+        if message_id in self._recent_crosses:
+            return True
         cached = self._messages.get(message_id)
         if cached is not None and await message_has_mudae_command_deny(cached):
             return True
@@ -552,8 +585,8 @@ class ChannelMonitor:
             # A listing page is edited in place on every page click, and its
             # embed looks like a character embed (an author line and a body),
             # so the roll-edit filter below would drop every page after the
-            # first before it ever reached a parser.
-            if is_wishlist_message(snapshot_text(snapshot)):
+            # first before it ever reached a parser. Same for `$dl` / `$adl`.
+            if _is_listing_page(snapshot_text(snapshot)):
                 pass
             elif is_character_embed(embed):
                 footer = embed.get("footer") or ""
@@ -608,6 +641,10 @@ class ChannelMonitor:
         if message.channel.id != self.channel_id:
             return
         user_id = getattr(user, "id", None)
+        if reaction_is_mudae_command_ack(reaction, user_id):
+            _remember_id(self._recent_acks, message.id)
+        elif reaction_is_mudae_command_deny(reaction, user_id):
+            _remember_id(self._recent_crosses, message.id)
         if message.id in self._cross_waiters and reaction_is_mudae_command_deny(
             reaction, user_id
         ):
