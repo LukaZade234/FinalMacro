@@ -30,6 +30,7 @@ from mudae.message_text import snapshot_visible_text as snapshot_text
 from mudae.parsers.wishlist import is_wishlist_message
 from mudae.parsers.antidisablelist import is_antidisablelist_message
 from mudae.parsers.disablelist import is_disablelist_message
+from mudae.parsers.serverdisablelist import is_serverdisablelist_message
 from mudae.serialization import is_mudae_message, snapshot_from_message
 from mudae.types import MessageKind, MudaeMessageSnapshot, ParseResult
 
@@ -66,6 +67,7 @@ def _is_listing_page(text: str) -> bool:
         is_wishlist_message(text)
         or is_disablelist_message(text)
         or is_antidisablelist_message(text)
+        or is_serverdisablelist_message(text)
     )
 
 

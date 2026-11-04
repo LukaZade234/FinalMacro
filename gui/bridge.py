@@ -3064,6 +3064,34 @@ class AppBridge(QObject):
             )
         )
 
+    async def _auto_kakera_loot_from_engine(
+        self, time_left: Callable[[], float | None]
+    ) -> dict[str, Any] | None:
+        """The hourly loop's automatic ``$kl`` run (preset › Expert › Kakera loots).
+
+        Same runner as the Run page's button, with a deadline from the engine
+        so it stops before the next rolls reset. While it runs it is the
+        ``_kl_runner``, so the Run page's stop works on it and nothing else
+        starts a minigame on top of it. ``None`` means it never started.
+        """
+        if not self._actions or not self._monitor or self._minigames_busy():
+            return None
+        runner = KakeraLootRunner(
+            self._actions,
+            self._monitor,
+            rules=self._macro_config.kakera_loot,
+            log=self._append_activity_log,
+            time_left=time_left,
+        )
+        self._kl_runner = runner
+        try:
+            return await runner.run(prefix=self._macro_config.prefix)
+        except Exception as exc:  # noqa: BLE001 - a $kl error must not end the roll loop
+            self._append_activity_log(f"Auto $kl error: {exc}")
+            return None
+        finally:
+            self._kl_runner = None
+
     async def _play_daily_minigames_from_engine(self) -> dict[str, Any] | None:
         """Play-all for the engine, returning the result so it can gate the day.
 
@@ -3278,6 +3306,7 @@ class AppBridge(QObject):
             notification_connection_held=self._minigames_busy,
             minigames_busy=self._minigames_busy,
             wishlist_get=self._wishlist_snapshot,
+            run_kakera_loot=self._auto_kakera_loot_from_engine,
         )
         if channel_settings is not None:
             self._engine.update_run_target(
@@ -4954,7 +4983,7 @@ class AppBridge(QObject):
                     actions, resolved.account_id, channel_profile_id
                 )
                 return
-            if command in ("disablelist", "antidisablelist"):
+            if command in ("disablelist", "antidisablelist", "serverdisablelist"):
                 await self._capture_mudae_list_for(
                     actions, command, resolved, channel_profile_id
                 )
@@ -5034,34 +5063,70 @@ class AppBridge(QObject):
         resolved: ResolvedRunTarget,
         channel_profile_id: str,
     ) -> None:
-        """Capture every page of ``$dld`` or ``$adl`` and store it for the pair.
+        """Capture every page of ``$dld``, ``$adl`` or ``$sdl`` and store it.
 
-        Channel only: neither is known to answer by DM. A listing that lost a
-        page is stored *as partial* — the page says so — rather than dropped,
-        since the pages it did read are still the user's real list.
+        `$dld` and `$adl` are channel only. `$sdl` (up to 67 pages) goes by DM
+        as `$sdls` when Settings → Mudae direct messages allows it, and pages
+        the channel otherwise. A listing that lost a page is stored *as
+        partial* — the page says so — rather than dropped, since the pages it
+        did read are still the real list.
         """
-        from macro.listing_capture import capture_paged_listing, page_matcher
+        from macro.listing_capture import (
+            capture_dm_listing,
+            capture_paged_listing,
+            page_matcher,
+        )
         from mudae.parsers.antidisablelist import merge_antidisablelist_pages
         from mudae.parsers.disablelist import merge_disablelist_pages
+        from mudae.parsers.serverdisablelist import (
+            is_sdl_empty,
+            is_serverdisablelist_message,
+            merge_sdl_pages,
+            parse_sdl_page,
+        )
         from mudae.types import MessageKind
 
-        if command == "disablelist":
-            kind, sent, label = "dl", "dld", "Disablelist"
-            matcher = page_matcher("disablelist", MessageKind.DISABLELIST)
-            merge = merge_disablelist_pages
+        if command == "serverdisablelist":
+            kind, label = "sdl", "Server disablelist"
+            if self._allow_mudae_dms:
+                sent = "sdls"
+                result = await capture_dm_listing(
+                    actions,
+                    command=sent,
+                    label=label,
+                    parse_part=parse_sdl_page,
+                    has_header=is_serverdisablelist_message,
+                    merge=merge_sdl_pages,
+                    log=self._append_activity_log,
+                    is_empty=is_sdl_empty,
+                )
+            else:
+                sent = "sdl"
+                result = await capture_paged_listing(
+                    actions,
+                    command=sent,
+                    label=label,
+                    is_page=page_matcher("serverdisablelist", MessageKind.SERVERDISABLELIST),
+                    merge=merge_sdl_pages,
+                    log=self._append_activity_log,
+                )
         else:
-            kind, sent, label = "adl", "adl", "Antidisablelist"
-            matcher = page_matcher("antidisablelist", MessageKind.ANTIDISABLELIST)
-            merge = merge_antidisablelist_pages
-
-        result = await capture_paged_listing(
-            actions,
-            command=sent,
-            label=label,
-            is_page=matcher,
-            merge=merge,
-            log=self._append_activity_log,
-        )
+            if command == "disablelist":
+                kind, sent, label = "dl", "dld", "Disablelist"
+                matcher = page_matcher("disablelist", MessageKind.DISABLELIST)
+                merge = merge_disablelist_pages
+            else:
+                kind, sent, label = "adl", "adl", "Antidisablelist"
+                matcher = page_matcher("antidisablelist", MessageKind.ANTIDISABLELIST)
+                merge = merge_antidisablelist_pages
+            result = await capture_paged_listing(
+                actions,
+                command=sent,
+                label=label,
+                is_page=matcher,
+                merge=merge,
+                log=self._append_activity_log,
+            )
         if not result.data:
             self._on_status(result.reason or f"${sent} capture failed")
             return
@@ -5134,6 +5199,21 @@ class AppBridge(QObject):
             self._list_send_state = {"running": False}
             self.listSendChanged.emit()
 
+    async def _sdl_is_empty(self, actions: DiscordActions) -> bool | None:
+        """Send `$sdl` once: ``True`` for "List empty!", ``False`` for a list,
+        ``None`` when Mudae did not answer (then the send clears as usual)."""
+        from macro.listing_capture import page_matcher
+        from mudae.types import MessageKind
+
+        matches = page_matcher("serverdisablelist", MessageKind.SERVERDISABLELIST)
+        actions.drain_queue()
+        await actions.send_command("sdl")
+        found = await actions.wait_for(lambda _s, parsed: matches(parsed), timeout=15.0)
+        if found is None:
+            self._append_activity_log("$sdl did not answer — clearing anyway")
+            return None
+        return bool((found[1].fields or {}).get("empty"))
+
     async def _send_mudae_list_for(
         self,
         actions: DiscordActions,
@@ -5156,7 +5236,7 @@ class AppBridge(QObject):
             self._set_list_send_state(running=False, ok=False, message="That preset no longer exists")
             return
         wanted = json.loads(json.dumps(preset.data))
-        label = {"dl": "$dl", "adl": "$adl", "wl": "$wl"}[kind]
+        label = {"dl": "$dl", "adl": "$adl", "sdl": "$sdl", "wl": "$wl"}[kind]
         try:
             current_toggles = None
             if kind == "dl":
@@ -5172,6 +5252,17 @@ class AppBridge(QObject):
                     )
                     return
                 current_toggles = snap.data.get("toggles") or []
+                await asyncio.sleep(COMMAND_GAP_SEC)
+
+            skip_clear = False
+            if kind == "sdl":
+                # `$serverenableall` on an empty server disablelist gets no
+                # answer at all, so ask first; "List empty!" skips the clear.
+                self._set_list_send_state(progress="checking whether $sdl is empty")
+                empty = await self._sdl_is_empty(actions)
+                if empty:
+                    skip_clear = True
+                    self._append_activity_log("$sdl is empty — skipping $serverenableall")
                 await asyncio.sleep(COMMAND_GAP_SEC)
 
             plan = plan_list_commands(kind, wanted, current_toggles=current_toggles)
@@ -5198,6 +5289,7 @@ class AppBridge(QObject):
                 plan,
                 nitro=bool(request.get("nitro")),
                 toggles=toggles,
+                skip_clear=skip_clear,
             )
             if not outcome.ok:
                 self._append_activity_log(f"{label} send stopped: {outcome.reason}")
@@ -5215,8 +5307,10 @@ class AppBridge(QObject):
                 got = self._mudae_wishlists.get(account_id, channel_profile_id).to_dict()
             else:
                 await self._capture_mudae_list_for(
-                    actions, "disablelist" if kind == "dl" else "antidisablelist",
-                    resolved, channel_profile_id,
+                    actions,
+                    {"dl": "disablelist", "adl": "antidisablelist", "sdl": "serverdisablelist"}[kind],
+                    resolved,
+                    channel_profile_id,
                 )
                 got = self._mudae_lists.get(kind, account_id, channel_profile_id).data
             problems = compare_list(kind, wanted, got)
@@ -5269,7 +5363,7 @@ class AppBridge(QObject):
         the saved copies, global per list type.
         """
         current: dict[str, Any] = {}
-        for kind in ("dl", "adl"):
+        for kind in ("dl", "adl", "sdl"):
             snap = self._mudae_lists.get(kind, account_id, channel_profile_id)
             current[kind] = {
                 **snap.data,

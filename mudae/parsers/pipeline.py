@@ -26,6 +26,7 @@ from mudae.parsers.wishlist import parse_wishlist_result, parse_wishlist_text_re
 from mudae.parsers.disablelist import parse_disablelist
 from mudae.parsers.antidisablelist import parse_antidisablelist
 from mudae.parsers.list_prompts import is_list_prompt, parse_list_prompt
+from mudae.parsers.serverdisablelist import parse_serverdisablelist
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
 from mudae.parsers.maintenance import is_maintenance_message, parse_maintenance
@@ -68,6 +69,7 @@ _KNOWN_PARSERS = frozenset(
         "harem",
         "disablelist",
         "antidisablelist",
+        "serverdisablelist",
     }
 )
 
@@ -91,6 +93,7 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.WISHLIST: "$wl",
     MessageKind.DISABLELIST: "$dl",
     MessageKind.ANTIDISABLELIST: "$adl",
+    MessageKind.SERVERDISABLELIST: "$sdl",
     MessageKind.LIST_PROMPT: "list confirm",
     MessageKind.P: "$p",
     MessageKind.DAILY: "$daily",
@@ -134,7 +137,7 @@ def _run_command_parser(
         if snapshot is not None:
             return parse_wishlist_result(snapshot)
         return parse_wishlist_text_result(content)
-    if parser_id in {"disablelist", "antidisablelist"}:
+    if parser_id in {"disablelist", "antidisablelist", "serverdisablelist"}:
         # Embed-only replies, like the harem: the visible text is the page.
         text = content
         if snapshot is not None:
@@ -143,6 +146,8 @@ def _run_command_parser(
             text = snapshot_text(snapshot)
         if parser_id == "disablelist":
             return parse_disablelist(text)
+        if parser_id == "serverdisablelist":
+            return parse_serverdisablelist(text)
         return parse_antidisablelist(text)
     if parser_id == "harem":
         # The listing lives entirely in the embed, so the plain content is
@@ -274,6 +279,8 @@ def parse_mudae_message(
         return parse_wishlist_result(snapshot)
     if kind == MessageKind.LIST_PROMPT:
         return parse_list_prompt(visible or snapshot.content)
+    if kind == MessageKind.SERVERDISABLELIST:
+        return parse_serverdisablelist(visible or snapshot.content)
     if kind == MessageKind.DISABLELIST:
         return parse_disablelist(visible or snapshot.content)
     if kind == MessageKind.ANTIDISABLELIST:

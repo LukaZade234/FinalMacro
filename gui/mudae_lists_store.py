@@ -25,9 +25,9 @@ from typing import Any
 
 from gui.wishlist_store import scope_key
 
-KINDS = ("dl", "adl", "wl")
+KINDS = ("dl", "adl", "sdl", "wl")
 # Kinds with a snapshot stored here; `wl` reads MudaeWishlistStore.
-SNAPSHOT_KINDS = ("dl", "adl")
+SNAPSHOT_KINDS = ("dl", "adl", "sdl")
 
 _POOLS = ("wa", "ha", "wg", "hg")
 
@@ -117,6 +117,9 @@ def clean_list_data(kind: str, raw: Any) -> dict[str, Any]:
         )
     elif kind == "adl":
         base["characters"] = _num(raw.get("characters"))
+    elif kind == "sdl":
+        # "1,000 disabled" — the server's count, beside the slot header.
+        base["total"] = _num(raw.get("total"))
     return base
 
 

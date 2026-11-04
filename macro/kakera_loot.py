@@ -17,6 +17,10 @@ Two things interrupt the loop:
   balance is re-read with ``$ku`` (a missed result may still have spent), and
   the batch is retried once after the cooldown. A second failure in a row
   stops the run.
+
+The automatic run (from the hourly roll loop) passes ``time_left``: the run
+then also stops — reason ``deadline`` — before a batch that could not finish
+in the time left, so a long run never eats into the next hour's rolls.
 """
 
 from __future__ import annotations
@@ -75,6 +79,7 @@ class KakeraLootRunner:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
         reply_timeout_sec: float = _REPLY_TIMEOUT_SEC,
+        time_left: Callable[[], float | None] | None = None,
     ) -> None:
         self._actions = actions
         self._monitor = monitor
@@ -85,6 +90,16 @@ class KakeraLootRunner:
         self._reply_timeout = reply_timeout_sec
         self._last_sent: float | None = None
         self._stop = False
+        self._time_left = time_left
+
+    def _out_of_time(self, batch: int) -> bool:
+        """True when the next batch (cooldown + reply) would overrun ``time_left``."""
+        if self._time_left is None:
+            return False
+        left = self._time_left()
+        if left is None:
+            return False
+        return left < kl_gap_sec(batch) + self._reply_timeout
 
     def request_stop(self) -> None:
         """Finish after the batch in flight; never interrupts one mid-confirm."""
@@ -119,6 +134,10 @@ class KakeraLootRunner:
         while balance >= cost:
             if self._stop:
                 summary["reason"] = "stopped"
+                break
+            if self._out_of_time(batch):
+                summary["reason"] = "deadline"
+                self._log("$kl: stopping before the next rolls reset — the rest waits for the next run")
                 break
             await self._wait_gap(batch)
             if self._stop:

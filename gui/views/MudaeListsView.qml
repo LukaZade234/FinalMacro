@@ -43,8 +43,8 @@ Item {
 
     property string kind: "dl"
     // Selected preset per tab; "live" is the current capture.
-    property var selected: ({ dl: "live", adl: "live", wl: "live" })
-    property var listsData: ({ current: {}, presets: { dl: [], adl: [], wl: [] }, scoped_ready: false })
+    property var selected: ({ dl: "live", adl: "live", sdl: "live", wl: "live" })
+    property var listsData: ({ current: {}, presets: { dl: [], adl: [], sdl: [], wl: [] }, scoped_ready: false })
     property bool naming: false
     property string namingMode: "save"   // save | new | rename
     property string copiedNote: ""
@@ -236,9 +236,20 @@ Item {
     readonly property var kinds: [
         { id: "dl", label: "$dl · disablelist", command: "disablelist", fetchLabel: "$dld" },
         { id: "adl", label: "$adl · antidisablelist", command: "antidisablelist", fetchLabel: "$adl" },
+        { id: "sdl", label: "$sdl · server disablelist", command: "serverdisablelist", fetchLabel: "$sdl" },
         { id: "wl", label: "$wl · wishlist", command: "wishlist", fetchLabel: "$wl" }
     ]
-    readonly property var kindInfo: kinds[kind === "dl" ? 0 : (kind === "adl" ? 1 : 2)]
+    readonly property var kindInfo: {
+        for (var i = 0; i < kinds.length; i++)
+            if (kinds[i].id === kind)
+                return kinds[i]
+        return kinds[0]
+    }
+    // What a list's rows are, for labels.
+    readonly property string rowNoun: kind === "dl" ? "Disabled"
+        : (kind === "adl" ? "Series" : (kind === "sdl" ? "Characters" : "Wishes"))
+    // The server disablelist holds at most this many characters.
+    readonly property int sdlCap: 1000
 
     readonly property var current: (listsData.current || {})[kind] || ({})
     readonly property var savedPresets: (listsData.presets || {})[kind] || []
@@ -263,7 +274,7 @@ Item {
         try {
             listsData = JSON.parse(App.mudaeListsFor(root.accountId, root.channelProfileId))
         } catch (e) {
-            listsData = ({ current: {}, presets: { dl: [], adl: [], wl: [] }, scoped_ready: false })
+            listsData = ({ current: {}, presets: { dl: [], adl: [], sdl: [], wl: [] }, scoped_ready: false })
         }
         rows.contentY = keepY
         Qt.callLater(function () {
@@ -325,15 +336,24 @@ Item {
             var has = max !== null && max !== undefined
             out.push({ text: fmt(used) + (has ? "/" + fmt(max) : "") + " " + unit, tone: "accent" })
         }
-        // A saved preset shows only its own counts: the slot maximum is the
-        // server's, and a preset can be sent to any server.
+        // A saved preset shows only its own counts, from its own rows: the slot
+        // maximum is the server's (a preset can be sent to any server), and the
+        // header it was saved from may describe a list it only partly holds.
         var maxOf = function (m) { return showingLive ? m : null }
+        var rows = v.entries || []
         if (kind === "wl") {
-            count(v.wl_used, maxOf(v.wl_max), "$wl")
-            count(v.sw_used, maxOf(v.sw_max), "$sw")
+            var stars = 0
+            for (var i = 0; i < rows.length; i++)
+                if (rows[i].starwish)
+                    stars++
+            count(showingLive ? v.wl_used : rows.length, maxOf(v.wl_max), "$wl")
+            count(showingLive ? v.sw_used : stars, maxOf(v.sw_max), "$sw")
         } else {
-            count(v.used, maxOf(v.max), kind === "adl" ? "series" : (showingLive ? "slots" : "entries"))
+            count(showingLive ? v.used : rows.length, maxOf(v.max),
+                  kind === "adl" ? "series" : (kind === "sdl" ? "characters" : (showingLive ? "slots" : "entries")))
         }
+        if (kind === "sdl" && !showingLive && (v.entries || []).length > sdlCap)
+            out.push({ text: "over the " + fmt(sdlCap) + " cap", tone: "warn" })
         if (showingLive && hasData) {
             if (v.complete) {
                 var pages = v.pages || 1
@@ -682,7 +702,10 @@ Item {
                 color: Theme.fg
                 font.pixelSize: Theme.sizeSmall
                 textFormat: Text.StyledText
-                text: "This <b>replaces</b> your " + root.kindInfo.fetchLabel.replace("$dld", "$dl")
+                text: root.kind === "sdl"
+                    ? "This <b>replaces</b> the <b>server's</b> $sdl on the server picked above — "
+                      + "it is one list for everyone there. The macro will:"
+                    : "This <b>replaces</b> your " + root.kindInfo.fetchLabel.replace("$dld", "$dl")
                       + " on the account and server picked above. The macro will:"
             }
 
@@ -692,7 +715,9 @@ Item {
                 color: Theme.dim
                 font.pixelSize: Theme.sizeSmall
                 text: (root.kind === "dl" ? "· read the current $dld, to see which toggles are on\n" : "")
-                      + "· clear the list with " + ((root.sendPlan.clear || {}).text || "") + " and type confirm\n"
+                      + (root.kind === "sdl"
+                         ? "· send $sdl to see whether the list is empty; if not, clear it with $serverenableall and type confirm\n"
+                         : "· clear the list with " + ((root.sendPlan.clear || {}).text || "") + " and type confirm\n")
                       + "· send " + sendPopup.addCount + " add command" + (sendPopup.addCount === 1 ? "" : "s") + ", waiting for Mudae's tick on each\n"
                       + (root.kind === "dl" ? "· flip only the toggles that differ from the preset\n" : "")
                       + "· read the list back and check it matches the preset"
@@ -1275,6 +1300,8 @@ Item {
                                 ? "Kadokawa Corporation$Shueisha$Kodansha\n$togglewestern   ·   one command or list per line"
                                 : (root.kind === "adl"
                                    ? "Cyberpunk: Edgerunners$Lord of the Mysteries   ·   or one per line"
+                                   : root.kind === "sdl"
+                                   ? "Character names: Abra$Absol$Acerola   ·   or one per line (not series)"
                                    : "$swl Reze$Lucy   ·   $wishk Makima   ·   $wishli 4$Power\nor plain names: Power$Makima   ·   one command per line")
                             background: Rectangle {
                                 radius: Theme.radiusSm
@@ -1344,7 +1371,11 @@ Item {
                         ? "Pick an account and a server above."
                         : ("Nothing fetched for this account and server yet. Fetch "
                            + root.kindInfo.fetchLabel + " reads every page of it"
-                           + (root.kind === "wl" ? (root.listsData.allow_dms ? " (by DM)." : " (page by page in the channel).") : "."))
+                           + ((root.kind === "wl" || root.kind === "sdl")
+                              ? (root.listsData.allow_dms
+                                 ? " (by DM" + (root.kind === "sdl" ? ", $sdls — Mudae can pause while mailing a long list" : "") + ")."
+                                 : " (page by page in the channel" + (root.kind === "sdl" ? " — up to 67 pages; turning on Mudae DMs in Settings is much quicker" : "") + ").")
+                              : "."))
                 }
 
                 // ---- $dl summary ----
@@ -1496,7 +1527,7 @@ Item {
                     Layout.fillWidth: true
                     visible: root.hasData
                     Label {
-                        text: Theme.sectionLabel(root.kind === "dl" ? "Disabled" : (root.kind === "adl" ? "Series" : "Wishes"))
+                        text: Theme.sectionLabel(root.rowNoun)
                         color: Theme.mute
                         font.pixelSize: Theme.sizeMicro
                     }
@@ -1504,6 +1535,8 @@ Item {
                     Label {
                         text: root.kind === "dl"
                             ? root.entries.length + (root.view.used ? " of " + root.view.used : "") + " · names only"
+                            : root.kind === "sdl"
+                            ? root.entries.length + " · character names only"
                             : root.entries.length + " in Mudae's order" + (root.kind === "wl" ? " ·" : "")
                         color: Theme.mute
                         font.pixelSize: Theme.sizeTiny

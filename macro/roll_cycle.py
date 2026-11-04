@@ -110,6 +110,16 @@ _FORCE_DIVORCE_RESULT_TIMEOUT_SEC = 12.0
 # gets a beat. A live run sent $forcedivorce in the same second as the $mmk=
 # reply and never got a confirmation prompt at all.
 _FORCE_DIVORCE_STEP_PAUSE_SEC = 1.0
+# Automatic $kl stops this long before the next rolls reset, so the next
+# hour's session starts on time; it does not start with less than the minimum
+# window left (a $ku plus one 20 s-cooldown batch and its reply).
+_AUTO_KL_RESET_MARGIN_SEC = 90.0
+_AUTO_KL_MIN_WINDOW_SEC = 60.0
+# The daily run at the top of a cycle goes before this hour's rolls, so it
+# leaves them this long before the next reset.
+_AUTO_KL_ROLL_RESERVE_SEC = 600.0
+# Key in the account's daily-resets blob for the daily mode's "done today".
+_AUTO_KL_DAILY_KEY = "kakera_loot"
 # A bare $us that Mudae ignores looks exactly like an empty stack, so the
 # farm asks more than once before believing it has nothing to hunt with.
 _US_STACK_READ_ATTEMPTS = 3
@@ -158,6 +168,8 @@ class RollCycleEngine:
         notification_connection_held: Callable[[], bool] | None = None,
         minigames_busy: Callable[[], bool] | None = None,
         wishlist_get: Callable[[], tuple[list[str], list[str]]] | None = None,
+        run_kakera_loot: Callable[[Callable[[], float | None]], Awaitable[dict[str, Any] | None]]
+        | None = None,
     ) -> None:
         self._actions = actions
         self._config = config
@@ -172,6 +184,10 @@ class RollCycleEngine:
         # The Mudae day auto-play has already covered. ``None`` until the first
         # attempt, which is what makes macro start one of the two firing points.
         self._minigames_played_for_day: dt.date | None = None
+        # Automatic $kl: the bridge's runner, and why it was switched off for
+        # this run (a wrong loot value would otherwise fail every hour).
+        self._run_kakera_loot = run_kakera_loot
+        self._auto_kl_disabled = ""
         # Set while the force-divorce farm is running. It owns the claim policy
         # for the whole session: nothing but its own target may be claimed.
         self._force_divorce: ForceDivorceSession | None = None
@@ -1095,6 +1111,9 @@ class RollCycleEngine:
             await self._run_priority_pause()
             await self._maybe_refresh_perk8_status()
             await self._maybe_play_daily_minigames()
+            # The reset wake is where the day's other once-a-day steps run
+            # while waiting for rolls, so the daily $kl goes here too.
+            await self._maybe_auto_kakera_loot(at="day_start")
         finally:
             held = False
             cb = self._notification_connection_held
@@ -1139,6 +1158,82 @@ class RollCycleEngine:
         if result.get("reason") == "ohu failed":
             return
         self._minigames_played_for_day = today
+
+    async def _maybe_auto_kakera_loot(self, *, at: str) -> None:
+        """Spend kakera on ``$kl`` automatically, if the preset says so.
+
+        Two modes (``kakera_loot.auto_mode``), each with its own moment:
+
+        * ``daily`` — ``at="day_start"``: once per UTC day, as one of the
+          start-of-day steps, right after the day's minigames and **before any
+          of that day's rolling** — at the top of the cycle, or in the reset
+          wake when the day turns over during the wait for rolls. Marked done in
+          the account's daily record, so a restart does not spend twice; a run
+          cut short carries on at the next start-of-cycle.
+        * ``hourly`` — ``at="hour_end"``: after every hour's roll session, just
+          before the wait for the next reset, which spends only what came in
+          since the last run.
+
+        Only the hourly loop (normal and force-divorce modes) gets here —
+        never ``$us`` mode; the reset wake is shared with ``$us`` waits, so it
+        checks. Every run stops before the next rolls reset: 90 s before it
+        when no rolls are waiting, and with :data:`_AUTO_KL_ROLL_RESERVE_SEC`
+        to spare when this hour's rolls are still to come.
+        """
+        rules = self._config.kakera_loot
+        cb = self._run_kakera_loot
+        if not rules.auto or cb is None or self._stop.is_set():
+            return
+        if self._auto_kl_disabled or self._discord_commands_blocked():
+            return
+        if self.running_mode == "us":
+            return
+        daily = rules.auto_mode == "daily"
+        if at != ("day_start" if daily else "hour_end"):
+            return
+        today = str(mudae_daily_date(dt.datetime.now(dt.timezone.utc)))
+        if daily and self._auto_kl_done_today() == today:
+            return
+        # At the top of a cycle this hour's rolls are still to come; in a wait
+        # (hour end, or the reset wake) rolling resumes only after the reset.
+        rolls_waiting = at == "day_start" and not self._waiting_for_hourly_refill
+        reserve = _AUTO_KL_ROLL_RESERVE_SEC if rolls_waiting else _AUTO_KL_RESET_MARGIN_SEC
+        loop = asyncio.get_running_loop()
+        stop_at = loop.time() + self._seconds_until_rolls_reset() - reserve
+        if stop_at - loop.time() < _AUTO_KL_MIN_WINDOW_SEC:
+            self._log("Auto $kl: not enough time before the rolls reset — next hour")
+            return
+        if not await self._wait_for_minigame_to_finish("Auto $kl"):
+            return
+        self._log(f"Auto $kl ({'start of the day' if daily else 'end of the hour'})")
+        result = await cb(lambda: stop_at - loop.time())
+        if result is None:
+            return  # never started (busy, disconnected) — try again next time
+        reason = result.get("reason")
+        if reason == "wrong cost":
+            self._auto_kl_disabled = reason
+            self._log("Auto $kl: off for this run — the loot value in the preset is wrong")
+            return
+        if daily and reason in {"insufficient", "stopped"}:
+            # Spent down to less than one batch (or stopped by hand): done for
+            # the day. "deadline" and failures leave the day open.
+            self._mark_auto_kl_done(today)
+
+    def _auto_kl_done_today(self) -> str:
+        try:
+            daily = self._get_daily_resets() or {}
+        except Exception:  # noqa: BLE001 - no record yet
+            return ""
+        entry = daily.get(_AUTO_KL_DAILY_KEY) or {}
+        return str(entry.get("done_for") or "") if isinstance(entry, dict) else ""
+
+    def _mark_auto_kl_done(self, day: str) -> None:
+        try:
+            daily = dict(self._get_daily_resets() or {})
+            daily[_AUTO_KL_DAILY_KEY] = {"done_for": day}
+            self._save_daily_resets(daily)
+        except Exception:  # noqa: BLE001 - the gate is a convenience, not state the run needs
+            pass
 
     async def _roll_hourly_normal_segment(
         self,
@@ -1449,6 +1544,9 @@ class RollCycleEngine:
 
                     await self._maybe_refresh_perk8_status()
                     await self._maybe_play_daily_minigames()
+                    # Once-a-day $kl, with the day's other start-of-day steps
+                    # and before any of today's rolling.
+                    await self._maybe_auto_kakera_loot(at="day_start")
 
                     # The farm's own step: pick a target once a day, and
                     # divorce it whenever a claim slot is in hand. It runs
@@ -1472,6 +1570,7 @@ class RollCycleEngine:
                         if await self._force_divorce_us_hunt([], roll_index):
                             tu_fresh = False
                             continue
+                        await self._maybe_auto_kakera_loot(at="hour_end")
                         if not await self._wait_for_hourly_refill():
                             break
                         tu_fresh = True
@@ -1497,6 +1596,7 @@ class RollCycleEngine:
                         claimed = True
                     remaining = int(self._state.rolls_left or 0)
                     if done == 0 and not claimed and remaining <= 0:
+                        await self._maybe_auto_kakera_loot(at="hour_end")
                         if not await self._wait_for_hourly_refill():
                             break
                         tu_fresh = True
@@ -1528,6 +1628,7 @@ class RollCycleEngine:
                         tu_fresh = True
                         continue
 
+                    await self._maybe_auto_kakera_loot(at="hour_end")
                     if not await self._wait_for_hourly_refill():
                         break
                     tu_fresh = True

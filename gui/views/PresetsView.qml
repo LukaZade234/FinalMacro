@@ -760,11 +760,11 @@ Item {
                         title: "Kakera loots ($kl)"
                         titleSize: 13
 
-                        readonly property var kl: rules.kakera_loot || ({ loot_value: 500, batch: 12000 })
+                        readonly property var kl: rules.kakera_loot || ({ loot_value: 500, batch: 12000, auto: false, auto_mode: "daily" })
 
                         Label {
                             Layout.fillWidth: true
-                            text: "Started from the Run page. Reads the balance with $ku, then sends "
+                            text: "Started from the Run page, or automatically below. Reads the balance with $ku, then sends "
                                 + "$kl in batches of this size until the next batch is unaffordable. "
                                 + "Batch cost: " + (klCard.kl.loot_value * klCard.kl.batch).toLocaleString(Qt.locale(), "f", 0)
                                 + " kakera."
@@ -805,6 +805,79 @@ Item {
                                 placeholderText: "12000"
                                 text: getField("kakera_loot", "batch")
                                 onEditingFinished: patch("kakera_loot", "batch", parseIntOrNull(text))
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 1
+                            color: Theme.border
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Label {
+                                text: "Run $kl automatically"
+                                color: Theme.fgPrimary
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                Layout.preferredWidth: 180
+                            }
+                            ThemedSwitch {
+                                checked: !!klCard.kl.auto
+                                onToggled: patch("kakera_loot", "auto", checked)
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                text: "Hourly macro and force-divorce mode only — never $us mode."
+                                color: Theme.fgMuted
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 10
+                            rowSpacing: 6
+                            enabled: !!klCard.kl.auto
+                            opacity: enabled ? 1 : 0.5
+
+                            Label {
+                                text: "When"
+                                color: Theme.fgSecondary
+                                font.pixelSize: 11
+                                Layout.preferredWidth: 180
+                            }
+                            ThemedComboBox {
+                                id: klModeCombo
+                                Layout.fillWidth: true
+                                readonly property var modes: ["daily", "hourly"]
+                                model: [
+                                    "Once a day — at the start of the day, before any rolling",
+                                    "Every hour — after each roll session"
+                                ]
+                                currentIndex: Math.max(0, modes.indexOf(klCard.kl.auto_mode || "daily"))
+                                onActivated: patch("kakera_loot", "auto_mode", modes[currentIndex])
+                            }
+
+                            Item { Layout.preferredWidth: 180; implicitHeight: 1 }
+                            Label {
+                                Layout.fillWidth: true
+                                text: klCard.kl.auto_mode === "hourly"
+                                    ? "Spends what came in during the hour — a few $kl each hour. Runs at the end "
+                                      + "of each roll session, before the wait for the next reset, and stops in time "
+                                      + "for the next hour's rolls."
+                                    : "Spends the whole balance once a day — many $kl at once. Runs with the other "
+                                      + "start-of-day steps, after the day's minigames and before any rolling, and "
+                                      + "leaves that hour's rolls at least 10 minutes; if it is cut short it carries "
+                                      + "on before the next hour's rolls."
+                                color: Theme.fgMuted
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
                             }
                         }
                     }

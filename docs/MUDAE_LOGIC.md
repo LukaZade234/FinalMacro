@@ -887,9 +887,10 @@ new one for at least one release, or the same thing happens again.
 
 
 
-## `$dl` and `$adl` — the disable lists
+## The lists — `$dl`, `$adl`, `$sdl` (and `$wl`)
 
-Both are per **player per server**. Mudae notes that characters on the
+`$dl` and `$adl` are per **player per server**; `$sdl` is one list for the whole
+server; `$wl` is covered under *Mudae direct messages* above. Mudae notes that characters on the
 wishlist and wishserieslist are **not** disabled by the disablelist.
 
 ### The list commands — Mudae's reference
@@ -923,6 +924,38 @@ why `$dld` prints "Pool limit reached" and "Can't be reduced below …".
 | `$antienableall` | `$aeall` | **Clears** the antidisablelist |
 | `$adc` / `$aec` | — | Name a **character** when a series shares its name |
 | `$antidisabledel` | `$add` | Like `$ad`, and auto-deletes your message |
+
+**Server disablelist**
+
+One list for the **whole server**, separate from each player's `$dl`. It
+disables up to **1,000** more characters and overrides the `$limroul` pool
+floor, so the pool can go down to 1,000 instead of 2,000.
+
+| Command | Short | Does |
+|---|---|---|
+| `$sdl` | — | Shows it, 15 characters a page — up to 67 pages at the cap |
+| `$sdls` | — | The same, mailed as several DMs (much quicker to read; Mudae can pause while sending a long one) |
+| `$sdc <character>` | — | Disables by **character** name. Several: separate with `$` |
+| `$sd <series>` | — | Disables a whole **series** (not used by the app — see below) |
+| `$serverenableall` | — | **Clears** it. No short form (`$seall` does not exist). On an **empty** list Mudae gives **no answer at all** — no question, no tick |
+
+```
+Disabled characters for this server ($sdl) (1,000/1,000)
+1,000 disabled
+
+'Her' 💞 - Veil
+Abra - Pokédex
+Awesome Face -
+Page 1 / 67          (channel only; the DM has no footer and no 💞)
+```
+
+An empty list answers `$sdl` with `List empty! ($serverdisable)` in the
+channel (parsed as `empty: true`; a `$sdls` fetch takes it from the channel
+instead of waiting for a DM).
+
+`💞` only means the character is claimed and is dropped; ` - ` ends the name
+and starts the series, and only the **name** is kept (cut at the first ` - `,
+since a series can contain one). `mudae/parsers/serverdisablelist.py`.
 
 **Wishlist**
 
@@ -997,8 +1030,8 @@ These replies are parsed by `mudae/parsers/list_prompts.py`
 caused them, so neither is ever mistaken for a claim.
 
 **Rebuilding a list** — what the app copies and **Send** sends — is always: the
-short clear command first (`$eall`, `$aeall`, `$wrall`) and its `confirm`, then
-the adds, then the toggles. See *Copy command* and *Send to Mudae* below.
+clear command first (`$eall`, `$aeall`, `$serverenableall`, `$wrall`) and its
+`confirm`, then the adds (`$sdc` for the server disablelist), then the toggles. See *Copy command* and *Send to Mudae* below.
 
 ### `$dl` / `$dld`
 
@@ -1056,13 +1089,15 @@ parsed as **rolls** — the `$dld` page came out as a character named
 
 ### Advisor › Lists
 
-Three tabs, `$dl` / `$adl` / `$wl`. Each shows **Current on Mudae** — the
+Four tabs, `$dl` / `$adl` / `$sdl` / `$wl`. Each shows **Current on Mudae** — the
 scoped pair's latest capture — beside named **presets** saved from earlier
 captures (global per list type, each remembering the server it was saved
 from; `gui/mudae_lists_store.py`). Fetch clicks through every page
 (`macro/listing_capture.py`); `$wl` reuses the wishlist capture, so the same
 fetch refreshes `$bw` and Spheres › Characters. **Fetch all three** sends
-`$dld`, `$adl`, `$wl` one after another, 1 s apart. A listing that lost a page
+`$dld`, `$adl`, `$wl` one after another, 1 s apart; `$sdl` is fetched on its
+own tab (`$sdls` by DM when Mudae DMs are allowed, else up to 67 pages), since
+it can take a while. A listing that lost a page
 is stored and shown as **partial**. Copy puts the names on the clipboard joined
 with `$`.
 
@@ -1164,7 +1199,11 @@ The steps:
 1. **`$dl` only:** read a fresh `$dld`, because the toggles that must flip
    depend on what is on *now*. If it cannot be read, the send stops — flipping
    blind could turn a toggle the wrong way.
-2. **Clear:** send `$eall` / `$aeall` / `$wrall`, wait for the confirm
+2. **`$sdl` only:** send `$sdl` first. `List empty!` means there is nothing to
+   clear, so step 3 is skipped and the send starts with `$sdc` — sending
+   `$serverenableall` to an empty list gets no answer and would stall the send.
+   A list (or no answer to `$sdl`) means clear as usual.
+3. **Clear:** send `$eall` / `$aeall` / `$serverenableall` / `$wrall`, wait for the confirm
    question, type `confirm`, and wait for the tick on the clear command.
    Nothing is added until that tick arrives; a ❌, no answer, or no tick stops
    the send. Mudae ticks the clear almost at once — often while `confirm` is
@@ -1174,7 +1213,7 @@ The steps:
    and only a re-fetch of the message found it, after the full 12 s timeout. So
    every tick wait in a send is now a series of **2 s checks**, each ending in a
    re-fetch: a tick the gateway never delivers costs about 2 s, not 12.
-3. **Add** each command in order (the 4,000-character plan if the user ticks
+4. **Add** each command in order (the 4,000-character plan if the user ticks
    *Nitro*), waiting for each tick. A ❌ stops the send. When Mudae offers to
    trade wishlist slots for more starwish slots, the macro **accepts if the
    wishlist still has room for every wish in the preset afterwards** (size from
@@ -1183,13 +1222,13 @@ The steps:
    size is unknown — it answers `n` and stops, saying why, since a missing
    starwish would shift every later insert. The send dialog warns in advance
    when the preset has more starwishes than the server's limit. An add with no
-   tick is noted and the send carries on — step 5 is the real check.
-4. **Toggles** (`$dl`): flip on the preset's toggles that are off, and flip off
+   tick is noted and the send carries on — step 6 is the real check.
+5. **Toggles** (`$dl`): flip on the preset's toggles that are off, and flip off
    any that are on but not on the preset. A toggle is not ticked, so the macro
    waits only for Mudae's "… now DISABLED / ENABLED" reply (up to 5 s, then
    carries on) and checks it went the intended way; the wrong way is reported
    with the result.
-5. **Check:** read the list back (`$dld`, `$adl`, or the `$wl` capture) and
+6. **Check:** read the list back (`$dld`, `$adl`, or the `$wl` capture) and
    compare it with the preset — names (ignoring case), and for `$wl` the order
    and each wish's type; for `$dl` the toggles. The page shows "matches", or
    exactly what differs.
@@ -1375,6 +1414,34 @@ anything else means the preset's loot value is wrong, so it answers `n` and
 stops. A ❌ or a missing result re-reads `$ku` (a missed result may still have
 spent) and retries once after the cooldown; a second failure in a row stops the
 run. Clicking the button again mid-run stops it after the batch in flight.
+
+**Automatic `$kl`.** The preset's Expert › Kakera loots card can run the same
+loop without a click (`kakera_loot.auto`), in one of two modes
+(`kakera_loot.auto_mode`), each at its own moment
+(`RollCycleEngine._maybe_auto_kakera_loot`):
+
+- **Once a day** (`daily`) — the whole balance, once per UTC day, as one of the
+  **start-of-day steps**: right after the day's minigames and **before any of
+  that day's rolling**. That is the top of the hourly cycle (after `$tu`,
+  `$p`/`$daily`, perk 8/9 and minigames, before the force-divorce step and the
+  rolls), or the reset wake when the day turns over while the macro waits for
+  rolls. It leaves that hour's rolls at least **10 minutes** before the next
+  reset (only **90 s** when it runs during the wait, since rolling resumes after
+  the reset anyway); a run cut short carries on at the next cycle, still before
+  the rolls. "Done today" is kept in the account's daily record
+  (`daily_resets › kakera_loot`), so a restart does not spend twice.
+- **Every hour** (`hourly`) — after each roll session, just before the wait for
+  the next rolls reset, which spends only what came in since the last run: a
+  few `$kl` an hour instead of many at the start of the day. Stops 90 s before
+  the next reset.
+
+Both run in the **hourly** and **force-divorce** modes (they are the same loop)
+and **never in `$us` mode** — the reset wake is shared with `$us` waits, so it
+checks. The runner skips a batch whose cooldown and reply would not fit in the
+time left, and nothing starts with less than a minute to spare. A wrong loot
+value (the confirm prompt asks for a different amount) switches it off for the
+rest of the run. While it runs it is the Run page's `$kl`, so that page's stop
+works on it.
 
 A loot result is classified **before** `$bonus` and `$us`: `<:morekakera:`
 alone satisfied `is_bonus_response`, so a hand-typed `$kl` result used to parse
@@ -2394,12 +2461,11 @@ were on the roll, and switches to the button if a refresh shows one.
 - Slash-command rolls. `Advisor › $bw` therefore removes the +10% slash spawn
 bonus `$bonus` reports, and leaves the 1,440/hour bonus cap unmodelled; both
 become live in one branch if slash rolling is ever added.
-- Sending `$bw` or any list command. `Advisor › $bw` names a value and prints
-the command; setting it is manual on purpose. `Advisor › Lists` reads `$dl` /
-`$adl` / `$wl` and saves presets, but its **Send** is disabled until the edit
-commands are captured. `$ov` is *read* on request (Fetch
-`$ov` on the Mudae scope bar) and never sent on its own; nothing this app does
-edits it.
+- Sending `$bw`. `Advisor › $bw` names a value and prints the command; setting
+it is manual on purpose. List commands are sent **only** by `Advisor › Lists ›
+Send to Mudae`, after a confirmation, never on their own. `$ov` is *read* on
+request (Fetch `$ov` on the Mudae scope bar) and never sent on its own; nothing
+this app does edits it.
 - Multi-account concurrent connections (config supports it; runtime is
 one Discord session — see Phase D in `ARCHITECTURE.md`).
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`

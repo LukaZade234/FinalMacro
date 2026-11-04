@@ -28,6 +28,7 @@ from mudae.parsers.wishlist import is_wishlist_message
 from mudae.parsers.disablelist import is_disablelist_message
 from mudae.parsers.antidisablelist import is_antidisablelist_message
 from mudae.parsers.list_prompts import is_list_prompt
+from mudae.parsers.serverdisablelist import is_serverdisablelist_message
 from mudae.parsers.kakeraloot import is_kakeraloot_prompt, is_kakeraloot_result
 from mudae.parsers.force_divorce import (
     is_force_divorce_prompt,
@@ -109,6 +110,8 @@ def classify_message(snapshot: MudaeMessageSnapshot) -> MessageKind:
     # which call a line with a bold run a claim.
     if is_list_prompt(content):
         return MessageKind.LIST_PROMPT
+    if is_serverdisablelist_message(content):
+        return MessageKind.SERVERDISABLELIST
     if is_antidisablelist_message(content):
         return MessageKind.ANTIDISABLELIST
     if is_disablelist_message(content):

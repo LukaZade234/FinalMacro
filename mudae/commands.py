@@ -79,6 +79,10 @@ COMMAND_ALIASES: dict[str, str] = {
     "disablelist": "disablelist",
     "adl": "antidisablelist",
     "antidisablelist": "antidisablelist",
+    # The server disablelist; ``s`` mails it by DM.
+    "sdl": "serverdisablelist",
+    "sdls": "serverdisablelist",
+    "serverdisablelist": "serverdisablelist",
     # ``$kl 12000`` arrives as "kl 12000"; the leading word resolves it.
     "kl": "kakeraloot",
     **ROLL_COMMAND_ALIASES,

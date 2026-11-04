@@ -477,3 +477,177 @@ def test_wish_flags_are_editable_and_counts_follow():
     assert store.set_entry_flag("wl", preset.id, 1, "owned", True) is False
     assert (preset.data["wl_used"], preset.data["sw_used"]) == (3, 1)
     assert store.set_entry_flag("dl", preset.id, 0, "starwish", True) is False
+
+
+# --- $sdl ---------------------------------------------------------------------
+
+_SDL_CHANNEL = """1,000 disabled
+
+'Her' 💞 - Veil
+「Shiki Ryougi」 💞 - Kara no Kyoukai: The Garden of Sinners
+●●|●●●●●|●●|● - SCP Foundation
+10t 💞 - Boku no Hero Academia
+Abby (TLoU) 💞 - The Last of Us Part II
+Abiko Samejima 💞 - 【OSHI NO KO】
+Abra - Pokédex"""
+
+_SDL_DM_1 = """Disabled characters for this server ($sdl) (5/1,000)
+5 disabled
+
+'Her' - Veil
+Aiura Mikoto - Saiki Kusuo no Ψ Nan
+Akane Tendo - Ranma ½"""
+
+_SDL_DM_2 = """Awesome Face - 
+AZKi - hololive"""
+
+
+def _sdl_embed_snapshot(description, page, pages, *, header=True):
+    return SimpleNamespace(
+        message_id=900, channel_id=1, channel_name="c", guild_id=1, guild_name="g",
+        author_id=1, author_name="Mudae", is_mudae=True, content="",
+        embeds=[{
+            "author": "Disabled characters for this server ($sdl) (1,000/1,000)" if header else "",
+            "title": "", "description": description, "footer": f"Page {page} / {pages}",
+        }],
+        buttons=_FIXTURE["dld_page1"]["buttons"], created_at="", edited=page > 1, components=[],
+    )
+
+
+def _dm_snapshot(content):
+    return SimpleNamespace(
+        message_id=901, channel_id=2, channel_name="dm", guild_id=None, guild_name=None,
+        author_id=1, author_name="Mudae", is_mudae=True, content=content, embeds=[],
+        buttons=[], created_at="", edited=False, components=[],
+    )
+
+
+def test_sdl_channel_page_keeps_names_only():
+    from mudae.parsers.serverdisablelist import merge_sdl_pages
+
+    for paired in ("sdl", "sdls", None):
+        parsed = parse_message(_sdl_embed_snapshot(_SDL_CHANNEL, 1, 67), reply_to_command=paired)
+        fields = parsed.fields
+        assert (fields["used"], fields["max"], fields["total"]) == (1000, 1000, 1000)
+        assert (fields["page"], fields["pages"]) == (1, 67)
+        assert fields["entries"] == [
+            "'Her'", "「Shiki Ryougi」", "●●|●●●●●|●●|●", "10t",
+            "Abby (TLoU)", "Abiko Samejima", "Abra",
+        ]
+    assert parse_message(_sdl_embed_snapshot(_SDL_CHANNEL, 1, 67)).kind == MessageKind.SERVERDISABLELIST
+    assert merge_sdl_pages([fields])["complete"] is False  # page 1 of 67
+
+
+def test_sdl_dm_parts_join_and_complete_by_count():
+    from mudae.parsers.serverdisablelist import merge_sdl_pages, parse_sdl_page
+
+    first, second = parse_sdl_page(_SDL_DM_1), parse_sdl_page(_SDL_DM_2)
+    assert first["entries"] == ["'Her'", "Aiura Mikoto", "Akane Tendo"]
+    # An empty series still ends the name; 💞-free DM rows read the same.
+    assert second["entries"] == ["Awesome Face", "AZKi"]
+    assert merge_sdl_pages([first])["complete"] is False
+    merged = merge_sdl_pages([first, second])
+    assert merged["complete"] is True and merged["count_matches"] is True
+
+
+def test_sdl_dm_capture_reads_parts_until_the_count_is_reached():
+    from macro.listing_capture import capture_dm_listing
+    from mudae.parsers.serverdisablelist import (
+        is_serverdisablelist_message, merge_sdl_pages, parse_sdl_page,
+    )
+
+    unrelated = _dm_snapshot("Lucy appeared! React with any emoji to claim")
+    channel_noise = SimpleNamespace(**{**_dm_snapshot(_SDL_DM_2).__dict__, "guild_id": 1})
+    replies = [
+        (unrelated, None),        # before the header: not a part
+        (channel_noise, None),    # not a DM
+        (_dm_snapshot(_SDL_DM_1), None),
+        (_dm_snapshot(_SDL_DM_2), None),
+        (_dm_snapshot("Zzz - never read"), None),  # after completion
+    ]
+
+    class Actions:
+        sent: list[str] = []
+
+        async def send_command(self, command):
+            self.sent.append(command)
+
+        async def wait_for(self, predicate, *, timeout=0.0):
+            while replies:
+                snapshot, parsed = replies.pop(0)
+                if predicate(snapshot, parsed):
+                    return snapshot, parsed
+            return None
+
+    actions = Actions()
+    result = asyncio.run(capture_dm_listing(
+        actions, command="sdls", label="Server disablelist",
+        parse_part=parse_sdl_page, has_header=is_serverdisablelist_message, merge=merge_sdl_pages,
+    ))
+    assert actions.sent == ["sdls"]
+    assert result.ok and result.complete and result.route == "dm"
+    assert result.entries == ["'Her'", "Aiura Mikoto", "Akane Tendo", "Awesome Face", "AZKi"]
+
+
+def test_sdl_aliases_and_commands():
+    from macro.list_commands import plan_list_commands
+
+    for typed in ("sdl", "sdls"):
+        assert normalize_command(typed) == "serverdisablelist"
+    plan = plan_list_commands("sdl", {"entries": ["Abra", "Absol", "AZKi"]})
+    assert plan["clear"]["text"] == "$serverenableall"
+    assert [c["text"] for c in plan["regular"]] == ["$sdc Abra$Absol$AZKi"]
+    big = plan_list_commands("sdl", {"entries": [f"Character number {i:04d}" for i in range(1000)]})
+    assert big["split"] and all(len(c["text"]) <= 2000 for c in big["regular"])
+
+
+def test_sdl_store_and_presets():
+    store = MudaeListsStore()
+    store.set("sdl", "a", "c", {"used": 3, "max": 1000, "total": 3, "entries": ["Abra", "Absol", "AZKi"]})
+    preset = store.save_preset("sdl", "Mine", store.get("sdl", "a", "c").data)
+    assert store.add_entries("sdl", preset.id, "Acerola$abra") == 1
+    again = MudaeListsStore()
+    again.load_from_settings(json.loads(json.dumps(store.to_settings_fragment())))
+    assert again.get("sdl", "a", "c").data["total"] == 3
+    assert again.presets["sdl"][0].data["entries"] == ["Abra", "Absol", "AZKi", "Acerola"]
+
+
+def test_sdl_empty_answer():
+    from mudae.parsers.serverdisablelist import is_sdl_empty, merge_sdl_pages
+
+    text = "List empty! ($serverdisable)"
+    assert is_sdl_empty(text)
+    for paired in ("sdl", None):
+        parsed = parse_message(_dm_snapshot(text) if paired is None else SimpleNamespace(
+            **{**_dm_snapshot(text).__dict__, "guild_id": 1}), reply_to_command=paired)
+        assert parsed.fields["empty"] is True and parsed.fields["entries"] == []
+    merged = merge_sdl_pages([parsed.fields])
+    assert merged["empty"] and merged["complete"] and merged["used"] == 0
+
+
+def test_sdl_dm_capture_stops_at_the_empty_answer_in_the_channel():
+    from macro.listing_capture import capture_dm_listing
+    from mudae.parsers.serverdisablelist import (
+        is_sdl_empty, is_serverdisablelist_message, merge_sdl_pages, parse_sdl_page,
+    )
+
+    channel_reply = SimpleNamespace(**{**_dm_snapshot("List empty! ($serverdisable)").__dict__, "guild_id": 1})
+    replies = [(channel_reply, None)]
+
+    class Actions:
+        async def send_command(self, command):
+            pass
+
+        async def wait_for(self, predicate, *, timeout=0.0):
+            while replies:
+                item = replies.pop(0)
+                if predicate(*item):
+                    return item
+            return None
+
+    result = asyncio.run(capture_dm_listing(
+        Actions(), command="sdls", label="Server disablelist", parse_part=parse_sdl_page,
+        has_header=is_serverdisablelist_message, merge=merge_sdl_pages, is_empty=is_sdl_empty,
+    ))
+    assert result.ok and result.complete and result.entries == []
+    assert result.data["empty"] is True

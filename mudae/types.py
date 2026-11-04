@@ -36,6 +36,7 @@ class MessageKind(str, Enum):
     WISHLIST = "wishlist"
     DISABLELIST = "disablelist"
     ANTIDISABLELIST = "antidisablelist"
+    SERVERDISABLELIST = "serverdisablelist"
     LIST_PROMPT = "list_prompt"
     HAREM = "harem"
     FORCE_DIVORCE_PROMPT = "force_divorce_prompt"

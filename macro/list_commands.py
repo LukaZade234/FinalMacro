@@ -16,6 +16,9 @@ so the adds always land on an empty list and their order is exact.
 
 ``$adl`` — ``$ad a$b$c``. Order does not matter.
 
+``$sdl`` — ``$sdc a$b$c`` (by character; ``$sd`` would take series). Cleared
+with ``$serverenableall``, which has no short form. Up to 1,000 characters.
+
 ``$dl`` — ``$d a$b$c`` for the disables, then the toggles. A toggle **flips**:
 sending ``$togglewestern`` while western is already off turns it back on, and
 ``$eall`` leaves toggles as they are. The preset's own toggles are always
@@ -122,14 +125,33 @@ def adl_commands(entries: Iterable[Any], limit: int = DISCORD_LIMIT) -> list[Lis
     return _simple("$ad", _names(entries), limit, "antidisable these series")
 
 
+# --- $sdl -------------------------------------------------------------------
+
+
+def sdl_commands(entries: Iterable[Any], limit: int = DISCORD_LIMIT) -> list[ListCommand]:
+    """``$sdc a$b$c`` — disable these **characters** server-wide.
+
+    ``$sdc`` adds by character name; ``$sd`` would add whole series and is not
+    used here, so a preset's names are never read as series.
+    """
+    return _simple("$sdc", _names(entries), limit, "server-disable these characters")
+
+
 # --- $dl --------------------------------------------------------------------
 
 
 # The short clear-all command for each list, sent before the adds.
-CLEAR_COMMANDS: dict[str, str] = {"dl": "$eall", "adl": "$aeall", "wl": "$wrall"}
+# `$sdl` has no short form of its clear.
+CLEAR_COMMANDS: dict[str, str] = {
+    "dl": "$eall",
+    "adl": "$aeall",
+    "sdl": "$serverenableall",
+    "wl": "$wrall",
+}
 _CLEAR_NOTES: dict[str, str] = {
     "dl": "$enableall — empties the disablelist",
     "adl": "$antienableall — empties the antidisablelist",
+    "sdl": "empties the server disablelist — for the whole server",
     "wl": "$wishremoveall — empties the wishlist",
 }
 
@@ -316,6 +338,8 @@ def plan_list_commands(
     def plan(limit: int) -> list[ListCommand]:
         if kind == "adl":
             return adl_commands(entries, limit)
+        if kind == "sdl":
+            return sdl_commands(entries, limit)
         if kind == "dl":
             return dl_commands(entries, limit)
         return wl_commands(entries, limit)

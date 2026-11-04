@@ -313,12 +313,19 @@ class ListSender:
         *,
         nitro: bool = False,
         toggles: list[Any] | None = None,
+        skip_clear: bool = False,
     ) -> SendOutcome:
+        """Clear (unless ``skip_clear``: the list is known to be empty), add, toggle.
+
+        ``skip_clear`` exists for ``$sdl``: ``$serverenableall`` on an empty
+        server disablelist gets **no answer at all**, so the caller checks first
+        and skips the clear when Mudae says "List empty!".
+        """
         outcome = SendOutcome()
         if plan.get("error"):
             outcome.reason = str(plan["error"])
             return outcome
-        clear = (plan.get("clear") or {}).get("text")
+        clear = None if skip_clear else (plan.get("clear") or {}).get("text")
         adds = [c["text"] for c in (plan.get("nitro") if nitro else plan.get("regular")) or []]
         steps = len(adds) + len(toggles or []) + (1 if clear else 0)
         done = 0

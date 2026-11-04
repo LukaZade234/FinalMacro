@@ -289,17 +289,29 @@ class ForceDivorceRules:
 KL_MAX_BATCH = 12_000
 
 
+# When automatic ``$kl`` runs (see `macro/roll_cycle.py` › auto kakera loot).
+KL_AUTO_DAILY = "daily"    # once per UTC day, after that day's minigames and first rolls
+KL_AUTO_HOURLY = "hourly"  # after every hourly roll session
+KL_AUTO_MODES = (KL_AUTO_DAILY, KL_AUTO_HOURLY)
+
+
 @dataclass
 class KakeraLootRules:
-    """``$kl`` settings for the Run page's kakera-loot button.
+    """``$kl`` settings — the Run page's button, and the automatic run.
 
     ``loot_value`` is the kakera one loot costs (500 unless Mudae's loot value
     has been changed); ``batch`` is how many loots each ``$kl`` command buys.
-    The run stops once the balance cannot pay for a whole batch.
+    A run stops once the balance cannot pay for a whole batch.
+
+    ``auto`` spends kakera on ``$kl`` without a click, from the hourly roll
+    loop (normal and force-divorce, never ``$us`` mode), at the end of an hour's
+    rolling: ``auto_mode`` ``daily`` once per UTC day, ``hourly`` every hour.
     """
 
     loot_value: int = 500
     batch: int = KL_MAX_BATCH
+    auto: bool = False
+    auto_mode: str = KL_AUTO_DAILY
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> KakeraLootRules:
@@ -307,9 +319,12 @@ class KakeraLootRules:
             return cls()
         value = _coerce_int_or_none(data.get("loot_value"))
         batch = _coerce_int_or_none(data.get("batch"))
+        mode = str(data.get("auto_mode") or KL_AUTO_DAILY).strip().lower()
         return cls(
             loot_value=max(1, value) if value is not None else 500,
             batch=max(1, min(KL_MAX_BATCH, batch)) if batch is not None else KL_MAX_BATCH,
+            auto=bool(data.get("auto", False)),
+            auto_mode=mode if mode in KL_AUTO_MODES else KL_AUTO_DAILY,
         )
 
     def to_dict(self) -> dict[str, Any]:

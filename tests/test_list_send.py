@@ -366,3 +366,12 @@ def test_reader_remembers_a_tick_that_landed_before_the_wait():
     cross = SimpleNamespace(message=SimpleNamespace(id=43, channel=SimpleNamespace(id=5)), emoji="\u274c")
     asyncio.run(monitor._handle_reaction_add(cross, SimpleNamespace(id=mudae_id)))
     assert asyncio.run(monitor.wait_for_mudae_cross(43, timeout=0.01)) is True
+
+
+def test_skip_clear_goes_straight_to_the_adds():
+    plan = plan_list_commands("sdl", {"entries": ["Abra", "Absol"]})
+    assert plan["clear"]["text"] == "$serverenableall"
+    mudae = FakeMudae(lambda c: "tick")
+    outcome = _send(mudae, plan, skip_clear=True)
+    assert outcome.ok
+    assert mudae.sent == ["$sdc Abra$Absol"] and mudae.texts == []

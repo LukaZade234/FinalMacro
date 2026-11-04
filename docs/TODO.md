@@ -8,7 +8,11 @@ Follow **Unlock path** unless you specifically want a quick win or a single high
 
 ## Next up
 
-The **`$dl`/`$adl`/`$wl` lists** are half done: parsers, paged fetch, presets and the **Advisor › Lists** page shipped (2026-11-04); what is left is **sending** a preset back, which needs the `$dl`/`$adl` edit commands captured first (the wish commands are in `MUDAE_LOGIC.md`). Per **By importance**, the two things actually worth doing are wiring *behavioural* rules off the already-parsed `$settings`/`$bonus` fields, and **full daily autonomy** (one connect covers rolls, reacts, minigames, dailies, and skips minigames already exhausted). The **auto sphere/kakera investor** needs one hand-typed invest exchange captured first — stock tracking and the `$ku` balance (from `$kl`) are in, but the invest command's syntax and reply are still undocumented. Phase D and achievements only matter if multi-account or a leaderboard is actually wanted.
+The **one-click lists are finished** (2026-11-04): `$dl`, `$adl`, `$sdl` and `$wl` are fetched, saved as presets, edited, copied as commands and sent back from **Advisor › Lists** — see the section of that name below, and only first-live-send checks remain.
+
+**Recommended next: the settings preflight check** ([`PARSED_FIELDS.md`](PARSED_FIELDS.md) §A). It is the cheapest real slice of **By importance #1**: compare the already-fetched `$settings` / `$ov` against what the parsers need (`setfooter`, `displaykeys`, `togglekakerarolls`, `wishdm`, `rollsleft`, …) and say so on the Mudae hub and at connect, so a display setting that blinds a parser stops failing silently. After it, the **kakera value model** (§B) is the next behavioural use of `$bonus`.
+
+**Full daily autonomy** — ~~automatic `$kl`~~ shipped (preset › Expert › Kakera loots: once a day with the start-of-day steps before any rolling, or every hour after each roll session; never in `$us` mode). Minigames already auto-play at start and reset and skip exhausted games, and `$p`/`$daily` run on their own; anything else still manual should be listed before it is built. The **auto sphere/kakera investor** is blocked on one hand-typed invest exchange (command syntax and reply). Phase D and achievements only matter if multi-account or a leaderboard is actually wanted.
 
 ---
 
@@ -23,7 +27,7 @@ Cheapest first. “Easy” means a sitting or two and little new machinery.
 5. ~~**Timezones**~~ — UTC for Mudae dailies / stats “today”; live feed stays local.
 6. ~~**`$p` / `$daily`**~~ — account-global, designated channel, priority over rolls.
 7. ~~**Chaos parser**~~ — `mudae/parsers/chaos.py`: extra rolls spent, free kakera/wish acted on, power discount applied, omega keys logged.
-8. **`$dl` / `$adl` / `$wl` one-click** — ~~parse + paged fetch + presets + Advisor › Lists~~ shipped. Copy command (the rebuild commands, `macro/list_commands.py`) shipped. ~~Send~~ shipped too (clear + `confirm` + tick, adds with ticks, starwish-limit question, toggles from a fresh `$dld`, re-read and compare). **Open:** first live sends — check that `$sw` appends to the end and `i <n>` inserts at *n* (the compare will say if not), and that every add really is ticked.
+8. ~~**`$dl` / `$adl` / `$sdl` / `$wl` one-click**~~ — fetch, presets, edit, Copy command and Send all shipped in **Advisor › Lists**. Remaining live checks are listed under that section.
 8b. ~~**`$kl` kakera loots**~~ — Run-page button, `$ku` balance then `$kl <batch>` until unaffordable (`macro/kakera_loot.py`).
 9. ~~**Perk 8 power save / `$us` control**~~ — perk-8 reserve in `macro/perk8_power.py`; `$us` drain/schedule on the preset. Run page is only the Roll `$us` button.
 10. ~~**Sphere tracking audit**~~ — perk-9 colour on `sphere_click`, `$oc` from `$oh` not double-counted, no overlap between SP sources; Statistics “today” matches hand tally.
@@ -50,7 +54,7 @@ Highest first. What makes an overnight run correct and complete.
 8. ~~**Overnight completeness**~~ — chaos parser + follow-up wired end to end.
 9. ~~**More SP from games we already play**~~ — `$oh` DP confirms the shipped heuristic, `$oc` lookahead measured (+1.25 SP/board, n.s.), `$oq` MIXED matches Colblitz. Nothing obvious left in this line.
 10. ~~**App-only wishlist**~~ and ~~**`$bw` advisory**~~ both shipped, including the base pool — no longer a guessed input, it now comes from `$limroul`.
-11. **`$dl` switch** (Send step), shell Run parity.
+11. ~~**`$dl` switch**~~ (done — Advisor › Lists), shell Run parity.
 12. Last: achievements, split `bridge.py`, leftover regexes, GUI polish.
 
 ---
@@ -89,7 +93,7 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 
 ## Daily loop and scheduling
 
-- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill.
+- **Full daily autonomy** — one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips minigames already exhausted until refill. ~~Automatic `$kl`~~ done (`daily` / `hourly`, preset › Expert).
 - ~~**Save power for perk 8 refresh**~~ — `macro/perk8_power.py`, horizon `min(N hours, time until UTC midnight)`, default 4h. Purple stays free.
 - **Auto sphere / kakera investor** — spend stock into `$oh` / kakera invest without a manual click.
 - ~~**`$ot` solver + auto-play**~~ — in `PLAYABLE_MINIGAMES`, same as `$oh`/`$oc`/`$oq`; the **Play $ot** button stays for an on-demand single play.
@@ -101,10 +105,23 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 ## Accounts and servers
 
 - **Multi account / server runtime (Phase D)** — config already has accounts, channels, presets, and `targets[]`. Runtime is still one Discord connection. Coordinator must resolve `(account, channel) → preset` per target (never “first preset on the account”). See Phase D in `ARCHITECTURE.md`.
-- **`$dl` / `$adl` / `$wl` one-click switch** — ~~read side~~ shipped: `Advisor › Lists` fetches all three, shows toggles apart from disables and wish types per row, and saves named presets. **Open:** Send (clear, then bulk add; `$wl` per wish type in an order that keeps positions). Not the same as Colblitz's disablelist *optimizer* (needs a bundle database we do not have).
-  - First live `$dld` fetch: check pages 2–3 parse (only page 1 has ever been seen) and whether the `42/62` count includes toggles (`count_matches`).
-  - No kakera-wish row has been captured; the parser's `:kakera:` match is from a hand-made row.
-  - First live `$wlsz+z!z-`: check how the no-sphere rows print in the DM.
+- ~~**`$dl` / `$adl` / `$wl` one-click switch**~~ — done, plus `$sdl`; see **Advisor › Lists** below. Still not the same as Colblitz's disablelist *optimizer* (needs a bundle database we do not have).
+
+---
+
+## Advisor › Lists (2026-11-04)
+
+- ~~**Read**~~ — parsers for `$dld` (totals, per-pool counts, **toggles** apart from disables, names only), `$adl`, `$sdl` / `$sdls` (names only, 💞 and series dropped) and plain `$wl` rows (starwish / locked / kakera wish / owned). All four used to parse as **roll cards**. Paged capture up to 100 pages (`macro/listing_capture.py`); `$sdls` and `$wlsz+z!z-` by DM when allowed. `z-` was added because `z+z!` alone hides every wish with no spheres.
+- ~~**Presets**~~ — save from a fetch or **Add new**; edit by pasting names or commands (`$swl reze$lucy`, `$wishk …`, `$wishli 4$…`, `$togglewestern`), drag-and-drop, rename, wish-type flags, toggle checkboxes, optional typed counts. Saved presets drop ✅ and show only their own counts.
+- ~~**Copy command**~~ — clear, then adds, then toggles (`macro/list_commands.py`); wishlists rebuilt per wish type with position inserts, fewest commands, split at 2,000 / 4,000 characters; replayed against a model of Mudae in tests.
+- ~~**Send to Mudae**~~ — clear + `confirm` + tick (`$eall` / `$aeall` / `$serverenableall` / `$wrall`), adds with ticks, the starwish-trade question (accepted only while the wishlist keeps room for the preset), toggles from a fresh `$dld` by their reply (toggles are never ticked), `$sdl` checked first (an empty list makes `$serverenableall` silent), 1 s between messages, then a re-read and compare. Gamemode-2 servers warn before a `$dl` / `$adl` send.
+- **Live checks still open** — none blocks use; each is reported by the post-send compare if it goes wrong:
+  - `$sw` appends to the end and `i <n>` inserts at *n* (the wishlist plan relies on both).
+  - `$sdc` is ticked like the other adds, and `$serverenableall` on a non-empty list asks "Type confirm…".
+  - `$dld` pages 2+ parse (only page 1 seen) and whether `42/62` counts toggles.
+  - A kakera-wish row has never been captured (parser matches `:kakera:` from a hand-made row); how no-sphere rows print in the `$wlsz+z!z-` DM.
+  - The `$wrall` confirm tick: the activity log's "ticked N s after confirm" will say whether the 2 s re-check is doing the work.
+- **Possible next:** series in `$sdl` presets (`$sd`), kept as a separate **Series** section beside **Characters** — `$sdl` only lists characters, so series would exist in presets only.
 
 ---
 
