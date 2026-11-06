@@ -140,6 +140,11 @@ Item {
                     value: run.dkText
                 }
                 ConsoleStatCell {
+                    key: "rt"
+                    value: run.rtText
+                    tone: run.rtReady ? "good" : "neutral"
+                }
+                ConsoleStatCell {
                     key: "us"
                     value: run.usText
                     tone: "violet"
@@ -317,6 +322,10 @@ Item {
                     onMovingChanged: updateStickToBottom()
                     onFlickingChanged: updateStickToBottom()
                     onCountChanged: if (stickToBottom) Qt.callLater(positionViewAtEnd)
+                    // Once the log is full (400 lines) the count stops changing, but each
+                    // refresh is a new model that resets the view to the top (the oldest
+                    // lines), so follow the tail on every model change too.
+                    onModelChanged: if (stickToBottom) Qt.callLater(positionViewAtEnd)
                     Component.onCompleted: Qt.callLater(positionViewAtEnd)
 
                     delegate: Item {
@@ -393,13 +402,36 @@ Item {
                     color: Theme.line
                 }
 
-                ColumnLayout {
+                // Scrolls once the alts block makes the rail taller than the page.
+                Flickable {
+                    id: railFlick
                     anchors.fill: parent
                     anchors.leftMargin: 14
                     anchors.rightMargin: 13
                     anchors.topMargin: 11
                     anchors.bottomMargin: 11
+                    clip: true
+                    contentWidth: width
+                    contentHeight: railColumn.implicitHeight
+                    boundsBehavior: Flickable.StopAtBounds
+                    flickableDirection: Flickable.VerticalFlick
+
+                ColumnLayout {
+                    id: railColumn
+                    width: railFlick.width
+                    height: Math.max(implicitHeight, railFlick.height)
                     spacing: 11
+
+                    ConsoleAltsBlock {
+                        Layout.fillWidth: true
+                        runModel: run
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Theme.line
+                    }
 
                     // last claim
                     Rectangle {
@@ -574,6 +606,7 @@ Item {
                     }
 
                     Item { Layout.fillHeight: true }
+                }
                 }
             }
         }

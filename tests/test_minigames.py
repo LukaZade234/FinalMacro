@@ -537,3 +537,18 @@ def test_refused_grid_click_refreshes_then_stops():
     asyncio.run(_case())
     assert fetches["n"] == 1
     assert any("stopping" in line for line in logs)
+
+
+def test_play_all_skips_games_left_out_of_an_alts_list(monkeypatch):
+    sent: list[str] = []
+    for game, cls in (("oh", "OhSphereGame"), ("oc", "OcSphereGame"), ("oq", "OqSphereGame"), ("ot", "OtSphereGame")):
+        monkeypatch.setattr(
+            f"macro.minigames.{cls}",
+            lambda *a, _g=game, **k: _FakeGame(_g, {"clicks": 1, "reward": 1, "reason": "done"}, sent),
+        )
+    actions = _FakeActions({f"{g}_{k}": (1 if k != "stored" else 0) for g in ("oh", "oc", "oq", "ot") for k in ("left", "stored", "total")})
+    runner = PlayAllMinigames(
+        actions, SimpleNamespace(macro_active=False), log=lambda _t: None, between_games_sec=0, games=["oh", "oq"]
+    )
+    asyncio.run(runner.play(prefix="$"))
+    assert sent == ["oh:1:$", "oq:1:$"]

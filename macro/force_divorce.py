@@ -45,6 +45,7 @@ IDLE = "idle"          # armed, waiting for a claim slot
 DIVORCING = "divorcing"  # $forcedivorce sent, prompt not yet confirmed
 HUNTING = "hunting"    # divorced and unowned — every roll is looking for it
 CLAIMED = "claimed"    # banked; waiting for the next slot to come round
+HELD = "held"          # an alt claimed it: divorced from the alt next, or given back
 STOPPED = "stopped"    # aborted, reason on ``stop_reason``
 
 
@@ -64,8 +65,12 @@ class ForceDivorceRecord:
     """
 
     target: str = ""
-    # False means "divorced and not claimed back" — i.e. still out there.
+    # False means "not the main's": divorced and out there, or held by an alt.
     owned: bool = True
+    # The alt account that claimed it on an alt cycle and has not given it
+    # back yet. Not exposed — but not the main's either, so it must be given
+    # back before anything is divorced again.
+    held_by: str = ""
     updated_at: str = ""
 
     @classmethod
@@ -75,6 +80,7 @@ class ForceDivorceRecord:
         return cls(
             target=str(data.get("target") or "").strip(),
             owned=bool(data.get("owned", True)),
+            held_by=str(data.get("held_by") or ""),
             updated_at=str(data.get("updated_at") or ""),
         )
 
@@ -82,13 +88,19 @@ class ForceDivorceRecord:
         return {
             "target": self.target,
             "owned": self.owned,
+            "held_by": self.held_by,
             "updated_at": self.updated_at,
         }
 
     @property
     def outstanding(self) -> bool:
-        """A character we divorced and never claimed back."""
-        return bool(self.target) and not self.owned
+        """A character we divorced and nobody of ours claimed back."""
+        return bool(self.target) and not self.owned and not self.held_by
+
+    @property
+    def held(self) -> bool:
+        """Claimed by an alt, not yet given back to the main."""
+        return bool(self.target) and not self.owned and bool(self.held_by)
 
 
 def load_force_divorce_record(daily_resets: dict[str, Any] | None) -> ForceDivorceRecord:
@@ -151,6 +163,9 @@ class ForceDivorceSession:
     # Set while the divorce is unconfirmed, so a lost reply can be resolved by
     # re-reading the harem rather than guessed at.
     pending_character: str = ""
+    # Alt cycle: the alt account holding the target until it gives it back.
+    held_by: str = ""
+    alt_cycles: int = 0
     notes: list[str] = field(default_factory=list)
 
     # --- target ------------------------------------------------------------
@@ -195,6 +210,7 @@ class ForceDivorceSession:
         *,
         allow_rt: bool = True,
         rt_min_minutes: int = RT_MIN_MINUTES_BEFORE_RESET,
+        alt_slot: bool = False,
     ) -> tuple[bool, str]:
         """Whether to force-divorce right now, and why not when the answer is no.
 
@@ -213,6 +229,13 @@ class ForceDivorceSession:
             return False, "no target chosen yet"
         if self.phase in {DIVORCING, HUNTING}:
             return False, f"{self.target.name} is already divorced and unclaimed"
+        # HELD: the main divorces it straight from the alt that claimed it
+        # ("Lucy belongs to @alt, do you want to force the divorce?"), so the
+        # same slots decide; with none left, the alt gives it back instead.
+        if alt_slot:
+            # An alt with a claim in hand is a slot too: that alt claims the
+            # target on this cycle, and the main's own slot is the fallback.
+            return True, ""
         if getattr(state, "claim_available", None) is True:
             return True, ""
         if allow_rt and getattr(state, "rt_available", None) is True:
@@ -228,16 +251,24 @@ class ForceDivorceSession:
     # --- transitions -------------------------------------------------------
 
     def begin_divorce(self) -> None:
+        # ``held_by`` stays set while divorcing from an alt: the prompt's
+        # owner must be that alt, and a failure leaves it with the alt.
         self.phase = DIVORCING
         self.pending_character = self.target.name if self.target else ""
+
+    @property
+    def divorcing_from_alt(self) -> bool:
+        return bool(self.held_by)
 
     def note_divorced(self) -> None:
         self.phase = HUNTING
         self.pending_character = ""
+        self.held_by = ""
 
     def note_divorce_failed(self) -> None:
-        """Back to waiting: nothing was divorced, so nothing is exposed."""
-        self.phase = IDLE
+        """Nothing was divorced, so nothing is exposed: back to waiting, or
+        still with the alt when it was being divorced from one."""
+        self.phase = HELD if self.held_by else IDLE
         self.pending_character = ""
 
     def note_claimed(self, *, kakera: int = 0, spheres: int = 0) -> None:
@@ -245,6 +276,17 @@ class ForceDivorceSession:
         self.cycles += 1
         self.kakera_banked += max(0, int(kakera or 0))
         self.spheres_banked += max(0, int(spheres or 0))
+
+    def note_held(self, account_id: str) -> None:
+        """An alt claimed it (``note_claimed`` already banked the payout)."""
+        self.phase = HELD
+        self.held_by = str(account_id)
+        self.alt_cycles += 1
+
+    def note_returned(self) -> None:
+        """The alt gave it back: the main owns it again."""
+        self.phase = CLAIMED
+        self.held_by = ""
 
     def ready_for_next_cycle(self) -> None:
         if self.phase == CLAIMED:
@@ -262,6 +304,8 @@ class ForceDivorceSession:
             "target": self.target.name if self.target else "",
             "target_kakera": self.target.kakera if self.target else 0,
             "cycles": self.cycles,
+            "alt_cycles": self.alt_cycles,
+            "held_by": self.held_by,
             "kakera": self.kakera_banked,
             "spheres": self.spheres_banked,
             "stop_reason": self.stop_reason,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
@@ -199,6 +200,12 @@ def is_ohu8_parse_result(parsed: ParseResult) -> bool:
 _MAX_QUEUE_SIZE = 512
 
 
+def prompt_guard(actions: Any) -> Any:
+    """The account's open-prompt lock, or a no-op for test doubles without one."""
+    opener = getattr(actions, "open_prompt", None)
+    return opener() if opener is not None else contextlib.nullcontext()
+
+
 class DiscordActions:
     """Send commands and wait for parsed Mudae replies on a shared monitor."""
 
@@ -208,6 +215,42 @@ class DiscordActions:
         # Every Mudae message on this account passes through ``feed``, so this
         # is the one place that sees an outage whichever command hit it.
         self.maintenance = MaintenanceWatch()
+        # Multi-account: the channel's command lane (macro/turns.py) and whose
+        # account this is. ``None`` when only one account runs, which leaves
+        # every path exactly as it was.
+        self._coordinator: Any = None
+        self._lane_account: str = ""
+        self._own_names: Callable[[], list[str]] = lambda: []
+        # Held while this account has a y/n question from Mudae open
+        # ($forcedivorce, $kl, a starwish trade, a transfer). A bare "y"
+        # answers whatever is open, so two open at once could confirm the
+        # wrong one — an alt's $give landing while the main's own
+        # $forcedivorce prompt waits, say.
+        self._prompt_lock = asyncio.Lock()
+
+    def set_lane(
+        self,
+        coordinator: Any,
+        account_id: str,
+        own_names: Callable[[], list[str]] | None = None,
+    ) -> None:
+        """Send through ``coordinator``'s lane as ``account_id`` (or detach with None)."""
+        self._coordinator = coordinator
+        self._lane_account = str(account_id or "")
+        self._own_names = own_names or (lambda: [])
+
+    @property
+    def lane_account(self) -> str:
+        return self._lane_account if self._coordinator is not None else ""
+
+    def open_prompt(self) -> "asyncio.Lock":
+        """``async with actions.open_prompt():`` around a command that asks y/n."""
+        return self._prompt_lock
+
+    def release_hold(self) -> None:
+        """The reply this account's last command was waiting on was read elsewhere."""
+        if self._coordinator is not None:
+            self._coordinator.reply_seen(self._lane_account)
 
     def feed(self, snapshot: MudaeMessageSnapshot, parsed: ParseResult) -> None:
         if not snapshot.is_mudae:
@@ -224,7 +267,10 @@ class DiscordActions:
         return self._queue.qsize()
 
     async def send_command(self, command: str, *, prefix: str | None = None) -> int | None:
-        return await self._monitor.send_command(command, prefix=prefix)
+        if self._coordinator is None:
+            return await self._monitor.send_command(command, prefix=prefix)
+        async with self._coordinator.command_lane(self._lane_account):
+            return await self._monitor.send_command(command, prefix=prefix)
 
     async def wait_for_mudae_tick(
         self,
@@ -295,6 +341,8 @@ class DiscordActions:
                 except asyncio.TimeoutError:
                     continue
                 if predicate(snapshot, parsed):
+                    if self._coordinator is not None:
+                        self._coordinator.reply_seen(self._lane_account)
                     return snapshot, parsed
                 deferred.append((snapshot, parsed))
             return None
@@ -306,10 +354,20 @@ class DiscordActions:
 
     async def wait_for_tu(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(
-            lambda _s, p: is_tu_parse_result(p),
+            lambda _s, p: is_tu_parse_result(p) and self._is_own_tu(p),
             timeout=timeout,
         )
         return result[1] if result else None
+
+    def _is_own_tu(self, parsed: ParseResult) -> bool:
+        """With alts in the channel, only this account's own ``$tu`` counts."""
+        if self._coordinator is None:
+            return True
+        user = str((parsed.fields or {}).get("tu_user") or "").strip().lower()
+        names = [str(n).strip().lower() for n in self._own_names() if n]
+        if not user or not names:
+            return True
+        return user in names
 
     async def wait_for_ohu(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(
@@ -447,7 +505,10 @@ class DiscordActions:
         send = getattr(self._monitor, "send_text", None)
         if send is None:
             return None
-        return await send(text)
+        if self._coordinator is None:
+            return await send(text)
+        async with self._coordinator.command_lane(self._lane_account):
+            return await send(text)
 
     async def wait_for_harem(self, *, timeout: float = 12.0) -> ParseResult | None:
         result = await self.wait_for(

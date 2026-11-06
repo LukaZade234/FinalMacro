@@ -26,6 +26,7 @@ from mudae.parsers.wishlist import parse_wishlist_result, parse_wishlist_text_re
 from mudae.parsers.disablelist import parse_disablelist
 from mudae.parsers.antidisablelist import parse_antidisablelist
 from mudae.parsers.list_prompts import is_list_prompt, parse_list_prompt
+from mudae.parsers.transfers import is_transfer_message, parse_transfer
 from mudae.parsers.serverdisablelist import parse_serverdisablelist
 from mudae.parsers.roll_limit import is_roll_limit_message, parse_roll_limit
 from mudae.parsers.roll import parse_roll, parse_roll_ownership
@@ -99,6 +100,8 @@ _KIND_DISPLAY: dict[MessageKind, str] = {
     MessageKind.DAILY: "$daily",
     MessageKind.KAKERALOOT_PROMPT: "$kl confirm",
     MessageKind.KAKERALOOT_RESULT: "$kl",
+    MessageKind.TRANSFER_PROMPT: "transfer confirm",
+    MessageKind.TRANSFER_RESULT: "transfer",
 }
 
 
@@ -231,6 +234,10 @@ def parse_mudae_message(
 
     if is_list_prompt(snapshot_visible_text(snapshot)):
         return parse_list_prompt(snapshot_visible_text(snapshot))
+    # Same for $give / $givek / $givesp: the question and the result answer
+    # a command no parser covers, and must never fall to the claim heuristics.
+    if is_transfer_message(snapshot.content):
+        return parse_transfer(snapshot.content)
 
     from mudae.parsers.classify import snapshot_is_kakera_claim, snapshot_text
 

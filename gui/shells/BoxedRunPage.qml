@@ -228,6 +228,10 @@ Item {
                     onMovingChanged: updateStickToBottom()
                     onFlickingChanged: updateStickToBottom()
                     onCountChanged: if (stickToBottom) Qt.callLater(positionViewAtEnd)
+                    // Once the log is full (400 lines) the count stops changing, but each
+                    // refresh is a new model that resets the view to the top (the oldest
+                    // lines), so follow the tail on every model change too.
+                    onModelChanged: if (stickToBottom) Qt.callLater(positionViewAtEnd)
                     Component.onCompleted: Qt.callLater(positionViewAtEnd)
 
                     delegate: Item {

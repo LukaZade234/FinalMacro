@@ -59,6 +59,27 @@ resends `$wa`. A full miss does not end the hour while `$tu` still shows rolls
 left; it skips that attempt and continues, and stops the batch only after
 several misses in a row.
 
+**A batch that runs into the reset stops there.** A large pool, or chaos
+kakera adding `+N rolls this hour`, can leave a batch rolling when the hour
+resets. On 2026-11-06, 298 rolls plus 63 from chaos ran from 12:45 to 13:03.
+The 65 rolls after 13:00 came from the new hour's pool. They were counted
+against the old pool and rolled before that hour's `$tu` and the
+force-divorce step. Two rules follow:
+
+- **Stop before the reset.** The rolls left in the old pool vanish at the
+  reset anyway, so the batch stops about 3 s before it. In the final roll hour
+  it stops 20 s before, so the end-of-batch claims (the main's, then the alts')
+  land before the claim slot resets too. The macro then waits until just past
+  the reset and starts the new hour from `$tu`, like any other hour
+  (`_RESET_CUT_SEC`, `_RESET_CUT_FINAL_SEC`, `_rolls_reset_due`).
+- **The reset is on a whole minute, and `$tu` rounds up.** For example, `15m`
+  read at 12:45:17 means 13:00. `rolls_reset_at` (read time plus the minutes)
+  can therefore be up to a minute late. The cut uses the start of that minute
+  (`seconds_until_rolls_reset_estimate`). Across the session logs, the read
+  time plus the minutes fell inside the reset's minute about 3,000 times
+  (servers resetting at :00 and at :41). The waits that ask `$tu` after a reset
+  still use the unsnapped time plus a buffer.
+
 ---
 
 
@@ -80,6 +101,24 @@ several misses in a row.
 | `$dk` stock / next         | Daily kakera power top-up                                              |
 | `$daily` reset             | Minutes until the account-global `$daily` (not the hourly rolls reset) |
 | Perk 8 refill              | When daily perk-8 clicks come back                                     |
+| Whose `$tu`                | The opening name, the account's Discord **username** (`tu_user`)       |
+| Kakera / sphere stock      | The two `Stock:` lines of a full `$tu`                                 |
+| Minigames left             | `4 $oh left for today, 1 $oc, 0 $oq and 0 $ot.` (full `$tu`)           |
+| `$daily` / vote ready      | `$daily is available!`, `You may vote right now!`                      |
+
+**Two layouts.** `$tuarrange` trims what `$tu` shows. The main's is trimmed;
+the alts' are not, so theirs also carry both balances, the minigame counts and
+`$daily` / vote status. The trimmed layout has no such lines, and the state
+keeps its last value instead of zeroing it.
+
+- **Stock lines.** The kakera balance sits under the power block, the sphere
+  balance under the minigame counts. Each is told apart by its emoji, or by
+  position when the emoji is missing (copied text drops custom emojis). A
+  parenthesised `(Stock: 22,946.4)` is a roll stack, not a balance.
+- **`$dk` wording follows its capacity.** An account that can hold several says
+  `**2** $dk available` (the main). One that holds a single use says
+  `$dk is ready!` (the alts, 2026-11-05), which reads as stock 1. Both fall
+  back to `Next $dk in …` when empty.
 
 
 **Macro:** almost every session starts with `$tu`. Claim timing, `$us`
@@ -2455,6 +2494,201 @@ and continues, and stops only after three refusals — the same recovery `$ot`
 already used. A claim that falls back to a reaction logs the buttons that
 were on the roll, and switches to the button if a refresh shows one.
 
+## Several accounts in one channel (alts)
+
+With alts in the main's channel, every account sees every roll and every reply,
+and each one could act on any of them. Mudae doesn't stop two accounts from
+reaching for the same claim, kakera button or force-divorced character. The
+macro does: each trigger has one owner, picked in a fixed turn order (the main,
+then the alts in the Alts page's order). See `macro/turns.py`.
+
+**Whose reply is it.** `$tu` opens with the account's name
+(`**lukazade234**, you __can__ claim…`), parsed as `tu_user`. When alts are up,
+each account accepts only its own `$tu`. Replies that don't name anyone are
+kept apart by the command lane instead: after one account sends a command, no
+other account sends until that reply has been read, or for at most 4 s.
+
+**`$us` is the main's.** When the main runs out of hourly rolls it moves to
+`$us`; alts never do.
+
+**Transfers** (captured live 2026-11-05, `data/alts_log.json`; parser
+`mudae/parsers/transfers.py`, exchange `macro/transfers.py`):
+
+| command | Mudae asks | who types `y` | result |
+| --- | --- | --- | --- |
+| `$give <@main> Anna (PC)` | `<@main>, **lukijade** wants to give you **Anna (PC)**. Do you confirm? (y/n/yes/no)` | the **receiver** | `**Anna (PC)** given to <@main>` |
+| `$givek <@main> 1000` | `**lukijade**, do you really want to give **1,000<:kakera:…>**? (y/n/yes/no)` | the **giver** | `<@alt> just gifted **1,000**<:kakera:…>to <@main>` |
+| `$givesp <@main> 100` | `**lukijade**, do you really want to give **100 <:sp:…> **? (y/n/yes/no)` | the **giver** | `<@alt> just gifted **100** <:sp:…> to <@main>` |
+
+- `<@main>` must be a real mention (`<@user id>`), not `@name`.
+- The prompts name the giver by its Discord **username** (`lukijade`, the
+  same name its `$tu` opens with), never its display name ("you guys played
+  sekiro?"). The results use ids only.
+- With Enhanced multitrade, the `$give` prompt adds a second line,
+  `(Enhanced multitrade: this gift is free)` (`free=True`).
+- **Confirmed live (2026-11-05):** the macro's own transfers work end to end
+  from Alts › Ledger.
+- **An empty harem gets no reply.** `$mmk=` from an account with no
+  characters gets nothing at all from Mudae, so the Ledger fetch reads 5 s of
+  silence as an empty harem.
+- **None of these are claims.** The `$give` prompt has two bold runs, which the
+  custom-claim check read as "lukijade claimed Anna (PC)". It is classified
+  ahead of the claim heuristics now.
+- **Each `y` is gated.** It is sent only when the prompt names the requested
+  character and receiver id, or the giver's own name and the exact amount.
+  Anything else is answered `n`, which closes the question.
+- **A bare `y` answers whatever is open**, so an account never has two
+  questions open at once. Force divorce, `$kl`, list clears and starwish trades,
+  and every transfer (on both accounts), hold that account's open-prompt lock
+  for the whole exchange.
+
+**An alt pays full price on the main's rolls.** Its `$tu` says it: "Each
+kakera button consumes 30% of your reaction power. Your characters with 10+
+keys consume half the power (15%)". The 10+ keys rule is the chaos-key half
+price, and it applies only to the reactor's **own** characters. Keys stay on a
+character whoever owns it, but they are soulkeys for the owner only. So an
+alt clicking kakera on the main's character pays its own `$bonus` base cost.
+The main is priced correctly: its rolls show keys only on its own characters
+(`$displaykeys` off).
+
+**Sheets don't name their player.** `$bonus`, `$shop`, `$ov` and `$limroul`
+replies open with "Player Bonuses", "Player Settings" and so on, never a name.
+A sheet is therefore credited to whoever last typed that command in the
+channel (`macro/sheet_attribution.py`). An alt's `$bonus` goes to the alt.
+Another player's `$bonus` is not stored at all. Before this, both would have
+overwritten the main's sheet.
+
+**An alt is used only once its own `$bonus` is read** for the run channel.
+It holds the alt's click cost, power max and `$dk` cooldown. Until then the
+alt takes no trigger; passing to the main by hand still works.
+
+**Kakera on the main's rolls.** When the main leaves a roll's kakera for
+power, the first ready alt in turn order takes each button. "For power" means
+out of it, or holding it back: once the day's perk-8 clicks are done, the
+perk-8 power save keeps enough for tomorrow's burst and skips every paid
+button ("reserving power for perk-8 burst"), and the perk-8 budget skips
+non-perk-8 rolls to save clicks. The alt pays from its own bar, so those
+buttons are not lost while the main saves. Only buttons the main did not take
+are handed on. That alt must
+have the colour in its list and afford it at full price. If Mudae refuses the
+click, or doesn't answer, the button passes to the next alt. Never on a perk-8
+roll, never purple (the main takes it, it's free) and never a sphere button.
+
+**The alt's own `$dk`.** If Kakera › "$dk when power runs out" is on, an
+alt that can't afford a button but has a `$dk` (its `$tu` says
+`$dk is ready!`) still takes it. It sends `$dk` first, spaced from its last
+command, and clicks once its bar is full again. A refusal the alt's bar
+didn't predict gets the same treatment: one `$dk`, then one more click. Each
+alt sends one `$dk` at a time, so a second button waiting on it finds the bar
+already full. The `$dk` payout is added to the alt's kakera stock and to the
+ledger (`macro/alt_kakera.py` `_use_dk`).
+
+**Claims on the main's rolls.** Judged by the main's claim rules, as if the
+main had a claim. Two cases:
+
+- **Mid-batch, main on cooldown:** a roll the main would claim right away (a
+  wish, or its kakera / rank threshold) goes to the first alt in turn order
+  that can claim. The main keeps rolling.
+- **Batch end:** after the main's own end-of-batch claim, the alts take the
+  best eligible rolls left, one each in turn order. When the main claimed the
+  best, the alts get the 2nd and 3rd, so their claims aren't wasted. Same
+  hours as the main's pick (final roll hour, or every batch when the preset
+  claims at any hour), and only rolls still inside the claim timer.
+
+A claim counts only when Mudae's "… are now married" names the alt. Never a
+perk-6 free claim (that button is the roller's). An alt needs its own `$tu`
+to say it can claim. The characters are `$give`n to the main at the end of
+the batch, after the main stops rolling. A give that fails is kept and tried
+again at the next batch end.
+
+**Passing kakera and spheres automatically.** At the end of the main's batch,
+after the claimed characters are given, each alt passes kakera and spheres
+per its Transfers setting: end of session (every batch end), once a day
+(one of the alt's start-of-day steps, after its minigames, not after a
+batch; retried at the next session start until it goes through), or above
+reserve (every batch end, and after the alt's minigames). It sends everything above its reserve,
+from the stock already known — no `$tu` right before: kakera from the
+session-start `$tu` plus what the alt earned since (kakera on the main's
+rolls, claim payouts), spheres from the `(Stock: N)` Mudae prints when each
+minigame finishes. Each transfer waits 2 s after the alt's last command (a
+`$givek` sent straight after `$tu` went unanswered, 2026-11-06). When Mudae
+never asks to confirm, nothing was given, so it is tried once more; kakera
+and spheres are separate, so one failing doesn't stop the other.
+
+**Alt minigames, once a day.** At the first session start of the UTC day
+(after the main's own start-of-day steps, before its first roll), each alt
+plays its own `$oh` / `$oc` / `$oq` / `$ot` (those ticked in Spheres ›
+Minigames) on its own connection, then does its once-a-day pass. Done is
+saved in the ledger, and the alt is not asked `$ohu` again until the next
+day: unlike the main, it gains no extra uses through the day. A run that
+never reached a decision is retried at the next session start. The alt
+plays while nothing else in the channel does, because the game runner takes
+the next board it sees.
+
+**Ledger.** `data/alts_ledger.json` keeps, per alt per UTC day: claims for the
+main, kakera earned on the main's rolls, characters given, kakera and spheres
+passed; plus every transfer with why it happened, the characters still
+waiting to be given (so a restart keeps them), and the day each resource was
+last passed.
+
+**Force divorce with an alt.** Keys stay on the character whoever owns it, so
+an alt that claims the divorced character earns almost what the main would.
+The main's upgrades are the difference. An alt's claim is therefore one more
+Emerald IV payout per reset.
+
+**The main can force-divorce a character an alt owns** (2026-11-06). The
+prompt then names the alt as the owner:
+
+    @LukaZade, Lucy belongs to @you guys played sekiro?, do you want to force the divorce? (y/n/yes/no)
+
+So the alt doesn't have to give the character back between cycles.
+
+Built (`macro/roll_cycle.py` `_force_divorce_alt_cycle`, `macro/alt_claims.py`
+`claim_for_farm`):
+
+- **An alt's claim is a slot.** The main may divorce when it has a claim or an
+  `$rt`, *or* when an alt with Claims › Force divorce on has a claim (or a
+  usable `$rt`).
+- **Alts first, the main last.** When the target rolls, the first such alt in
+  turn order claims it. If no alt gets it, the main's own slot claims it.
+- **Divorced straight from the alt.** If another slot is left after the alt's
+  claim (another alt, or the main's claim or `$rt`), the main sends
+  `$forcedivorce <target>` while the alt still owns it. It confirms only if the
+  prompt names that alt as the owner (`alt_user_id`). If the prompt names
+  anyone else, the macro doesn't confirm and the farm stops. The target is
+  then out there again and the hunt goes on, with no `$give` round trip.
+- **Given back only at the end.** If no slot is left, the alt `$give`s the
+  character to the main (the main answers `y`), so the reset still ends with
+  the main holding it. The same happens if the alt's Discord id is unknown,
+  since the prompt's owner then can't be checked.
+- **Held by alt.** Between the alt's claim and the next step, the record says
+  `held_by: <alt>`. A restart then divorces it from the alt, or gives it back,
+  before anything else.
+- **Unclear outcomes.** If the reply to a divorce from the alt can't be read,
+  the alt's `$mmk=` decides: still listed means nothing happened. If a give
+  isn't confirmed, the main's `$mmk=` decides.
+- **Claims kept for the farm.** While the farm runs, alts with Force divorce
+  on take no spare or end-of-batch claims: their claim is an alt cycle.
+- **Only replies newer than the roll.** The farm claims and gives the same
+  character over and over, so an earlier cycle's claim message or `$give`
+  prompt can still be queued. Alt claims, alt kakera clicks and transfers
+  only accept a Mudae message whose id is newer than the roll or command it
+  answers (2026-11-06: kleinam0n's own claim of Lucy was read as
+  lukijade's from the cycle before).
+- **"Belongs to <one of our alts>" is not a loss.** A roll of the target
+  owned by an alt, or a main claim beaten by one, marks it held by that alt
+  and has it given back; the farm only stops for another player. A record
+  saying "divorced" with the target missing from the main's harem asks each
+  alt's `$mmk=` before hunting.
+- **An alt's own `$rt`** (Claims › "Spend the alt's $rt too"). An alt whose
+  claim is spent but whose `$rt` is ready counts as one more slot. This needs
+  two things: the main has no claim of its own (the main's slot comes first,
+  and the main's `$rt` stays for its wishes), and at least 30 minutes left
+  before the alt's claim reset, the rule the main follows. When the target
+  rolls, the alt sends `$rt`. A tick on the command is Mudae's only answer;
+  without it, the alt's `$tu` decides. Then the alt claims and gives the
+  character back as usual (`macro/alt_claims.py` `_rt_slot`, `_use_rt`).
+
 ## What the macro does not do (yet)
 
 - External sniping of other people's rolls.
@@ -2466,8 +2700,9 @@ it is manual on purpose. List commands are sent **only** by `Advisor › Lists �
 Send to Mudae`, after a confirmation, never on their own. `$ov` is *read* on
 request (Fetch `$ov` on the Mudae scope bar) and never sent on its own; nothing
 this app does edits it.
-- Multi-account concurrent connections (config supports it; runtime is
-one Discord session — see Phase D in `ARCHITECTURE.md`).
+- Alts rolling: the alts claim, click and transfer for the main on the
+main's rolls, but don't roll themselves yet (`ARCHITECTURE.md` ›
+Multi-account runtime).
 - Driving claim / kakera / roll from parsed `$settings` / `$bonus` / `$shop`
 (parsers are trusted for storage; power max and perk 9 cap are the
 exceptions already wired).

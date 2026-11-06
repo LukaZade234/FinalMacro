@@ -536,3 +536,100 @@ def test_power_save_status_blocks_when_today_burst_would_fail():
     assert status["power_blocked"] is True
     assert status["kakera_free"] is False
     assert status["spendable_percent"] < 15.0
+
+
+# ---- alts take what the power save holds back -----------------------------
+
+
+def _reserve_state() -> AccountState:
+    state = AccountState(
+        power_percent=155.0,
+        power_max_percent=155.0,
+        dk_stock=0,
+        dk_cooldown_minutes=20 * 60,
+        perk8_priority_mode="active",
+        perk8_click_max=40,
+    )
+    state.rollover_kakera_budget_if_needed()
+    state.kakera_clicks_today = 9
+    return state
+
+
+def test_partial_hold_back_is_flagged_for_the_alts():
+    rules = _budget_rules(
+        types_allowed=["kakeraP", "kakeraR"],
+        perk_8_budget_bypass_types=["kakeraP", "kakeraR"],
+        auto_use_dk=False,
+    )
+    decision = passes_kakera_reaction(
+        _kakera_fields("kakeraP", "kakeraR"), rules, _reserve_state(), now=_FOURTEEN
+    )
+    assert [b.emoji for b in decision.buttons] == ["kakeraP"]
+    assert decision.held_back
+
+
+def test_nothing_held_back_when_everything_is_clicked():
+    rules = _budget_rules(types_allowed=["kakeraR"], perk_8_power_save=False)
+    state = AccountState(power_percent=155.0, power_max_percent=155.0, dk_stock=0)
+    decision = passes_kakera_reaction(_kakera_fields("kakeraR"), rules, state, now=_FOURTEEN)
+    assert decision.buttons and not decision.held_back
+
+
+def test_reactor_hands_a_reserved_roll_to_the_alts():
+    async def _case() -> None:
+        rules = _budget_rules(perk_8_budget_bypass_types=["kakeraR"], auto_use_dk=False)
+        config = MacroConfig(prefix="$", kakera_reaction=rules)
+        handed: list[tuple[int, dict]] = []
+        reactor = KakeraReactor(
+            actions=_FakeDkActions(),
+            config=config,
+            state=_reserve_state(),
+            log=lambda _m: None,
+            on_power_short=lambda mid, f: handed.append((mid, f)),
+        )
+        with (
+            patch("macro.kakera_reactor.asyncio.sleep", new=_fast_sleep),
+            patch("macro.perk8_power.utc_now", return_value=_FOURTEEN),
+            patch("macro.rule_eval.utc_now", return_value=_FOURTEEN),
+        ):
+            clicked = await reactor.react(message_id=7, fields=_kakera_fields("kakeraR"))
+        assert clicked == 0
+        assert [mid for mid, _f in handed] == [7]
+        assert [b["emoji"] for b in handed[0][1]["buttons"]] == ["kakeraR"]
+
+    asyncio.run(_case())
+
+
+def test_hand_off_leaves_out_buttons_the_main_took_and_reports_once():
+    handed: list[dict] = []
+    reactor = KakeraReactor(
+        actions=_FakeDkActions(),
+        config=MacroConfig(prefix="$"),
+        state=AccountState(),
+        log=lambda _m: None,
+        on_power_short=lambda _mid, f: handed.append(f),
+    )
+    fields = _kakera_fields("kakeraP", "kakeraR", "kakeraC")
+    reactor._react_fields = fields
+    reactor._react_taken = {"cid-0-kakeraP"}
+    reactor._report_power_short(1)
+    reactor._report_power_short(1)
+    assert len(handed) == 1
+    assert [b["emoji"] for b in handed[0]["buttons"]] == ["kakeraR", "kakeraC"]
+
+
+def test_below_the_floor_every_percent_is_still_kept_for_the_burst():
+    """2026-11-05 22:33: 210% with tomorrow's 40 already out of reach used to
+    be spent freely; each paid click now costs the burst a perk-8 click."""
+    snap = _snap(power=210.0, max_power=480.0, dk_next_sec=(154 + 86) * 60.0, cooldown_hours=10.0)
+    kwargs = dict(remaining=0, window_sec=2 * 3600.0, until_midnight_sec=86 * 60.0, click_cap=40)
+    assert not should_spend_paid_non_perk8(snap, cost=7.5, **kwargs)
+    roomy = _snap(power=250.0, max_power=480.0, dk_next_sec=(154 + 86) * 60.0, cooldown_hours=10.0)
+    assert should_spend_paid_non_perk8(roomy, cost=7.5, **kwargs)
+
+
+def test_today_burst_out_of_reach_still_keeps_power():
+    snap = _snap(power=40.0, max_power=155.0)
+    assert not should_spend_paid_non_perk8(
+        snap, cost=7.5, remaining=30, window_sec=3600.0, until_midnight_sec=3600.0
+    )

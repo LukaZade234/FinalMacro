@@ -23,7 +23,7 @@ from gui.bridge import AppBridge  # noqa: E402
 from gui.fonts import load_bundled_fonts  # noqa: E402
 
 PAGE_NAMES = [
-    "run", "accounts", "servers", "presets", "mudae", "spheres", "advisor",
+    "run", "accounts", "alts", "servers", "presets", "mudae", "spheres", "advisor",
     "statistics", "debug", "settings",
 ]
 

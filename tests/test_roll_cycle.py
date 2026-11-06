@@ -668,7 +668,11 @@ def test_normal_macro_skips_initial_tu_when_persisted_state_valid():
     )
     now = saved + dt.timedelta(minutes=5)
 
-    with patch("macro.runtime_store._utc_now", return_value=now):
+    # Only the restore runs on the faked clock; on the real one this reset is
+    # long past, which would stop the batch at the reset (test_reset_cut).
+    with patch("macro.runtime_store._utc_now", return_value=now), patch(
+        "macro.roll_cycle.seconds_until_rolls_reset_estimate", return_value=40 * 60.0
+    ):
         with patch("macro.roll_cycle.asyncio.sleep", new=_fast_sleep):
             engine._stop.clear()
             asyncio.run(engine._run_cycle())

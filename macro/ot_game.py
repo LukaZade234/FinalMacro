@@ -86,6 +86,7 @@ from macro.sphere_game import (
     new_reward_outcome_types,
     parse_clicks_allowed,
     reward_has_entries,
+    sphere_stock_from_content,
     total_reward_from_content,
     wait_for_final_grid,
     wait_for_minigame_click_ack,
@@ -418,6 +419,7 @@ class OtSphereGame:
                 "clicks": len(session_clicks),
                 "clicks_paid": blues_spent,
                 "reward": reward,
+                "sphere_stock": sphere_stock_from_content(self._reward_content),
                 "reason": "done",
                 "session": session,
             }

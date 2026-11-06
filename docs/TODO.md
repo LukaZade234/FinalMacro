@@ -47,7 +47,7 @@ Highest first. What makes an overnight run correct and complete.
 1. **Use parsed `$settings` / `$bonus` in decisions** — parse-and-store is done; perk 9 DP and the `$bw` sweep read those fields, but any *behavioural* rule from them still waits. Field-by-field survey of what is wired vs. sitting unused: [`PARSED_FIELDS.md`](PARSED_FIELDS.md). ~~Claim-via-emoji~~ shipped, but deliberately reads the roll's own components instead — the server and account can disagree, and only the roll shows the live combination.
 2. **Full daily autonomy** — the product: one connect covers rolls, reacts, minigames, `$p`/`$daily`, and skips what is already exhausted.
 3. ~~**Sphere tracking + EventLog / shared stats**~~ — daily cube + paged stats tables; totals/charts no longer walk every event in QML.
-4. **Phase D (multi account / server)** — only this high if alts or a second server are why the app exists; otherwise it waits.
+4. **Alts (multi-account)** — in progress; next is alts that roll (Shared / Independent) (see **Accounts and servers**).
 5. ~~**Unused or mis-spent daily budget**~~ — `$ot` Extra Chance (+168.9 SP, t=3.72, 100.2% of ceiling, 7/27 boards cleared outright) and the perk-9 adaptive threshold both shipped.
 6. ~~**Reconnect / overlap holes**~~ — `mudae/macro_activity.py`'s owner **depth count** replaced the save/restore idiom, closing a stale-true bug, a reconnect window, and a real minigame/hourly-refill collision.
 7. ~~**Timezones**~~ — UTC `date_key` + UTC stats buckets; live feed local.
@@ -104,7 +104,25 @@ Do not change per-server claim / kakera / roll rules until a slice *uses* the pa
 
 ## Accounts and servers
 
-- **Multi account / server runtime (Phase D)** — config already has accounts, channels, presets, and `targets[]`. Runtime is still one Discord connection. Coordinator must resolve `(account, channel) → preset` per target (never “first preset on the account”). See Phase D in `ARCHITECTURE.md`.
+- **Alts supplementing the main (multi-account)** — in progress (2026-11-04). Plan: `~/.claude/plans/i-captured-me-sending-indexed-lampson.md`; design in `ARCHITECTURE.md` › Multi-account runtime. **Preventing clashes between accounts comes before any feature.** That means one account per trigger, a fixed turn order (main, then alts), one command lane, and `$us` for the main only.
+  1. ~~Foundation~~ — done: turn coordinator, command lane with reply hold, preset scopes, alt rules and tiers, the alts store, alt connections (`AccountPool`), the Alts page (Setup; Ledger placeholder), and Console Run's alts block plus the `$rt` cell.
+  2. ~~**Transfers**~~ — captured 2026-11-05 (`data/alts_log.json`); parser `mudae/parsers/transfers.py`, gated exchange `macro/transfers.py`, `AccountPool.give_to_main`. The `$give` prompt no longer reads as a claim. An open-prompt lock per account keeps two y/n questions from being open at once. Manual **Pass to main** on Alts › Ledger (fetch, keep amounts, pick characters, give). Transfers confirmed live 2026-11-05. An empty harem's `$mmk=` gets no reply, which is handled. **Open:** the character list is `$mmk=` page 1 only.
+  3. **Support tier,** in this order:
+     - ~~sheets gate~~: an alt takes no trigger until its own `$bonus` is read (Alts › Setup › Sheets, with `$shop` and an `$ov` comparison with the main). Sheets are now credited to whoever typed the command.
+     - ~~kakera on the main's rolls once the main is out of power~~: built 2026-11-05 (`macro/alt_kakera.py`), seen live 2026-11-06. Full price for the alt, never perk 8, purple or spheres. Also takes what the main **holds back** for the perk-8 power save or budget, and only the buttons the main didn't take. Alts `$tu` at session start, not on connect. The alt's own `$dk` when it runs short followed on 2026-11-06 (the "$dk when power runs out" switch); not yet seen live.
+     - ~~perk-8 reserve below the floor~~ (2026-11-05): a bar already short of tomorrow's burst used to be spent freely (210% → 121%). Now the reserve counts burst clicks; a full bar keeps the old rule.
+     - ~~spare claims on the main's rolls, then `$give`~~: built 2026-11-05 (`macro/alt_claims.py`), confirmed live 2026-11-05. Mid-batch when the main is on cooldown; at batch end the alts take the 2nd, 3rd … best after the main's pick; given to the main at batch end. Pending gives are saved in the ledger across a restart.
+     - ~~pass kakera and spheres automatically (session end / daily), and save the ledger totals~~: built 2026-11-05 (`macro/alt_passing.py`, `macro/alt_ledger.py`), confirmed live 2026-11-06. "Above reserve" passes at every batch end and after the alt's minigames.
+     - ~~per-alt minigames at the reset~~: built 2026-11-06 (`macro/alt_daily.py`), confirmed live 2026-11-06. Once a day at the first session start, saved in the ledger, never re-checked that day. The once-a-day pass moved here (after the minigames).
+  4. ~~**Force-divorce alt cycle,** in turn order, ending on the main, with a "held by alt" restart record.~~ Built 2026-11-06; two alt cycles seen live 2026-11-06 (13:05). An alt's own `$rt` for an extra cycle followed on 2026-11-06 (only when the main has no claim, and with 30 m or more before the alt's claim reset); not yet seen live. From 2026-11-06 the main divorces the target straight from the alt that claimed it (the prompt names the alt as owner); the alt `$give`s it back only when no slot is left. Not yet seen live.
+  5. **Alts that roll** (Shared and Independent), after the main's batch and one alt at a time, plus "20 sphere clicks then stop".
+  6. **Extras:**
+     - wishlist overflow
+     - complementary `$dl`
+     - snipe guard
+     - gateway backup
+     - the alts block on the other four Run designs
+- **Second server at once** — still one run target. The `(account, channel) → preset` rule in `ARCHITECTURE.md` stands.
 - ~~**`$dl` / `$adl` / `$wl` one-click switch**~~ — done, plus `$sdl`; see **Advisor › Lists** below. Still not the same as Colblitz's disablelist *optimizer* (needs a bundle database we do not have).
 
 ---

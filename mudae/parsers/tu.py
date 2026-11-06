@@ -8,6 +8,7 @@ from typing import Any
 from mudae.parsers.dk import extract_dk_fields
 from mudae.parsers.reaction_power import parse_reaction_power_fields
 from mudae.parsers.utils import extract_bold_minutes, parse_hours_minutes
+from mudae.parsers.ohu import parse_minigame_availability
 from mudae.parsers.ohu8 import parse_refill_minutes
 from mudae.types import MessageKind, ParseResult
 
@@ -28,11 +29,29 @@ _ROLLS_LEFT_RE = re.compile(
     re.IGNORECASE,
 )
 _DIGITS_ONLY_RE = re.compile(r"[^\d]")
+# "**lukazade234**, you __can__ claim…" — whose $tu this is: the account's
+# Discord *username* (not its display name). With alts in the channel several
+# accounts' $tu replies arrive in the same place.
+_TU_USER_RE = re.compile(r"^\s*\*\*(?P<user>[^*\n]+?)\*\*\s*,")
+_TU_USER_PLAIN_RE = re.compile(r"^\s*(?P<user>[^\s*,][^,\n]{0,40}?)\s*,\s*you\b", re.IGNORECASE)
 _DK_COUNT_RE = re.compile(
-    r"\*\*(\d+)\*\*\s*\$dk\s*(?:available|dispon)",
+    r"\*\*(\d+)\*\*\s*\$dk\s*(?:available|ready|dispon)",
     re.IGNORECASE,
 )
-_DK_AVAILABLE_RE = re.compile(r"\$dk\s+(?:is\s+)?available", re.IGNORECASE)
+# The wording follows the account's $dk capacity: an account that can hold
+# several says "**2** $dk available" (the main), one that holds a single
+# use says "$dk is ready!" (the alts, 2026-11-05) — stock 1.
+_DK_AVAILABLE_RE = re.compile(r"\$dk\s+(?:is\s+)?(?:available|ready)", re.IGNORECASE)
+# A full $tu (one not trimmed with $tuarrange) also carries both balances,
+# each on a "Stock:" line — kakera under the power block, spheres under the
+# minigame counts — plus $daily and vote status. Rolled-up stacks print
+# "(Stock: 22,946.4)" in parentheses; those are not balances.
+_STOCK_LINE_RE = re.compile(
+    r"(?<!\()\bstock:\s*\*{0,2}(?P<n>[\d,]+)(?![\d.])\*{0,2}\s*(?P<emoji><a?:(?P<name>\w+):\d+>|:(?P<short>\w+):)?",
+    re.IGNORECASE,
+)
+_DAILY_READY_RE = re.compile(r"\$daily\s+is\s+available", re.IGNORECASE)
+_VOTE_READY_RE = re.compile(r"you\s+may\s+vote\s+right\s+now", re.IGNORECASE)
 _DK_DISPON_RE = re.compile(r"\$dk\s+dispon", re.IGNORECASE)
 
 
@@ -48,6 +67,9 @@ def parse_tu(content: str) -> ParseResult:
     warnings: list[str] = []
     fields: dict[str, Any] = {}
     lower = content.lower()
+    user = _TU_USER_RE.match(content or "") or _TU_USER_PLAIN_RE.match(content or "")
+    if user:
+        fields["tu_user"] = user.group("user").strip()
 
     # 1. Claim available now
     if _CLAIM_CAN_RE.search(lower):
@@ -139,8 +161,48 @@ def parse_tu(content: str) -> ParseResult:
     # Embedded ``$dk`` payout line (Mudae sometimes combines with ``$tu``).
     fields.update(extract_dk_fields(content))
 
+    # 8. The full layout's extras: balances, minigames, $daily, vote.
+    fields.update(_parse_stocks(content))
+    if "$oh left for today" in lower:
+        fields.update(parse_minigame_availability(content))
+    if _DAILY_READY_RE.search(content):
+        fields["daily_available"] = True
+    elif "daily_reset_minutes" in fields:
+        fields["daily_available"] = False
+    if _VOTE_READY_RE.search(content):
+        fields["vote_available"] = True
+
     summary = _build_summary(fields)
     return ParseResult(kind=MessageKind.TU, summary=summary, fields=fields, warnings=warnings)
+
+
+def _parse_stocks(content: str) -> dict[str, int]:
+    """``kakera_stock`` / ``sphere_stock`` from the full ``$tu``'s Stock lines.
+
+    The emoji says which is which. Copied text loses custom emojis, so without
+    one the position decides: a Stock line after the minigame counts is the
+    sphere balance, one after the power line is the kakera balance.
+    """
+    fields: dict[str, int] = {}
+    lower = (content or "").lower()
+    games_at = lower.find("$oh left for today")
+    power_at = lower.find("power:")
+    for match in _STOCK_LINE_RE.finditer(content or ""):
+        name = (match.group("name") or match.group("short") or "").lower()
+        if name == "kakera":
+            key = "kakera_stock"
+        elif name == "sp":
+            key = "sphere_stock"
+        elif name:
+            continue
+        elif games_at >= 0 and match.start() > games_at:
+            key = "sphere_stock"
+        elif power_at >= 0 and match.start() > power_at:
+            key = "kakera_stock"
+        else:
+            continue
+        fields.setdefault(key, int(match.group("n").replace(",", "")))
+    return fields
 
 
 def _build_summary(fields: dict[str, Any]) -> str:

@@ -19,6 +19,7 @@ Item {
     readonly property var navItems: [
         { icon: "run", title: "Run" },
         { icon: "accounts", title: "Accounts" },
+        { icon: "alts", title: "Alts" },
         { icon: "servers", title: "Servers" },
         { icon: "presets", title: "Presets" },
         { icon: "mudae", title: "Mudae" },
@@ -40,7 +41,7 @@ Item {
         IconRail {
             currentPage: shell.currentPage
             items: shell.navItems
-            settingsIndex: 9
+            settingsIndex: 10
             onNavigate: function(index) { shell.navigate(index) }
         }
 

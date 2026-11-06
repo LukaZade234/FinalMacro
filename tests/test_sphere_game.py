@@ -918,3 +918,11 @@ def test_oh_game_handles_exhausted_uses():
     assert result["refill_minutes"] == 188
     assert any("out of minigames for today" in line for line in logs)
     assert any("3h 08 min" in line for line in logs)
+
+
+def test_sphere_stock_is_the_last_stock_in_the_reward_tracker():
+    from macro.sphere_game import sphere_stock_from_content
+
+    assert sphere_stock_from_content("<:spY:1> **+59** (Stock: 1,000)\n<:spT:3> **+1,200** (Stock: **2,259**)") == 2259
+    assert sphere_stock_from_content(":spT: +76 (Stock: 37,458)") == 37458
+    assert sphere_stock_from_content("<:spY:1> **+59**") is None

@@ -213,11 +213,11 @@ def test_a_sheet_is_filed_under_the_account_that_asked_for_it(tmp_path, monkeypa
     bridge = _bridge(tmp_path, monkeypatch)
     bridge._run_account_id = "acc-run"
 
-    assert bridge._sheet_account_id() == "acc-run"
+    assert bridge._sheet_account_id("bonus") == "acc-run"
     bridge._scope_fetch_account_id = "acc-other"
-    assert bridge._sheet_account_id() == "acc-other"
+    assert bridge._sheet_account_id("bonus") == "acc-other"
     bridge._scope_fetch_account_id = ""
-    assert bridge._sheet_account_id() == "acc-run"
+    assert bridge._sheet_account_id("bonus") == "acc-run"
 
 
 def test_the_delivered_sheet_honours_the_stamped_account(tmp_path, monkeypatch):
@@ -294,3 +294,41 @@ def test_the_legacy_fetch_slots_target_the_run_pair(tmp_path, monkeypatch):
     bridge._run_account_id = "acc-run"
     bridge._run_channel_profile_id = "chan-run"
     assert bridge._default_fetch_scope() == ("acc-run", "chan-run")
+
+
+def test_alt_sheet_set_files_each_reply_under_the_alt():
+    """The alt's own connection files what it got, both $bonus parts too."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from gui.bridge import AppBridge
+
+    bridge = AppBridge()
+    replies = {
+        "bonus": [SimpleNamespace(kind="x", fields={"part": 1, "parts": 2}), SimpleNamespace(kind="x", fields={"part": 2, "parts": 2})],
+        "shop": [SimpleNamespace(kind="x", fields={})],
+        "ov": [],
+    }
+    sent: list[str] = []
+
+    class Actions:
+        def drain_queue(self):
+            pass
+
+        async def send_command(self, cmd, prefix=None):
+            sent.append(cmd)
+
+        async def wait_for(self, predicate, timeout=0):
+            queue = replies[sent[-1]]
+            return ("snap", queue.pop(0)) if queue else None
+
+    filed: list = []
+    with (
+        patch("gui.bridge.profile_kind_from_parse", side_effect=lambda p: sent[-1]),
+        patch("gui.bridge._LIST_COMMAND_GAP_SEC", 0),
+        patch.object(bridge, "_file_sheet", side_effect=lambda s, p, acc: filed.append((sent[-1], p.fields.get("part"), acc))),
+    ):
+        missing = asyncio.run(bridge._fetch_sheet_set(Actions(), file_as="alt-1"))
+    assert missing == ["ov"]
+    assert filed == [("bonus", 1, "alt-1"), ("bonus", 2, "alt-1"), ("shop", None, "alt-1")]

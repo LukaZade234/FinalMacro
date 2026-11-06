@@ -231,6 +231,19 @@ def _reward_events(content: str) -> list[tuple[str, str]]:
     return events
 
 
+_STOCK_RE = re.compile(r"Stock:\s*\**\s*([\d,]+)", re.IGNORECASE)
+
+
+def sphere_stock_from_content(content: str) -> int | None:
+    """The sphere stock after the last payout in the reward tracker.
+
+    Each payout line ends ``(Stock: N)``, so the last one is the player's
+    total once the game is over — no ``$tu`` / ``$ohu`` needed for it.
+    """
+    found = _STOCK_RE.findall(content or "")
+    return int(found[-1].replace(",", "")) if found else None
+
+
 def total_reward_from_content(content: str) -> int:
     """Sum chat ``+N`` sphere lines, skipping hidden ``spU`` ($oc grant, not SP)."""
     total = 0
@@ -987,6 +1000,7 @@ class OhSphereGame:
                 "clicks": clicks_spent,
                 "free_clicks": free_clicks,
                 "reward": reward,
+                "sphere_stock": sphere_stock_from_content(self._reward_content),
                 "oq_bonus": bonus["oq_bonus"],
                 "ot_bonus": bonus["ot_bonus"],
                 "oc_bonus": oc_bonus,

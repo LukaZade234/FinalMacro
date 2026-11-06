@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import datetime as dt
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from macro.actions import DiscordActions, is_perk6_spawn_parse_result, is_roll_parse_result
+from macro.actions import (
+    DiscordActions,
+    is_perk6_spawn_parse_result,
+    is_roll_parse_result,
+    prompt_guard,
+)
 from macro.activity_log import ActivityLog, ActivitySeverity
 from macro.connection_recovery import ConnectionRecovery
 from macro.roll_context import RollContext
 from macro.roll_scheduler import (
     earliest_wake_seconds,
     seconds_until_rolls_reset,
+    seconds_until_rolls_reset_estimate,
     sleep_interruptible,
     wait_for_scheduled_wake,
 )
@@ -110,6 +117,16 @@ _FORCE_DIVORCE_RESULT_TIMEOUT_SEC = 12.0
 # gets a beat. A live run sent $forcedivorce in the same second as the $mmk=
 # reply and never got a confirmation prompt at all.
 _FORCE_DIVORCE_STEP_PAUSE_SEC = 1.0
+# A batch still rolling when the hour's rolls reset stops just short of it:
+# the old pool's leftovers vanish at the reset anyway, and every roll after it
+# is the *new* hour's, spent on a stale count and before the reset's own
+# steps ($tu, the force-divorce step, the alts' $tu). In the final roll hour it
+# stops earlier, so the end-of-batch claims (the main's, then the alts') land
+# before the claim slot resets with them.
+_RESET_CUT_SEC = 3.0
+_RESET_CUT_FINAL_SEC = 20.0
+# After the cut, ask $tu this long past the estimated reset.
+_RESET_CUT_TU_PAD_SEC = 3.0
 # Automatic $kl stops this long before the next rolls reset, so the next
 # hour's session starts on time; it does not start with less than the minimum
 # window left (a $ku plus one 20 s-cooldown batch and its reply).
@@ -176,6 +193,33 @@ class RollCycleEngine:
         | None = None,
     ) -> None:
         self._actions = actions
+        # Multi-account: who to tell when the main leaves kakera for lack of
+        # power (``AltKakera.main_power_short``). Set by the bridge while
+        # alts run; None leaves the solo path unchanged.
+        self.kakera_power_short: Any = None
+        # Multi-account: awaited once per hourly session, after the main's own
+        # $tu and before its first roll, so each alt's $tu (power, claim) is
+        # fresh for the batch. Set by the bridge while alts run.
+        self.before_roll_batch: Callable[[], Awaitable[None]] | None = None
+        # Multi-account claims (macro/alt_claims.py): a roll the main would
+        # claim now but has no claim for; and the batch end, after the main's
+        # own claim (alts take the best rolls left, then give to the main).
+        self.alt_spare_claim: Callable[[RollRecord, str], None] | None = None
+        self.alt_batch_end: Callable[[list[RollRecord], bool], Awaitable[None]] | None = None
+        # Force-divorce alt cycle (macro/alt_claims.py, bridge): whether an alt
+        # can claim the target now; have one claim it (returns who and the
+        # payout, or None); and its $give back to the main (True when given).
+        self.alt_fd_ready: Callable[[], bool] | None = None
+        self.alt_fd_claim: Callable[[RollRecord], Awaitable[dict[str, Any] | None]] | None = None
+        self.alt_fd_return: Callable[[str, str], Awaitable[bool]] | None = None
+        # Which alt account a Discord username is (None: not ours), and which
+        # alt's harem holds a character (reads their $mmk=; None: none).
+        self.alt_account_for: Callable[[str], str | None] | None = None
+        self.alt_fd_find: Callable[[str], Awaitable[str | None]] | None = None
+        # Alt account id → its Discord user id: the owner a force-divorce
+        # prompt names when the main divorces the target from that alt.
+        self.alt_user_id: Callable[[str], int | None] | None = None
+        self._fd_held_note = ""
         self._config = config
         self._state = state
         self._monitor = monitor
@@ -219,6 +263,8 @@ class RollCycleEngine:
         self._us_schedule_wait_logged = False
         self._us_halt_reason: str | None = None
         self._waiting_for_hourly_refill = False
+        # Set when the last hourly batch stopped at the rolls reset.
+        self._batch_cut_at_reset = False
         self._activity = ActivityLog(self._state, on_update=self._notify)
         self._session: SessionLogRecorder | None = None
         self._final_roll_session = False
@@ -476,7 +522,19 @@ class RollCycleEngine:
         except Exception:
             return ForceDivorceRecord()
 
-    def _save_force_divorce_record(self, target: str, *, owned: bool) -> None:
+    @property
+    def force_divorce_active(self) -> bool:
+        return self._force_divorce is not None and self._force_divorce.active
+
+    def _alt_fd_ready(self) -> bool:
+        if self.alt_fd_ready is None:
+            return False
+        try:
+            return bool(self.alt_fd_ready())
+        except Exception:  # noqa: BLE001 - alts must not stop the farm
+            return False
+
+    def _save_force_divorce_record(self, target: str, *, owned: bool, held_by: str = "") -> None:
         """Remember whether the farm's character is currently ours.
 
         Written at both edges of the exposure window — the moment a divorce
@@ -487,6 +545,7 @@ class RollCycleEngine:
             record = ForceDivorceRecord(
                 target=str(target or ""),
                 owned=bool(owned),
+                held_by="" if owned else str(held_by or ""),
                 updated_at=utc_now().isoformat(),
             )
             self._save_daily_resets(
@@ -527,8 +586,31 @@ class RollCycleEngine:
         # would divorce a second character and leave two of the account's most
         # valuable sitting unowned. The saved record is what catches it.
         record = self._load_force_divorce_record()
+        if record.held and not harem_holds(parsed.fields, record.target):
+            # An alt claimed it on an alt cycle and the app stopped before the
+            # $give back. Not exposed — but not the main's, so nothing may be
+            # divorced until it is given back.
+            session.set_target(record.target, day=str(mudae_daily_date(utc_now())))
+            session.note_held(record.held_by)
+            session.alt_cycles -= 1  # not a new cycle, one carried over
+            self._log(
+                f"$forcedivorce: {record.target} is still with an alt from an earlier "
+                "run — divorcing it from the alt, or giving it back, before a new cycle"
+            )
+            self._notify()
+            return True
+        if record.held:
+            # The main holds it after all (the give landed, reply lost).
+            self._save_force_divorce_record(record.target, owned=True)
         if record.outstanding and not harem_holds(parsed.fields, record.target):
             session.set_target(record.target, day=str(mudae_daily_date(utc_now())))
+            holder = await self._find_alt_holder(record.target)
+            if holder:
+                # Not out there: an alt claimed it and the claim was not
+                # recognised (or the app stopped first). Give it back.
+                self._adopt_alt_holder(holder, counted=False)
+                self._notify()
+                return True
             session.note_divorced()
             self._log(
                 f"$forcedivorce: {record.target} is still divorced from an earlier "
@@ -549,6 +631,12 @@ class RollCycleEngine:
 
     async def _force_divorce_exchange(self) -> bool:
         """Send ``$forcedivorce <target>``, check the prompt, confirm with ``y``."""
+        # No other y/n question (an alt's $give to the main) may be open while
+        # this one waits for its "y".
+        async with prompt_guard(self._actions):
+            return await self._force_divorce_exchange_locked()
+
+    async def _force_divorce_exchange_locked(self) -> bool:
         session = self._force_divorce
         if session is None or session.target is None:
             return False
@@ -589,7 +677,13 @@ class RollCycleEngine:
             self._stop.set()
             return False
         owner_id = prompt.fields.get("owner_id")
-        own_ids = {str(uid) for uid in (self._state.own_user_ids or [])}
+        if session.divorcing_from_alt:
+            # Divorced straight from the alt that claimed it: the prompt must
+            # name that alt as the owner, nobody else.
+            alt_id = self._alt_user_id(session.held_by)
+            own_ids = {str(alt_id)} if alt_id is not None else {"?"}
+        else:
+            own_ids = {str(uid) for uid in (self._state.own_user_ids or [])}
         if own_ids and str(owner_id or "") not in own_ids:
             session.stop(f"{target.name} belongs to someone else")
             self._log(
@@ -615,9 +709,14 @@ class RollCycleEngine:
 
         outcome = str(result.fields.get("outcome") or "")
         if outcome == "success":
+            from_alt = session.divorcing_from_alt
             session.note_divorced()
             self._save_force_divorce_record(target.name, owned=False)
-            self._log(f"$forcedivorce: {target.name} divorced — hunting for it now")
+            self._log(
+                f"$forcedivorce: {target.name} divorced"
+                + (" from the alt (no $give needed)" if from_alt else "")
+                + " — hunting for it now"
+            )
             self._notify()
             return True
         if outcome == "cancelled":
@@ -643,6 +742,18 @@ class RollCycleEngine:
         session = self._force_divorce
         if session is None:
             return False
+        if session.divorcing_from_alt:
+            # The alt's harem is the one it would still be in.
+            self._log("$forcedivorce: reply unreadable — asking the alt's $mmk= whether it landed")
+            if await self._find_alt_holder(name):
+                session.note_divorce_failed()
+                self._log(f"$forcedivorce: {name} is still with the alt — nothing divorced")
+                return False
+            session.note_divorced()
+            self._save_force_divorce_record(name, owned=False)
+            self._log(f"$forcedivorce: {name} is gone from the alt's harem — it landed")
+            self._notify()
+            return True
         self._log("$forcedivorce: reply unreadable — re-reading $mmk= to see if it landed")
         if await self._send_command_with_reconnect("mmk=", label="$mmk") is None:
             session.note_divorce_failed()
@@ -685,8 +796,29 @@ class RollCycleEngine:
                 self._log(f"$forcedivorce: target is {override} (set on the preset)")
             else:
                 await self._refresh_force_divorce_target()
+        if session.phase in {force_divorce.IDLE, force_divorce.CLAIMED} and session.target is not None:
+            # A target set on the preset skips $mmk=, so check the saved record
+            # here too: never divorce while an alt still holds the character.
+            record = self._load_force_divorce_record()
+            if record.held and session.is_target(record.target):
+                session.note_held(record.held_by)
+                session.alt_cycles -= 1
         allow_rt = bool(self._config.character_claim.auto_use_rt)
-        ok, why = session.can_divorce(self._state, allow_rt=allow_rt)
+        if session.phase == force_divorce.HELD:
+            # With a slot for another cycle, the main divorces it straight
+            # from the alt — no $give round trip. Without one (or when the
+            # alt's user id is unknown, so its prompt can't be checked), the
+            # alt gives it back and the reset ends with the main holding it.
+            ok, _why = session.can_divorce(
+                self._state, allow_rt=allow_rt, alt_slot=self._alt_fd_ready()
+            )
+            if not ok or self._alt_user_id(session.held_by) is None:
+                if not await self._force_divorce_return():
+                    return False
+                session.ready_for_next_cycle()
+        ok, why = session.can_divorce(
+            self._state, allow_rt=allow_rt, alt_slot=self._alt_fd_ready()
+        )
         if not ok:
             if why and why != self._force_divorce_last_skip:
                 self._force_divorce_last_skip = why
@@ -772,8 +904,10 @@ class RollCycleEngine:
         if session.phase != force_divorce.HUNTING:
             return False
         allow_rt = bool(self._config.character_claim.auto_use_rt)
-        if self._state.claim_available is not True and not (
-            allow_rt and self._state.rt_available is True
+        if (
+            self._state.claim_available is not True
+            and not (allow_rt and self._state.rt_available is True)
+            and not self._alt_fd_ready()
         ):
             self._log("$forcedivorce: no claim slot left — not spending $us this hour")
             return False
@@ -918,6 +1052,17 @@ class RollCycleEngine:
             if username_matches_own(str(owner or ""), self._state.own_usernames):
                 # Ours already — nothing to do until the next divorce.
                 return None
+            holder = self._alt_owner(owner)
+            if holder:
+                # One of our alts has it — an alt cycle whose claim was missed,
+                # or a restart since. Not a loss: have it given back.
+                if session.phase != force_divorce.HELD:
+                    self._adopt_alt_holder(holder, counted=session.phase == force_divorce.HUNTING)
+                if await self._force_divorce_return():
+                    session.ready_for_next_cycle()
+                    if await self._run_force_divorce_step():
+                        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+                return _RollOutcome(ok=True, rolls_left=rolls_left, claimed=False, stop=False)
             # The whole method rests on being the one who re-claims it. Somebody
             # else holding it is not something to roll through.
             session.stop(f"{name} was claimed by {owner or 'another player'}")
@@ -931,9 +1076,14 @@ class RollCycleEngine:
         if not fields.get("can_claim"):
             return None
 
-        self._log(f"$forcedivorce: {name} rolled — claiming")
         self._state.phase = MacroPhase.POST_ROLL
         self._notify()
+        if self._alt_fd_ready() and self.alt_fd_claim is not None:
+            outcome = await self._force_divorce_alt_cycle(record, rolls_left)
+            if outcome is not None:
+                return outcome
+            self._log(f"$forcedivorce: no alt got {name} — the main claims it")
+        self._log(f"$forcedivorce: {name} rolled — claiming")
         # ``allow_rt`` on purpose: a reset in hand is exactly the slot this
         # cycle was started on, and the preset's own claim rules (min kakera,
         # final hour, even ``enabled``) have no say over the farm's target.
@@ -942,6 +1092,17 @@ class RollCycleEngine:
             reason="$forcedivorce target",
             allow_rt=True,
         )
+        if not claimed and session.phase == force_divorce.HUNTING and record.fields.get("claimed"):
+            # Claimed under the main's nose. If it was one of our alts (an
+            # alt claim whose reply was missed), it is held, not lost.
+            holder = await self._find_alt_holder(name)
+            if holder:
+                self._adopt_alt_holder(holder, counted=True)
+                if await self._force_divorce_return():
+                    session.ready_for_next_cycle()
+                    if await self._run_force_divorce_step():
+                        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+                return _RollOutcome(ok=True, rolls_left=rolls_left, claimed=True, stop=False)
         if claimed:
             # Start the next cycle here rather than at the top of the next
             # hour. The rolls left in *this* hour are what the new cycle has to
@@ -957,6 +1118,133 @@ class RollCycleEngine:
             # rolling for kakera and spheres.
             stop=False,
         )
+
+    async def _force_divorce_alt_cycle(
+        self, record: RollRecord, rolls_left: Any
+    ) -> _RollOutcome | None:
+        """An alt claims the target, gives it back, and the next cycle starts.
+
+        Each alt with a claim gets one cycle per reset, in turn order, before
+        the main's own (``ChannelCoordinator.force_divorce_claimers``), so the
+        reset still ends with the main holding it. ``None`` when no alt got
+        it: the caller falls back to the main's slot.
+        """
+        session = self._force_divorce
+        if session is None or session.target is None or self.alt_fd_claim is None:
+            return None
+        name = record.character_name or session.target.name
+        self._log(f"$forcedivorce: {name} rolled — an alt claims it (alt cycle)")
+        try:
+            got = await self.alt_fd_claim(record)
+        except Exception as exc:  # noqa: BLE001 - fall back to the main's slot
+            self._log(f"$forcedivorce: alt claim failed ({exc})")
+            got = None
+        if not got:
+            return None
+        session.note_claimed(kakera=got.get("kakera") or 0, spheres=got.get("spheres") or 0)
+        session.note_held(str(got.get("account_id") or ""))
+        self._save_force_divorce_record(
+            session.target.name, owned=False, held_by=session.held_by
+        )
+        self._log(
+            f"$forcedivorce: {got.get('name') or 'an alt'} claimed {name} for "
+            f"{int(got.get('kakera') or 0):,} ka"
+        )
+        self._notify()
+        # Next cycle: divorced straight from the alt when a slot is left,
+        # otherwise given back to the main (``_run_force_divorce_step``).
+        if await self._run_force_divorce_step():
+            await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+        return _RollOutcome(ok=True, rolls_left=rolls_left, claimed=True, stop=False)
+
+    def _alt_user_id(self, account_id: str) -> int | None:
+        if self.alt_user_id is None or not account_id:
+            return None
+        try:
+            return self.alt_user_id(str(account_id))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _alt_owner(self, username: Any) -> str | None:
+        if self.alt_account_for is None or not username:
+            return None
+        try:
+            return self.alt_account_for(str(username)) or None
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _find_alt_holder(self, name: str) -> str | None:
+        """Which alt's ``$mmk=`` lists ``name`` (None when no alt has it)."""
+        if self.alt_fd_find is None:
+            return None
+        try:
+            return await self.alt_fd_find(name) or None
+        except Exception as exc:  # noqa: BLE001 - treated as "not found"
+            self._log(f"$forcedivorce: could not check the alts' harems ({exc})")
+            return None
+
+    def _adopt_alt_holder(self, account_id: str, *, counted: bool) -> None:
+        """Record that an alt holds the target (found, not seen claiming it)."""
+        session = self._force_divorce
+        if session is None or session.target is None:
+            return
+        session.note_held(account_id)
+        if not counted:
+            session.alt_cycles -= 1
+        self._save_force_divorce_record(session.target.name, owned=False, held_by=account_id)
+        self._log(
+            f"$forcedivorce: {session.target.name} is with an alt, not out there — giving it back"
+        )
+
+    async def _force_divorce_return(self) -> bool:
+        """The holding alt ``$give``s the target back; True once the main owns it.
+
+        When the exchange does not confirm, the main's ``$mmk=`` decides: a
+        ``y`` may have landed with its reply lost, and a second ``$give`` of a
+        character the alt no longer has would only fail. Until it is back,
+        nothing is divorced (``can_divorce`` refuses while held).
+        """
+        session = self._force_divorce
+        if session is None or session.target is None or session.phase != force_divorce.HELD:
+            return True
+        name = session.target.name
+        holder = session.held_by
+        if self.alt_fd_return is None:
+            note = f"$forcedivorce: {name} is with an alt — turn Alts on to give it back"
+            if note != self._fd_held_note:
+                self._fd_held_note = note
+                self._log(note)
+            return False
+        self._fd_held_note = ""
+        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+        try:
+            given = await self.alt_fd_return(holder, name)
+        except Exception as exc:  # noqa: BLE001 - verified below either way
+            self._log(f"$forcedivorce: giving {name} back failed ({exc})")
+            given = False
+        if not given:
+            given = await self._main_holds(name)
+        if not given:
+            self._log(f"$forcedivorce: {name} is still with the alt — will try again")
+            return False
+        session.note_returned()
+        self._save_force_divorce_record(name, owned=True)
+        self._log(f"$forcedivorce: {name} is back with the main")
+        self._notify()
+        return True
+
+    async def _main_holds(self, name: str) -> bool:
+        """Whether the main's ``$mmk=`` page 1 lists ``name`` (it is the top)."""
+        await self._sleep(_FORCE_DIVORCE_STEP_PAUSE_SEC)
+        if await self._send_command_with_reconnect("mmk=", label="$mmk") is None:
+            return False
+        parsed = await self._actions.wait_for_harem(timeout=_HAREM_TIMEOUT_SEC)
+        if parsed is None:
+            return False
+        owner = parsed.fields.get("owner")
+        if owner and not username_matches_own(str(owner), self._state.own_usernames):
+            return False
+        return harem_holds(parsed.fields, name)
 
     def _claim_gate(self) -> Callable[[str], bool] | None:
         """The active claim policy, or ``None`` when the preset rules decide."""
@@ -992,6 +1280,31 @@ class RollCycleEngine:
         )
         self._notify()
 
+    def _offer_spare_claim(self, record: RollRecord, ctx: RollInterruptContext) -> None:
+        """Main on cooldown, roll worth claiming now: one alt claims it.
+
+        Judged by the main's own rules as if it had a claim; the alt claims
+        without blocking the roll loop (``AltClaims.offer``).
+        """
+        if self.alt_spare_claim is None or self._state.claim_available is not False:
+            return
+        if record.fields.get("claimed") or not record.fields.get("can_claim"):
+            return
+        unblocked = copy.copy(self._state)
+        unblocked.claim_available = True
+        trigger = evaluate_claim_trigger(
+            ctx,
+            self._config.character_claim,
+            unblocked,
+            final_hour=self._final_roll_session,
+        )
+        if trigger is None:
+            return
+        try:
+            self.alt_spare_claim(record, trigger.reason)
+        except Exception as exc:  # noqa: BLE001 - alts must not stop the main
+            self._log(f"Alts: claim hand-off failed ({exc})")
+
     def _make_post_roll_handler(self) -> PostRollHandler:
         return PostRollHandler(
             self._actions,
@@ -1022,6 +1335,7 @@ class RollCycleEngine:
             on_state=self._notify,
             on_keys=self._notify_keys,
             claim_gate=self._claim_gate(),
+            on_power_short=self.kakera_power_short,
         )
 
     def _get_daily_resets(self) -> dict[str, Any]:
@@ -1257,11 +1571,13 @@ class RollCycleEngine:
         self._reset_roll_stop_tracker()
         self._log(f"{normal_rolls} hourly roll(s) — standard macro rules")
         segment_start = len(session_records)
+        self._batch_cut_at_reset = False
         done, claimed, _ = await self._run_normal_roll_segment(
             cmd,
             session_records,
             roll_index,
             max_rolls=normal_rolls,
+            cut_at_reset=True,
         )
         roll_index += done
         await self._claim_best_at_session_end(
@@ -1570,6 +1886,13 @@ class RollCycleEngine:
                         break
 
                     pool = int(self._state.rolls_left or 0)
+                    if pool > 0 and self.before_roll_batch is not None:
+                        try:
+                            await self.before_roll_batch()
+                        except Exception as exc:  # noqa: BLE001 - alts must not stop the main
+                            self._log(f"Alts: $tu before the batch failed ({exc})")
+                        if self._stop.is_set():
+                            break
                     if pool <= 0:
                         # No hourly rolls, but the farm's target may still be
                         # out there — on a restart mid-exposure it always is.
@@ -1602,6 +1925,15 @@ class RollCycleEngine:
                             normal_rolls=pool,
                         )
                     )
+                    if self._batch_cut_at_reset:
+                        # The reset ends this hour: its leftovers are gone and
+                        # the new hour starts over from $tu — the farm's step,
+                        # the alts' $tu, a fresh count — as any hour does.
+                        self._batch_cut_at_reset = False
+                        if self._stop.is_set() or not await self._wait_past_reset_after_cut():
+                            break
+                        tu_fresh = False
+                        continue
                     if await self._force_divorce_us_hunt(session_records, roll_index):
                         claimed = True
                     remaining = int(self._state.rolls_left or 0)
@@ -1874,17 +2206,20 @@ class RollCycleEngine:
         wishlist_characters, wishlist_series = (
             self._wishlist_get() if self._wishlist_get else ([], [])
         )
+        claim_ctx = RollInterruptContext(
+            fields=fields,
+            own_user_ids=self._state.own_user_ids,
+            wishlist_characters=wishlist_characters,
+            wishlist_series=wishlist_series,
+        )
         interrupt = evaluate_claim_trigger(
-            RollInterruptContext(
-                fields=fields,
-                own_user_ids=self._state.own_user_ids,
-                wishlist_characters=wishlist_characters,
-                wishlist_series=wishlist_series,
-            ),
+            claim_ctx,
             self._config.character_claim,
             self._state,
             final_hour=self._final_roll_session,
         )
+        if interrupt is None:
+            self._offer_spare_claim(record, claim_ctx)
         if interrupt is not None:
             if stop_on_interrupt:
                 self._log(f"{interrupt.reason} — stop rolling, claim now")
@@ -1897,6 +2232,8 @@ class RollCycleEngine:
                 reason=interrupt.reason,
                 allow_rt=interrupt.code == "wish_ping",
             )
+            if not claimed:
+                self._offer_spare_claim(record, claim_ctx)
             if (
                 not us_roll
                 # The farm claims a character that is very likely wished, and
@@ -2156,6 +2493,34 @@ class RollCycleEngine:
                     f"Rolled {len(session_records)} this hour — "
                     "claim best skipped (not final hour; buttons expire)"
                 )
+        await self._alts_at_batch_end(session_records)
+
+    async def _alts_at_batch_end(self, session_records: list[RollRecord]) -> None:
+        """After the main's own claim: alts take the best rolls left (2nd,
+        3rd … in turn order), then give what they claimed to the main.
+
+        Same hours as the main's batch-end pick: the final roll session, or
+        any hour when the preset claims at the end of every batch.
+        """
+        if self.alt_batch_end is None or self._stop.is_set():
+            return
+        from macro.alt_claims import rank_for_alts
+
+        rules = self._config.character_claim
+        final = bool(self._final_roll_session)
+        ranked: list[RollRecord] = []
+        if session_records and rules.enabled and (final or not rules.only_final_hour):
+            ranked = rank_for_alts(
+                session_records,
+                rules,
+                self._state,
+                final_hour=final,
+                expire_sec=self._make_post_roll_handler()._claim_expire_sec(),
+            )
+        try:
+            await self.alt_batch_end(ranked)
+        except Exception as exc:  # noqa: BLE001 - alts must not stop the main
+            self._log(f"Alts: batch end failed ({exc})")
 
     def _consume_roll(self, *, us_roll: bool) -> None:
         """Count one roll off the pool this roll was spending.
@@ -2328,6 +2693,7 @@ class RollCycleEngine:
         *,
         respect_roll_stop: bool = True,
         max_rolls: int | None = None,
+        cut_at_reset: bool = False,
     ) -> tuple[int, bool, bool]:
         """Roll normal hourly rolls with standard stop/interrupt rules.
 
@@ -2353,6 +2719,13 @@ class RollCycleEngine:
 
         while not self._stop.is_set() and not stop_rolling:
             if budget is not None and done >= budget:
+                break
+            if cut_at_reset and self._rolls_reset_due():
+                self._batch_cut_at_reset = True
+                self._log(
+                    f"Rolls reset is due — stopping the batch after {done} roll(s)"
+                    + (" to claim before the claim reset" if self._final_roll_session else "")
+                )
                 break
             if respect_roll_stop and self._roll_stop.should_stop_before_roll(
                 self._state.rolls_left
@@ -2922,6 +3295,23 @@ class RollCycleEngine:
         await asyncio.sleep(delay)
         return True, roll_timeouts
 
+    def _rolls_reset_due(self) -> bool:
+        """True once the hour's rolls reset is close enough to stop a batch."""
+        left = seconds_until_rolls_reset_estimate(self._state.rolls_reset_at)
+        if left is None:
+            return False
+        cut = _RESET_CUT_FINAL_SEC if self._final_roll_session else _RESET_CUT_SEC
+        return left <= cut
+
+    async def _wait_past_reset_after_cut(self) -> bool:
+        """Sleep until just past the estimated reset; False when stopped."""
+        left = seconds_until_rolls_reset_estimate(self._state.rolls_reset_at)
+        wait = max(0.0, (left or 0.0) + _RESET_CUT_TU_PAD_SEC)
+        if wait > 0:
+            self._log(f"Waiting {wait:.0f}s for the rolls reset, then $tu")
+            return await self._sleep_interruptible(wait)
+        return not self._stop.is_set()
+
     def _seconds_until_rolls_reset(self) -> float:
         return seconds_until_rolls_reset(
             self._state.rolls_reset_minutes,
@@ -3280,23 +3670,6 @@ class RollCycleEngine:
             self._state.claim_expire_sec = int(timer)
 
     def _apply_tu_fields(self, fields: dict[str, Any]) -> None:
-        if "rolls_left" in fields and fields["rolls_left"] is not None:
-            merge_tu_hourly_rolls(self._state, int(fields["rolls_left"]))
-        # Always refresh the $us bonus (None when $tu no longer reports one).
-        us_bonus = fields.get("rolls_us_bonus")
-        self._state.rolls_us_bonus = int(us_bonus) if us_bonus is not None else None
-        if "claim_available" in fields:
-            self._state.claim_available = fields["claim_available"]
-            if fields["claim_available"]:
-                self._state.set_claim_cooldown(None)
-        if "claim_cooldown_minutes" in fields:
-            self._state.set_claim_cooldown(fields["claim_cooldown_minutes"])
-        sync_reaction_power_fields(self._state, fields)
-        sync_dk_fields_from_tu(self._state, fields)
-        from macro.rt_manager import sync_rt_fields_from_tu
+        from macro.tu_apply import apply_tu_fields
 
-        sync_rt_fields_from_tu(self._state, fields)
-        if "rolls_reset_minutes" in fields:
-            self._state.set_rolls_reset(int(fields["rolls_reset_minutes"]))
-        if "next_claim_reset_minutes" in fields and fields["next_claim_reset_minutes"] is not None:
-            self._state.set_claim_reset(int(fields["next_claim_reset_minutes"]))
+        apply_tu_fields(self._state, fields)

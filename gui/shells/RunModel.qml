@@ -161,6 +161,20 @@ Item {
         ? Math.ceil(dkNextSeconds / 60)
         : numberOr(stateData.dk_next_minutes, -1)
 
+    // $rt: Mudae shows one reset claim at a time — ready, or the cooldown left.
+    readonly property int rtNextSeconds: Clock.remainingSeconds(stateData.rt_reset_at, nowMs)
+    readonly property int rtNextMinutes: rtNextSeconds >= 0
+        ? Math.ceil(rtNextSeconds / 60)
+        : numberOr(stateData.rt_next_minutes, -1)
+    readonly property bool rtReady: stateData.rt_available === true
+    readonly property string rtText: rtReady ? "ready"
+        : (rtNextMinutes > 0 ? durationFromMinutes(rtNextMinutes) : "—")
+
+    // ---- alts --------------------------------------------------------------
+
+    readonly property bool altsOn: App.altsOn
+    property var alts: []
+
     // ---- perks -------------------------------------------------------------
 
     readonly property var today: summary.today || ({})
@@ -209,11 +223,13 @@ Item {
             return []
         var s = forceDivorce
         var phaseTone = s.phase === "stopped" ? "bad"
-            : (s.phase === "hunting" ? "accent" : "")
+            : (s.phase === "hunting" || s.phase === "held" ? "accent" : "")
+        var altCycles = numberOr(s.alt_cycles, 0)
         var rows = [
             { label: "target", value: s.target || "—", tone: "" },
-            { label: "state", value: s.phase || "—", tone: phaseTone },
-            { label: "cycles today", value: String(numberOr(s.cycles, 0)), tone: "" },
+            { label: "state", value: s.phase === "held" ? "with an alt" : (s.phase || "—"), tone: phaseTone },
+            { label: "cycles today",
+              value: String(numberOr(s.cycles, 0)) + (altCycles > 0 ? " (" + altCycles + " by alts)" : ""), tone: "" },
             { label: "kakera banked", value: compact(numberOr(s.kakera, 0)), tone: "good" }
         ]
         if (s.stop_reason)
@@ -429,6 +445,10 @@ Item {
         stateData = parseJson(App.macroStateJson, {})
     }
 
+    function reloadAlts() {
+        alts = parseJson(App.altsLiveJson(), [])
+    }
+
     function reloadSummary() {
         summary = parseJson(App.runSummaryJson, {})
     }
@@ -458,7 +478,9 @@ Item {
         function onMacroLogChanged() { model.reloadFeed() }
         function onRunSummaryChanged() { model.reloadSummary() }
         function onConfigChanged() { model.reloadRules(); model.reloadSummary() }
-        function onConnectedChanged() { model.reloadSummary() }
+        function onConnectedChanged() { model.reloadSummary(); model.reloadAlts() }
+        function onAltsLiveChanged() { model.reloadAlts() }
+        function onAltsChanged() { model.reloadAlts() }
     }
 
     Timer {
@@ -473,5 +495,6 @@ Item {
         reloadSummary()
         reloadFeed()
         reloadRules()
+        reloadAlts()
     }
 }

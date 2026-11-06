@@ -1064,3 +1064,289 @@ def test_the_usable_bonus_alone_can_close_the_hunt():
     assert claimed is True
     assert actions.stack_reads == 0, "the stack was read despite the claim landing"
     assert [c for c in actions.sent if c.startswith("$us")] == []
+
+
+# --- the alt cycle: an alt claims, gives it back, the main claims last --------
+
+
+def _alt_hooks(engine, *, ready=True, claim=None, give=True):
+    calls = {"claims": 0, "gives": []}
+    alt = {"ready": ready}
+
+    async def alt_claim(record):
+        calls["claims"] += 1
+        got = claim if claim is not None else {"account_id": "alt1", "name": "lukijade", "kakera": 600_000}
+        if got:
+            alt["ready"] = False  # its claim is spent
+        return got or None
+
+    async def alt_return(acc, name):
+        calls["gives"].append((acc, name))
+        return give
+
+    engine.alt_fd_ready = lambda: alt["ready"]
+    engine.alt_fd_claim = alt_claim
+    engine.alt_fd_return = alt_return
+    return calls
+
+
+def _stored_engine(actions, **kw):
+    stored: dict = {}
+    engine, state = _farm_engine(actions, **kw)
+    engine._get_daily_resets = lambda: dict(stored)
+    engine._save_daily_resets = lambda d: stored.update(d)
+    return engine, state, stored
+
+
+def test_an_alt_with_a_claim_is_a_slot_for_the_divorce():
+    actions = _FarmActions(harem=_harem_reply(), prompt=_prompt_reply(), result=_result_reply("success"))
+    engine, _, _ = _stored_engine(actions, claim_available=False)
+    engine._force_divorce.set_target("Lucy", day=_today())
+    _alt_hooks(engine)
+    assert asyncio.run(engine._run_force_divorce_step()) is True
+    assert actions.texts == ["y"]
+
+
+def test_an_alt_claims_gives_it_back_and_the_main_divorces_again_on_its_own_slot():
+    actions = _FarmActions(prompt=_prompt_reply(), result=_result_reply("success"))
+    engine, state, stored = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", 271_065, day=_today())
+    session.note_divorced()
+    calls = _alt_hooks(engine)
+    fields = {"character_name": "Lucy", "can_claim": True, "claimed": False}
+    record = RollRecord(message_id=1, character_name="Lucy", fields=fields)
+
+    outcome = asyncio.run(engine._force_divorce_roll_check(record, fields, 40))
+
+    assert outcome.claimed is True and outcome.stop is False
+    assert calls["gives"] == [("alt1", "Lucy")]
+    assert session.alt_cycles == 1 and session.kakera_banked == 600_000
+    # Back with the main, then straight out again on the main's slot.
+    assert actions.sent == ["$forcedivorce Lucy"] and session.phase == fd.HUNTING
+    assert stored["force_divorce"]["held_by"] == ""
+
+
+def test_the_main_claims_when_no_alt_gets_it():
+    actions = _FarmActions()
+    engine, state, _ = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_divorced()
+    calls = _alt_hooks(engine, claim={})
+    claimed: list = []
+
+    class _Handler:
+        async def claim_record(self, record, *, reason="", allow_rt=False):
+            claimed.append(reason)
+            return True
+
+    engine._make_post_roll_handler = lambda: _Handler()
+    engine._run_force_divorce_step = lambda: asyncio.sleep(0, result=False)
+    fields = {"character_name": "Lucy", "can_claim": True, "claimed": False}
+    asyncio.run(engine._force_divorce_roll_check(RollRecord(1, "Lucy", fields), fields, 40))
+    assert calls["claims"] == 1 and claimed == ["$forcedivorce target"]
+
+
+def test_a_failed_give_keeps_it_held_and_nothing_is_divorced_until_it_is_back():
+    # The give fails and the main's $mmk= does not list Lucy: still with the alt.
+    actions = _FarmActions(
+        harem=_harem_reply(top="Reze", entries=[{"name": "Reze", "kakera": 1}]),
+        prompt=_prompt_reply(), result=_result_reply("success"),
+    )
+    engine, _, stored = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_divorced()
+    calls = _alt_hooks(engine, give=False)
+    fields = {"character_name": "Lucy", "can_claim": True, "claimed": False}
+    asyncio.run(engine._force_divorce_roll_check(RollRecord(1, "Lucy", fields), fields, 40))
+
+    assert session.phase == fd.HELD
+    assert stored["force_divorce"] == {**stored["force_divorce"], "owned": False, "held_by": "alt1"}
+    assert actions.texts == []  # nothing divorced
+    asyncio.run(engine._run_force_divorce_step())
+    assert actions.texts == [] and len(calls["gives"]) == 2  # tried again, still no divorce
+
+
+def test_a_lost_give_reply_is_settled_by_the_mains_harem():
+    actions = _FarmActions(harem=_harem_reply(), prompt=_prompt_reply(), result=_result_reply("success"))
+    engine, _, stored = _stored_engine(actions, claim_available=False)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_claimed(kakera=1)
+    session.note_held("alt1")
+    _alt_hooks(engine, ready=False, give=False)
+    assert asyncio.run(engine._force_divorce_return()) is True  # $mmk= lists Lucy
+    assert session.phase == fd.CLAIMED and stored["force_divorce"]["owned"] is True
+
+
+def test_a_restart_with_the_character_on_an_alt_gives_it_back_before_divorcing():
+    actions = _FarmActions(
+        # Lucy is not in the main's harem: the alt still has her.
+        harem=_harem_reply(top="Reze", entries=[{"name": "Reze", "kakera": 1}]),
+        prompt=_prompt_reply(), result=_result_reply("success"),
+    )
+    engine, _, stored = _stored_engine(actions, claim_available=True)
+    engine._save_force_divorce_record("Lucy", owned=False, held_by="alt1")
+    calls = _alt_hooks(engine, ready=False)
+
+    asyncio.run(engine._run_force_divorce_step())
+
+    assert calls["gives"] == [("alt1", "Lucy")]
+    assert engine._force_divorce.target.name == "Lucy"  # not Reze
+    assert actions.sent == ["$mmk=", "$forcedivorce Lucy"]  # given back, then divorced
+    assert engine._force_divorce.alt_cycles == 0  # carried over, not a new cycle
+
+
+def test_with_alts_off_a_held_character_blocks_the_farm():
+    actions = _FarmActions(
+        harem=_harem_reply(top="Reze", entries=[{"name": "Reze", "kakera": 1}]),
+        prompt=_prompt_reply(), result=_result_reply("success"),
+    )
+    engine, _, _ = _stored_engine(actions, claim_available=True)
+    engine._save_force_divorce_record("Lucy", owned=False, held_by="alt1")
+    asyncio.run(engine._run_force_divorce_step())
+    assert actions.texts == [] and engine._force_divorce.phase == fd.HELD
+
+
+def test_a_target_owned_by_one_of_our_alts_is_given_back_not_a_stop():
+    """2026-11-06: 'Lucy is now owned by kleinam0n — stopping the farm'."""
+    actions = _FarmActions(prompt=_prompt_reply(), result=_result_reply("success"))
+    engine, _, stored = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_divorced()  # what the stale record said
+    calls = _alt_hooks(engine, ready=False)
+    engine.alt_account_for = lambda name: "alt2" if name == "kleinam0n" else None
+    fields = {"character_name": "Lucy", "claimed": True, "owner": "kleinam0n", "can_claim": False}
+
+    outcome = asyncio.run(engine._force_divorce_roll_check(RollRecord(1, "Lucy", fields), fields, 40))
+
+    assert outcome is not None and outcome.stop is False and not engine._stop.is_set()
+    assert calls["gives"] == [("alt2", "Lucy")]
+    assert session.phase == fd.HUNTING and actions.texts == ["y"]  # back, then divorced again
+
+
+def test_an_outstanding_record_asks_the_alts_before_hunting():
+    """The restart in the same report: the record said 'divorced', but kleinam0n had Lucy."""
+    actions = _FarmActions(
+        harem=_harem_reply(top="Reze", entries=[{"name": "Reze", "kakera": 1}]),
+        prompt=_prompt_reply(), result=_result_reply("success"),
+    )
+    engine, _, stored = _stored_engine(actions, claim_available=True)
+    engine._save_force_divorce_record("Lucy", owned=False)
+    calls = _alt_hooks(engine, ready=False)
+
+    async def find(name):
+        return "alt2"
+
+    engine.alt_fd_find = find
+    asyncio.run(engine._run_force_divorce_step())
+
+    assert calls["gives"] == [("alt2", "Lucy")]
+    assert engine._force_divorce.alt_cycles == 0
+    assert actions.sent == ["$mmk=", "$forcedivorce Lucy"]
+
+
+def test_a_main_claim_beaten_by_our_own_alt_is_adopted():
+    actions = _FarmActions(prompt=_prompt_reply(), result=_result_reply("success"))
+    engine, _, _ = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_divorced()
+    calls = _alt_hooks(engine, claim={})  # the alt's own claim was not recognised
+
+    async def find(name):
+        return "alt2"
+
+    engine.alt_fd_find = find
+
+    class _Handler:
+        async def claim_record(self, record, *, reason="", allow_rt=False):
+            record.fields["claimed"] = True  # "already claimed by someone else"
+            return False
+
+    engine._make_post_roll_handler = lambda: _Handler()
+    fields = {"character_name": "Lucy", "can_claim": True, "claimed": False}
+    outcome = asyncio.run(engine._force_divorce_roll_check(RollRecord(1, "Lucy", fields), fields, 40))
+    assert outcome.claimed is True and calls["gives"] == [("alt2", "Lucy")]
+    assert session.phase == fd.HUNTING
+
+
+# --- divorced straight from the alt: no $give round trip ----------------------
+
+
+def test_the_main_divorces_it_straight_from_the_alt_that_claimed_it():
+    """2026-11-06: "Lucy belongs to @alt, do you want to force the divorce?" —
+    the main can divorce an alt's character, so the $give back is skipped."""
+    actions = _FarmActions(prompt=_prompt_reply(owner_id="555"), result=_result_reply("success"))
+    engine, _state, stored = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", 271_065, day=_today())
+    session.note_divorced()
+    calls = _alt_hooks(engine)
+    engine.alt_user_id = lambda acc: 555 if acc == "alt1" else None
+    fields = {"character_name": "Lucy", "can_claim": True, "claimed": False}
+
+    outcome = asyncio.run(
+        engine._force_divorce_roll_check(RollRecord(1, "Lucy", fields), fields, 40)
+    )
+
+    assert outcome.claimed is True and outcome.stop is False
+    assert calls["gives"] == []  # no $give
+    assert actions.sent == ["$forcedivorce Lucy"] and actions.texts == ["y"]
+    assert session.phase == fd.HUNTING and session.held_by == ""
+    assert stored["force_divorce"]["held_by"] == "" and stored["force_divorce"]["owned"] is False
+
+
+def test_with_no_slot_left_the_alt_gives_it_back_so_the_main_ends_with_it():
+    actions = _FarmActions(prompt=_prompt_reply(owner_id="555"), result=_result_reply("success"))
+    engine, _state, _ = _stored_engine(actions, claim_available=False)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_divorced()
+    calls = _alt_hooks(engine)
+    engine.alt_user_id = lambda acc: 555
+    fields = {"character_name": "Lucy", "can_claim": True, "claimed": False}
+
+    asyncio.run(engine._force_divorce_roll_check(RollRecord(1, "Lucy", fields), fields, 40))
+
+    assert calls["gives"] == [("alt1", "Lucy")]
+    assert actions.texts == [] and session.phase == fd.IDLE and session.held_by == ""
+
+
+def test_a_prompt_naming_another_owner_is_not_confirmed_when_divorcing_from_an_alt():
+    actions = _FarmActions(prompt=_prompt_reply(owner_id="999"), result=_result_reply("success"))
+    engine, _state, _ = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_claimed(kakera=1)
+    session.note_held("alt1")
+    _alt_hooks(engine, ready=False)
+    engine.alt_user_id = lambda acc: 555
+
+    assert asyncio.run(engine._run_force_divorce_step()) is False
+    assert actions.texts == [] and session.phase == fd.STOPPED
+
+
+def test_an_unreadable_reply_is_settled_by_the_alts_harem():
+    actions = _FarmActions(prompt=_prompt_reply(owner_id="555"), result=_result_reply("weird"))
+    engine, _state, _ = _stored_engine(actions, claim_available=True)
+    session = engine._force_divorce
+    session.set_target("Lucy", day=_today())
+    session.note_claimed(kakera=1)
+    session.note_held("alt1")
+    _alt_hooks(engine, ready=False)
+    engine.alt_user_id = lambda acc: 555
+    holder = {"acc": "alt1"}
+
+    async def find(name):
+        return holder["acc"]
+
+    engine.alt_fd_find = find
+    assert asyncio.run(engine._run_force_divorce_step()) is False
+    assert session.phase == fd.HELD and session.held_by == "alt1"  # still with the alt
+    holder["acc"] = None
+    assert asyncio.run(engine._run_force_divorce_step()) is True
+    assert session.phase == fd.HUNTING

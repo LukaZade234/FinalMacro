@@ -49,6 +49,12 @@ class AccountState:
     claim_expire_sec: int | None = None
     rt_available: bool | None = None
     rt_next_minutes: int | None = None
+    # From a full $tu (alts never trim theirs with $tuarrange). None until seen.
+    kakera_stock: int | None = None
+    sphere_stock: int | None = None
+    # {"oh": 4, "oc": 1, "oq": 0, "ot": 0} — left + stored, per game.
+    minigames_left: dict[str, int] | None = None
+    daily_available: bool | None = None
     rt_reset_at: str = ""
     # Character an ``$rt`` was spent on to open the *currently open* claim slot,
     # blank when the open slot is an ordinary one. ``$rt`` is bought for one

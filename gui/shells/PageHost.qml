@@ -5,7 +5,7 @@ import "../views"
 /*
     Loads the view for a page index.
 
-    Every design shares the same ten pages and the same view files; only the
+    Every design shares the same eleven pages and the same view files; only the
     Run page differs, so each shell passes its own `runComponent`.
 
     The index is the contract between here and every shell's nav array, plus
@@ -23,14 +23,15 @@ Loader {
     sourceComponent: {
         switch (pageIndex) {
         case 1: return accountsPage
-        case 2: return serversPage
-        case 3: return presetsPage
-        case 4: return mudaePage
-        case 5: return spheresPage
-        case 6: return advisorPage
-        case 7: return statisticsPage
-        case 8: return debugPage
-        case 9: return settingsPage
+        case 2: return altsPage
+        case 3: return serversPage
+        case 4: return presetsPage
+        case 5: return mudaePage
+        case 6: return spheresPage
+        case 7: return advisorPage
+        case 8: return statisticsPage
+        case 9: return debugPage
+        case 10: return settingsPage
         default: return host.runComponent
         }
     }
@@ -53,6 +54,10 @@ Loader {
     Component {
         id: accountsPage
         AccountsView { anchors.fill: parent }
+    }
+    Component {
+        id: altsPage
+        AltsView { anchors.fill: parent }
     }
     Component {
         id: serversPage

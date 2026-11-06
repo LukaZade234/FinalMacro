@@ -88,7 +88,11 @@ class PlayAllMinigames:
         daily_get: Callable[[], dict[str, Any]] | None = None,
         daily_save: Callable[[dict[str, Any]], None] | None = None,
         state: Any | None = None,
+        games: Any | None = None,
     ) -> None:
+        # Which of oh / oc / oq / ot to play; None plays all four (the main).
+        # An alt's Spheres › Minigames list may leave some out.
+        self._games = None if games is None else {str(g) for g in games}
         self._actions = actions
         self._monitor = monitor
         self._log = log
@@ -103,6 +107,9 @@ class PlayAllMinigames:
             for game in ("oh", "oc", "oq", "ot")
             for kind in ("left", "stored", "total")
         }
+
+    def _plays(self, game: str) -> bool:
+        return self._games is None or game in self._games
 
     async def play(
         self,
@@ -149,7 +156,7 @@ class PlayAllMinigames:
         oq_uses = availability["oq_total"]
         ot_uses = availability["ot_total"]
 
-        if oh_uses > 0:
+        if oh_uses > 0 and self._plays("oh"):
             oh_results = await self._play_batches(
                 "oh", OhSphereGame, oh_uses, prefix=prefix
             )
@@ -181,7 +188,7 @@ class PlayAllMinigames:
         else:
             self._log("play-all: no $oh uses — skipping")
 
-        if oc_uses > 0:
+        if oc_uses > 0 and self._plays("oc"):
             oc_results = await self._play_batches(
                 "oc", OcSphereGame, oc_uses, prefix=prefix
             )
@@ -193,7 +200,7 @@ class PlayAllMinigames:
         else:
             self._log("play-all: no $oc uses — skipping")
 
-        if oq_uses > 0:
+        if oq_uses > 0 and self._plays("oq"):
             oq_results = await self._play_batches(
                 "oq", OqSphereGame, oq_uses, prefix=prefix
             )
@@ -205,7 +212,7 @@ class PlayAllMinigames:
         else:
             self._log("play-all: no $oq uses — skipping")
 
-        if ot_uses > 0:
+        if ot_uses > 0 and self._plays("ot"):
             ot_results = await self._play_batches(
                 "ot", OtSphereGame, ot_uses, prefix=prefix
             )

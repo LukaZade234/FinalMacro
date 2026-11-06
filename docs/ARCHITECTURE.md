@@ -350,41 +350,118 @@ Offscreen PNG previews: `scripts/ui_preview.py`.
 
 ---
 
-## Multi-account runtime (Phase D)
+## Multi-account runtime — alts that supplement the main
 
-Config already supports several accounts. Runtime still opens **one**
-Discord connection. This is how to extend it without repeating the old
-MudaeBot bug (one account using the wrong preset on every channel).
+The main is the Run target's account. Any other account whose type is **Alt**
+(Accounts page) is an alt. While a run is connected and **Alts: on** is set,
+each enabled alt opens its own gateway in the main's run channel. Claim and
+kakera windows are seconds long, and button clicks need a live session, so the
+token switching used for `$p`/`$daily` is not enough here.
 
-Rules:
+**Clashes between accounts are the first thing every alt feature is checked
+against.** The rules live in code, not in each feature:
 
-1. **Never collapse presets per account.** Each running instance resolves
-   `(account_id, channel_profile_id)` → `preset_id` via `TargetStore`.
-2. **One monitor per connected account**, keyed by `account_id`. Do not
-   share `AccountState` across accounts. `RollContext` is already
-   per-account so a coordinator can hold several.
-3. **Schedule work on targets**, not accounts alone: iterate `targets[]`,
-   skip accounts on cooldown, round-robin channels then accounts.
-4. **GUI:** Run can stay single-target for manual use; `deployAll()` would
-   start every configured target.
+| Module | Role |
+| --- | --- |
+| `macro/turns.py` | `ChannelCoordinator`, built per run. Turn order is the main, then the alts in Alts-page order. `assign(key, eligible)` hands a trigger (claim, kakera button, force-divorce claim) to exactly one account and remembers it; `pass_on` moves it to the next account in order, never back. `command_lane` serialises every account's commands, keeps different accounts' commands ≥ 1 s apart, and holds the lane for the last sender until its reply is read (`reply_seen`, ≤ 4 s), so two accounts never have a command in flight at once. `may_roll_us` is true for the main only. |
+| `macro/preset_scope.py` | Every `MacroConfig` field is `ACCOUNT` (roll command, claim/kakera/sphere rules, `$kl`: the alt's own preset, else the main's), `SESSION` (prefix, roll pacing, claim window, notification mode, force divorce: always the main's), or `MAIN_ONLY` (all `$us` settings, switched off for alts). `alt_config(main, own)` builds an alt's config. A test fails on any unclassified field. |
+| `macro/alt_rules.py` | `AltRules`: the Claims / Kakera / Spheres parts. The tiers (`support`, `shared`, `independent`) fill all three; `tier_of` derives the tier from the parts (else `custom`), so it is never stored on its own. |
+| `gui/alts_store.py` | `settings.json › alts`: the turn order and the rules per alt. `alt_ids()` reconciles them with the accounts' types. |
+| `macro/account_pool.py` | `AccountPool`: one monitor, `DiscordActions` and `AccountState` per alt. Alt connections only feed their own waiter. The main's monitor already records rolls for the feed and logs, and an alt must not record them twice. A failed or tokenless alt is left out of the turn order. Notification mode is the main's: `release/restore_for_notifications` follow the main's disconnect and reconnect. |
+| `macro/tu_apply.py` | `apply_tu_fields(state, fields)`, shared by the main's engine and the alts. |
 
-Sketch:
+`DiscordActions.set_lane(coordinator, account_id, own_names)` routes
+`send_command` / `send_text` through the lane. It is only set while alts are
+up; a solo run is unchanged. With a lane set, `wait_for_tu` accepts only the
+account's own `$tu`, using the `tu_user` field (`**name**, you can claim…`).
 
-```text
-AccountManager
-  clients: dict[account_id, ChannelMonitor]
-  deploy(target) -> connect monitor to channel snowflake
-  schedule() -> for each target: resolve preset, run RollCycleEngine
-```
+**Bridge** (`gui/bridge.py`, "multi-account: alts"): `_start_alts` runs after
+the main connects (and when Alts is switched on mid-run); `_stop_alts` runs
+before the main disconnects. Slots: `altsJson`, `altsLiveJson`, `setAltsOn`,
+`setAltTier`, `setAltRules`, `setAltEnabled`, `moveAlt`, `refreshAlts`.
 
-Files to extend: `mudae/discord_reader.py` (already one channel per
-monitor), `macro/roll_cycle.py` (one engine per monitor), new
-`macro/coordinator.py`, `gui/bridge.py` (`connect()` stays single-target).
+**UI:** the **alts** page is page index 2. Every shell's nav, `PageHost`,
+`ShellSwitcher.settingsPageIndex` (10), Haul's `settingsIndex` and
+`scripts/ui_preview.py` follow that index. `gui/views/AltsView.qml` holds
+Setup (turn order, tiers, three parts) and Ledger.
+Ledger has two parts:
+- **Pass to main.** Fetch reads `AccountPool.fetch_balances`: `$tu`, then
+  `$ku` or `$ohu` only for a stock `$tu` lacks, then `$mmk=` page 1. Per
+  currency there is a keep amount (starting at the Setup reserve) and a give
+  button. Characters are picked from page 1. "Give everything above keep"
+  calls `AccountPool.pass_to_main`, one exchange at a time, and stops at the
+  first failure.
+- **This session's transfers** (`AccountPool.transfer_log`).
 
-Legacy MudaeBot `channel_presets` strings map to `targets[]` in
-`gui/import_legacy.py`. Do not port “first preset per account”.
+Bridge slots: `altPassJson`, `fetchAltBalances`, `passAltToMain`. On Console Run, `ConsoleAltsBlock.qml` heads the rail, which now
+scrolls: the on/off switch, then each alt's claim, power, `$dk` and `$rt`.
+`$rt` also has a stat cell of its own.
 
-Original write-up: `docs/archive/MULTI_ACCOUNT.md`.
+**Transfers** (`macro/transfers.py`, `AccountPool.give_to_main`):
+- `$give` / `$givek` / `$givesp` from an alt to the main, read on the alt's
+  connection.
+- Each `y` is gated on the prompt naming what was asked for. A mismatch is
+  answered `n`.
+- `DiscordActions.open_prompt()` is a per-account lock held around every y/n
+  exchange, so a bare `y` can't confirm the wrong question. The main's force
+  divorce, `$kl` and list exchanges take it too.
+- Transfer prompts name the alt by its Discord **username**, not its display
+  name. Its own `$tu` opens with the same name, which is recorded as
+  `AltSession.mudae_name`.
+
+**Sheets and readiness:**
+- Alts › Setup › Sheets fetches an alt's `$bonus` / `$shop` / `$ov`
+  (`fetchAltSheets`). While it runs, they go on the alt's own connection.
+  Otherwise they use the scope-fetch `sheets` job.
+- The main's `_on_parsed` credits each sheet to whoever typed the command
+  (`macro/sheet_attribution.py`).
+- `_refresh_alt_sheets` applies the alt's `$bonus`/`$shop` to its own
+  `AccountState` and sets `AltSession.ready` (`macro/alt_readiness.py`). The
+  `$ov` roll-display settings are compared with the main's.
+- Only `AccountPool.ready_sessions()` may take a trigger.
+- `fetchAltSheets` files each reply under the alt from the alt's own
+  connection (`_fetch_sheet_set(file_as=…)`), not via the main seeing it. An
+  alt with no pool connection gets a short connection of its own (never the
+  main's gateway), unless the macro is running.
+- A run-target switch stops the alts and starts them again on the new
+  channel (`_apply_run_target_switch`).
+
+**Kakera on the main's rolls** (`macro/alt_kakera.py`):
+- `KakeraReactor.on_power_short` (wired through
+  `RollCycleEngine.kakera_power_short`) reports each roll the main leaves for
+  power: out of it, or held back by the perk-8 power save / budget
+  (`hands_off_to_alts`, `ReactionDecision.held_back`). Only the buttons the
+  main did not take are passed, once per roll.
+- Alts `$tu` once per hourly session, after the main's `$tu` and before its
+  first roll (`RollCycleEngine.before_roll_batch`), not when they connect.
+- `AltKakera` assigns each button to one alt through the coordinator, at the
+  alt's full price, and passes it on after a refusal.
+
+**Claims on the main's rolls** (`macro/alt_claims.py`):
+- `RollCycleEngine._offer_spare_claim` → `alt_spare_claim` (`AltClaims.offer`)
+  when the main is on cooldown and its rules (re-run with a claim in hand)
+  say claim now.
+- `_claim_best_at_session_end` → `_alts_at_batch_end` → `alt_batch_end`:
+  `rank_for_alts` ranks the rolls left; `AltClaims.batch_end` gives one per
+  alt through the coordinator (`claim_key`); `give_pending` `$give`s them
+  to the main.
+
+**Passing and the ledger:** `macro/alt_passing.py` (`AltPassing.batch_end`,
+run from the bridge's `alt_batch_end` after `give_pending`) and
+`macro/alt_ledger.py` (`AltLedger`, set as `AccountPool.ledger`; written by
+`give_to_main`, `AltKakera`, `AltClaims`). Alts › Ledger reads it through
+`altPassJson` › `ledger`.
+
+**Alt start of day:** `macro/alt_daily.py` (`AltDaily.run_due`) runs from
+the bridge's `alt_session_start` (`RollCycleEngine.before_roll_batch`), after
+`pool.refresh_all`: `_play_alt_minigames` (`PlayAllMinigames` on the alt's
+actions/monitor, `games=` its list, rewards to the ledger) then
+`AltPassing.start_of_day`. Gated per day by `AltLedger.done_today`.
+
+**Built so far:** connections, turn order, lane, scopes, settings, UI,
+transfers, sheets, kakera on the main's rolls, spare claims plus `$give`,
+automatic passing, the ledger, the force-divorce alt cycle (`RollCycleEngine.alt_fd_*` hooks, `ForceDivorceRecord.held_by`).
+**Not yet:** alt rolling and an alt's own `$rt` in the farm. Order and status are in `TODO.md`.
 
 ---
 

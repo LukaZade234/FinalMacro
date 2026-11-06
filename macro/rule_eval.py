@@ -76,6 +76,10 @@ class ReactionDecision:
 
     buttons: list[ButtonChoice] = field(default_factory=list)
     reason: str = ""
+    # Kakera only: paid buttons the rules wanted but held back for the perk-8
+    # burst or budget while still clicking others (a free purple). Alts may
+    # take them (macro/alt_kakera.py).
+    held_back: bool = False
 
     @property
     def should_click(self) -> bool:
@@ -334,17 +338,20 @@ def passes_kakera_reaction(
     # and if the belief that slots remain is wrong nothing will ever spend it.
     # So a full bar hands the decision to `_filter_perk8_power_reserve` below,
     # which reserves exactly what the remaining perk-8 clicks need and no more.
+    held_back = False
     if saving and not fields.get("perk_8") and hoarding_wastes_power(state, rules, now=now):
         saving = False
     if saving and not fields.get("perk_8"):
         bypass = perk8_budget_bypass_types(rules)
         bypass_selected = [b for b in selected if _kakera_emoji(b) in bypass]
         if bypass_selected:
+            held_back = held_back or len(bypass_selected) < len(selected)
             selected = bypass_selected
         else:
             return ReactionDecision(reason="saving perk-8 kakera budget")
 
     if power_save_enabled(rules):
+        before = len(selected)
         selected = _filter_perk8_power_reserve(
             selected,
             fields,
@@ -354,6 +361,7 @@ def passes_kakera_reaction(
         )
         if not selected:
             return ReactionDecision(reason="reserving power for perk-8 burst")
+        held_back = held_back or len(selected) < before
 
     choices = [_make_button_choice(message_id, b) for b in selected]
     reason_parts = [f"{len(choices)} kakera"]
@@ -377,7 +385,7 @@ def passes_kakera_reaction(
             f"budget {state.kakera_clicks_today}/{perk8_click_budget(state, rules)}"
         )
 
-    return ReactionDecision(buttons=choices, reason=" · ".join(reason_parts))
+    return ReactionDecision(buttons=choices, reason=" · ".join(reason_parts), held_back=held_back)
 
 
 def perk8_mode_from_state(state: AccountState) -> Perk8PriorityMode:

@@ -52,6 +52,8 @@ SCOPE_FETCH_COMMANDS: dict[str, str] = {
     "serverdisablelist": "$sdl",
     # All three lists in one go, 1 s apart (see `MUDAE_LOGIC.md`, Spacing commands).
     "lists": "$dld · $adl · $wl",
+    # An account's three sheets in one go (Alts › Setup › Sheets), 1 s apart.
+    "sheets": "$bonus · $shop · $ov",
     # Advisor › Lists › Send: clear a list and add a preset back. Not a fetch,
     # but it needs the same routes (send / hop / temporary) and busy gate.
     "listsend": "list send",

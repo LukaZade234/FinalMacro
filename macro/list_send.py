@@ -41,6 +41,7 @@ import types
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from macro.actions import prompt_guard
 from mudae.parsers.list_prompts import (
     is_list_clear_prompt,
     is_starwish_limit_prompt,
@@ -189,6 +190,10 @@ class ListSender:
     # --- steps ---------------------------------------------------------------
 
     async def clear(self, command: str) -> str:
+        async with prompt_guard(self._actions):
+            return await self._clear_locked(command)
+
+    async def _clear_locked(self, command: str) -> str:
         """``""`` once the list is cleared, or why it was not."""
         message_id = await self._send_command(command)
         if message_id is None:
@@ -228,6 +233,10 @@ class ListSender:
         return f"{command} was not ticked after confirm — the list may not be cleared"
 
     async def add(self, command: str) -> tuple[str, str]:
+        async with prompt_guard(self._actions):
+            return await self._add_locked(command)
+
+    async def _add_locked(self, command: str) -> tuple[str, str]:
         """``(status, detail)`` — status is ``ok`` / ``unconfirmed`` / ``stop``."""
         message_id = await self._send_command(command)
         if message_id is None:

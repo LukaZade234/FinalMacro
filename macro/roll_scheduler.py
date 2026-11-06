@@ -58,6 +58,30 @@ def seconds_until_rolls_reset(
     return max(0.0, reset_minutes * 60.0 + buffer_sec)
 
 
+def seconds_until_rolls_reset_estimate(
+    reset_at: str | None,
+    *,
+    now: dt.datetime | None = None,
+) -> float | None:
+    """Seconds until the rolls *actually* reset, or ``None`` when unknown.
+
+    ``$tu`` rounds the minutes up (``15m`` at 12:45:17 is a 13:00 reset), so
+    ``reset_at`` — read time plus those minutes — runs up to a minute past
+    the real reset. Mudae resets on a whole minute, so the start of the
+    minute ``reset_at`` falls in is the reset itself. Can be negative once
+    it has passed. No buffer: callers that must not ask before the reset add
+    their own.
+    """
+    deadline = parse_iso(reset_at or "")
+    if deadline is None:
+        return None
+    stamp = now or dt.datetime.now(dt.timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=dt.timezone.utc)
+    snapped = deadline.replace(second=0, microsecond=0)
+    return (snapped - stamp).total_seconds()
+
+
 def seconds_until_perk8_refill(
     record: Perk8DailyRecord,
     *,

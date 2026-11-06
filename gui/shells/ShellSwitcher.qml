@@ -17,7 +17,7 @@ Item {
     id: switcher
 
     property int currentPage: 0
-    readonly property int settingsPageIndex: 9
+    readonly property int settingsPageIndex: 10
 
     onCurrentPageChanged: {
         if (currentPage === settingsPageIndex && App.updateAvailable)

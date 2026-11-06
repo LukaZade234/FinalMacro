@@ -24,6 +24,7 @@ Item {
     readonly property var menuItems: [
         { label: "Run", accel: 0 },
         { label: "Accounts", accel: 0 },
+        { label: "Alts", accel: 1 },
         { label: "Servers", accel: 0 },
         { label: "Presets", accel: 0 },
         { label: "Mudae", accel: 0 },

@@ -30,6 +30,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from macro.actions import prompt_guard
 from macro.config import KakeraLootRules
 from mudae.macro_activity import enter_macro_activity, exit_macro_activity
 from mudae.types import ParseResult
@@ -208,6 +209,10 @@ class KakeraLootRunner:
 
     async def _spend_batch(self, *, prefix: str, batch: int, cost: int) -> tuple[str, int]:
         """``("done", refund)`` or ``(reason, 0)``."""
+        async with prompt_guard(self._actions):
+            return await self._spend_batch_locked(prefix=prefix, batch=batch, cost=cost)
+
+    async def _spend_batch_locked(self, *, prefix: str, batch: int, cost: int) -> tuple[str, int]:
         self._actions.drain_queue()
         message_id = await self._actions.send_command(f"kl {batch}", prefix=prefix)
         self._last_sent = self._clock()

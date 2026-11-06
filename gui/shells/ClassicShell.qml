@@ -17,6 +17,7 @@ Item {
     readonly property var pages: [
         { label: "Run", title: "Run" },
         { label: "Accounts", title: "Accounts" },
+        { label: "Alts", title: "Alts" },
         { label: "Servers", title: "Servers" },
         { label: "Presets", title: "Presets" },
         { label: "Mudae", title: "Mudae" },

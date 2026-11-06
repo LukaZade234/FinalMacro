@@ -13,6 +13,11 @@ Item {
     // replaces the colored dot.
     property var options: []
     property var selected: []
+    // Controlled: the owner's binding is the only source of `selected`, so
+    // a click only reports the new list. Without it the click assigns
+    // `selected` and breaks that binding (one picker shown for several
+    // records would then keep the previous record's list).
+    property bool controlled: false
     signal selectionChanged(var ids)
 
     function isSelected(id) {
@@ -26,7 +31,8 @@ Item {
             next.push(id)
         else
             next.splice(idx, 1)
-        selected = next
+        if (!controlled)
+            selected = next
         selectionChanged(next)
     }
 

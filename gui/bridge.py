@@ -44,6 +44,7 @@ from gui.targets import ResolvedRunTarget, TargetStore
 from gui.update_check import MAX_COMMIT_SUMMARY, UpdateStatus, check_for_updates, pull_update
 from gui.mudae_wishlist_store import MudaeWishlist, MudaeWishlistStore
 from gui.mudae_lists_store import KINDS as MUDAE_LIST_KINDS, MudaeListsStore
+from gui.alts_store import AltsStore
 from gui.wishlist_store import Wishlist, scope_key
 from macro.actions import DiscordActions
 from macro.activity_log import ActivityLog, ActivitySeverity, activity_log_text
@@ -231,6 +232,8 @@ class AppBridge(QObject):
     wishlistChanged = Signal()
     mudaeWishlistChanged = Signal()
     mudaeListsChanged = Signal()
+    altsChanged = Signal()
+    altsLiveChanged = Signal()
     listSendChanged = Signal()
     scopeFetchChanged = Signal()
     bwOptionsChanged = Signal()
@@ -249,6 +252,25 @@ class AppBridge(QObject):
         self._wishlist = Wishlist()
         self._mudae_wishlists = MudaeWishlistStore()
         self._mudae_lists = MudaeListsStore()
+        # Multi-account: each alt's parts and the turn order (Alts page), the
+        # Run page's "Alts: on" switch, and while a run has alts up, the
+        # channel's turn coordinator and the alts' connections.
+        self._alts = AltsStore()
+        self._alts_on = False
+        self._alt_pool: Any = None
+        self._alt_kakera: Any = None
+        self._alt_claims: Any = None
+        from macro.alt_ledger import AltLedger
+
+        # Alts › Ledger: daily totals, transfers and pending gives, on disk.
+        self._alt_ledger = AltLedger()
+        # The alt a temporary-connection sheet fetch is for (Alts › Sheets).
+        self._scope_fetch_alt = ""
+        # Alts › Ledger › Pass to main: what each alt is busy with, and the
+        # last outcome line, keyed by account id.
+        self._alt_pass_busy: dict[str, str] = {}
+        self._alt_pass_note: dict[str, str] = {}
+        self._coordinator: Any = None
         # Advisor › Lists › Send: the request in flight and what the page shows.
         self._list_send_request: dict[str, Any] = {}
         self._list_send_state: dict[str, Any] = {"running": False}
@@ -257,6 +279,11 @@ class AppBridge(QObject):
         # arrive belong to *its* account rather than the Run target's.
         self._scope_fetch_command: str = ""
         self._scope_fetch_account_id: str = ""
+        from macro.sheet_attribution import SheetAskers
+
+        # Who last typed $bonus / $shop / $ov … in the channel: those replies
+        # do not name their player (macro/sheet_attribution.py).
+        self._sheet_askers = SheetAskers()
         self._scope_fetch_thread: threading.Thread | None = None
         self._apply_saved_settings(saved, initial=True)
         self._macro_state = AccountState()
@@ -1047,6 +1074,8 @@ class AppBridge(QObject):
         self._wishlist = Wishlist.from_dict(saved.get("wishlist"))
         self._mudae_wishlists.load_from_settings(saved)
         self._mudae_lists.load_from_settings(saved)
+        self._alts.load_from_settings(saved)
+        self._alts.sync(self._accounts.accounts)
         self._bw_options.load_from_settings(saved)
         if not initial:
             self.wishlistChanged.emit()
@@ -1088,6 +1117,7 @@ class AppBridge(QObject):
         # directly rather than a nested "run_ui" key.
         self._minimize_to_tray = bool(saved.get("minimize_to_tray", False))
         self._allow_mudae_dms = bool(saved.get("allow_mudae_dms", False))
+        self._alts_on = bool(saved.get("alts_on", False))
 
         layout = str(saved.get("ui_layout") or _DEFAULT_UI_LAYOUT)
         palette = str(saved.get("ui_palette") or _DEFAULT_UI_PALETTE)
@@ -1981,10 +2011,12 @@ class AppBridge(QObject):
             wishlist=self._wishlist.to_settings_fragment(),
             mudae_wishlists=self._mudae_wishlists.to_settings_fragment(),
             mudae_lists=self._mudae_lists.to_settings_fragment(),
+            alts=self._alts.to_settings_fragment(),
             bw_options=self._bw_options.to_settings_fragment(),
             run_ui={
                 "minimize_to_tray": self._minimize_to_tray,
                 "allow_mudae_dms": self._allow_mudae_dms,
+                "alts_on": self._alts_on,
             },
             appearance={
                 "ui_layout": self._ui_layout,
@@ -2555,6 +2587,11 @@ class AppBridge(QObject):
         *,
         severity: ActivitySeverity | None = None,
     ) -> None:
+        if self._engine is not None:
+            # Through the engine so the line also lands in the session log
+            # file (the alts' lines used to reach only the live feed).
+            self._engine.write_activity(text, severity=severity)
+            return
         ActivityLog(self._macro_state, on_update=self._notify_macro).write(
             text, severity=severity
         )
@@ -2651,6 +2688,13 @@ class AppBridge(QObject):
         self._bind_run_target_metadata(resolved)
         suffix = " (reconnected from notification standby)" if was_notification_standby else ""
         self._append_activity_log(f"Switched to {resolved.label}{suffix}")
+
+        # The alts serve the main in its channel: move them with it. Left on
+        # the old channel they would answer (and click) where the main is not.
+        if self._alt_pool is not None:
+            await self._stop_alts()
+        if ready and self._alts_on:
+            await self._start_alts(resolved.account_id, channel_id)
 
         if was_notification_standby:
             self._on_notification_standby(False)
@@ -2779,8 +2823,18 @@ class AppBridge(QObject):
             minutes = parsed.fields.get("daily_reset_minutes")
             if minutes is not None:
                 self._sync_daily_from_tu(int(minutes))
+        if parsed.kind == MessageKind.COMMAND:
+            self._sheet_askers.observe(
+                str(parsed.fields.get("parser_command") or parsed.fields.get("command") or ""),
+                snapshot.author_id,
+            )
         profile_kind = profile_kind_from_parse(parsed)
-        if profile_kind:
+        sheet_account = self._sheet_account_id(profile_kind) if profile_kind else None
+        if profile_kind and sheet_account is None:
+            self._append_activity_log(
+                f"${profile_kind} reply from another player's command — not stored"
+            )
+        if profile_kind and sheet_account is not None:
             payload = json.dumps(
                 {
                     "discord_channel_id": snapshot.channel_id,
@@ -2795,7 +2849,7 @@ class AppBridge(QObject):
                     # account, and by the time the queued call runs it could
                     # already be home again. Who the sheet belongs to is only
                     # unambiguous at the moment it arrives.
-                    "account_id": self._sheet_account_id(),
+                    "account_id": sheet_account,
                 }
             )
             QMetaObject.invokeMethod(
@@ -3200,14 +3254,25 @@ class AppBridge(QObject):
         )
         self._notify_config()
         self._persist()
-        if str(data.get("kind") or "") in {"bonus", "shop"}:
-            self._apply_sheet_caps_if_discord_channel(int(data["discord_channel_id"]))
+        if str(data.get("kind") or "") in {"bonus", "shop", "ov"}:
+            if self._alt_pool is not None and str(data.get("account_id") or "") in self._alt_pool.sessions:
+                self._refresh_alt_sheets(str(data["account_id"]))
+            elif str(data.get("account_id") or "") == self._run_account_id:
+                if str(data.get("kind")) == "ov" and self._alt_pool is not None:
+                    # The main's $ov is what each alt's is compared with.
+                    for acc in list(self._alt_pool.sessions):
+                        self._refresh_alt_sheets(acc)
+            if str(data.get("kind")) != "ov":
+                self._apply_sheet_caps_if_discord_channel(int(data["discord_channel_id"]))
 
     async def _notification_disconnect(self) -> bool:
         """Drop the Discord gateway between hourly sessions (notification mode)."""
         if not self._monitor or not self._connected:
             return True
         await self._monitor.stop_background()
+        if self._alt_pool is not None:
+            # Notification mode is the main's setting; the alts follow it.
+            await self._alt_pool.release_for_notifications()
         from mudae.kakera_log import flush_disk_log
         from mudae.key_log import flush_disk_log as flush_key_log
         from mudae.sphere_log import flush_disk_log as flush_sphere_log
@@ -3244,6 +3309,8 @@ class AppBridge(QObject):
             self._on_connected(True)
             self._on_notification_standby(False)
             self._on_macro_state()
+            if self._alt_pool is not None:
+                await self._alt_pool.restore_for_notifications()
         else:
             self._on_status("Reconnect timed out (notification mode)")
             self._on_connected(False)
@@ -3346,10 +3413,13 @@ class AppBridge(QObject):
                     self._macro_state.own_user_ids = [own_id] if own_id is not None else []
                     self._on_connected(True)
                     self._on_macro_state()
+                    if self._alts_on:
+                        await self._start_alts(resolved.account_id, channel_id)
                 else:
                     self._on_status("Connection timed out")
                     self._on_connected(False)
                 await self._stop_event.wait()
+                await self._stop_alts()
                 if self._engine:
                     self._engine.save_runtime_state()
                 if self._engine and self._engine.is_running:
@@ -3509,6 +3579,566 @@ class AppBridge(QObject):
                 )
 
         asyncio.run_coroutine_threadsafe(_run(), self._loop)
+
+    # ---- multi-account: alts ----------------------------------------------
+    #
+    # The main is the Run target's account; every other account whose type is
+    # "Alt" is an alt. Alts connect only while a run is up and "Alts: on" is
+    # set, in the main's run channel. While they are up, the main's commands
+    # go through the same turn coordinator lane as theirs (macro/turns.py).
+
+    def _alt_main_id(self) -> str:
+        return self._run_account_id or self._accounts.active_account_id
+
+    async def _start_alts(self, main_id: str, channel_id: int) -> None:
+        from macro.account_pool import AccountPool, AltSpec
+        from macro.preset_scope import alt_config
+        from macro.turns import ChannelCoordinator
+
+        if self._alt_pool is not None:
+            return
+        self._alts.sync(self._accounts.accounts)
+        specs: list[AltSpec] = []
+        for acc_id in self._alts.enabled_alt_ids(self._accounts.accounts):
+            if acc_id == main_id:
+                continue
+            account = self._accounts.find_account(acc_id)
+            if account is None:
+                continue
+            rules = self._alts.get(acc_id)
+            own_id = rules.claims.own_preset_id
+            own = self._presets.find_preset(own_id) if own_id else None
+            specs.append(
+                AltSpec(
+                    account_id=acc_id,
+                    name=account.name,
+                    token=account.token.strip(),
+                    rules=rules,
+                    config=alt_config(self._macro_config, own),
+                )
+            )
+        if not specs:
+            self._append_activity_log("Alts: none enabled — the main runs alone")
+            return
+        coordinator = ChannelCoordinator(main_id)
+        self._coordinator = coordinator
+        if self._actions:
+            self._actions.set_lane(
+                coordinator, main_id, lambda: list(self._macro_state.own_usernames)
+            )
+
+        def make_monitor(token: str, channel: int, on_parsed: Any) -> ChannelMonitor:
+            return ChannelMonitor(token=token, channel_id=channel, on_parsed=on_parsed)
+
+        pool = AccountPool(
+            coordinator,
+            make_monitor=make_monitor,
+            make_actions=DiscordActions,
+            log=self._append_activity_log,
+            on_change=self._on_alts_live,
+        )
+        self._alt_pool = pool
+        pool.ledger = self._alt_ledger
+        main_user_id = self._monitor.get_own_user_id() if self._monitor else None
+        pool.set_main(self._actions, main_user_id, lambda: list(self._macro_state.own_usernames))
+        self._append_activity_log(f"Alts: connecting {len(specs)}…")
+        await pool.start(specs, int(channel_id))
+        for acc in list(pool.sessions):
+            self._refresh_alt_sheets(acc)
+        from macro.alt_kakera import AltKakera
+
+        # Alts take the kakera the main leaves for lack of power.
+        self._alt_kakera = AltKakera(pool, log=self._append_activity_log)
+        if self._engine is not None:
+            self._engine.kakera_power_short = self._alt_kakera.main_power_short
+            # Like the main, the alts $tu when a session starts rolling, not
+            # when they connect.
+            from macro.alt_claims import AltClaims
+            from macro.alt_daily import AltDaily
+            from macro.alt_passing import AltPassing
+
+            alt_claims = AltClaims(
+                pool,
+                log=self._append_activity_log,
+                farm_active=lambda: self._engine is not None and self._engine.force_divorce_active,
+                # An alt's $rt comes after the main's own claim in the farm.
+                main_has_claim=lambda: self._macro_state.claim_available is True,
+            )
+            self._alt_claims = alt_claims
+            alt_passing = AltPassing(pool, log=self._append_activity_log)
+            alt_daily = AltDaily(
+                pool,
+                play_minigames=self._play_alt_minigames,
+                passing=alt_passing,
+                log=self._append_activity_log,
+            )
+
+            async def alt_session_start() -> None:
+                # Like the main, the alts $tu when a session starts rolling,
+                # not when they connect; then each alt's once-a-day steps
+                # (minigames, the daily pass), before the main's first roll.
+                await pool.refresh_all()
+                await alt_daily.run_due()
+                self._on_alts_live()
+
+            self._engine.before_roll_batch = alt_session_start
+
+            async def alt_batch_end(ranked: list[Any]) -> None:
+                # Main not rolling: claims left this batch, then the gives,
+                # then kakera / spheres per each alt's Transfers setting.
+                await alt_claims.wait_idle()
+                await alt_claims.batch_end(ranked)
+                await alt_claims.give_pending()
+                await alt_passing.batch_end()
+                self._on_alts_live()
+
+            self._engine.alt_spare_claim = alt_claims.offer
+            self._engine.alt_batch_end = alt_batch_end
+
+            async def alt_fd_return(account_id: str, character: str) -> bool:
+                result = await pool.give_to_main(account_id, character=character, why="force divorce")
+                return bool(result.ok)
+
+            # Force-divorce alt cycles: one per alt with a claim, before the main's.
+            self._engine.alt_fd_ready = alt_claims.farm_ready
+            self._engine.alt_fd_claim = alt_claims.claim_for_farm
+            self._engine.alt_fd_return = alt_fd_return
+            # The main divorces the target straight from the alt holding it;
+            # the prompt's owner must be that alt.
+            self._engine.alt_user_id = lambda acc: (
+                pool.sessions[acc].user_id if acc in pool.sessions else None
+            )
+
+            async def alt_fd_find(character: str) -> str | None:
+                for session in pool.connected_sessions():
+                    if await pool.holds_character(session.account_id, character):
+                        return session.account_id
+                return None
+
+            self._engine.alt_account_for = pool.account_for_username
+            self._engine.alt_fd_find = alt_fd_find
+            if self._macro_state.phase == MacroPhase.ROLLING:
+                # Switched on mid-batch: the session's $tu is past, so read
+                # theirs now or they sit out this batch with unknown power.
+                await pool.refresh_all()
+
+    async def _play_alt_minigames(self, session: Any) -> dict[str, Any] | None:
+        """One alt's daily minigames on its own connection (``AltDaily``).
+
+        Rewards go to the alts' ledger, not the main's sphere and minigame
+        logs, which are the run account's. The alt's own daily record keeps
+        ``$ohu``'s "until refill" the same way the main's does.
+        """
+        if self._minigames_busy():
+            return None
+        acc = session.spec.account_id
+        ledger = self._alt_ledger
+        daily_get, daily_save = self._daily_resets_callbacks_for(acc, self._alt_channel_profile_id())
+
+        def on_result(_game: str, result: dict[str, Any]) -> None:
+            if result.get("reason") not in {"exhausted", "no grid", "no fleet"}:
+                ledger.add(acc, "minigames_played", 1)
+            stock = result.get("sphere_stock")
+            if stock is not None:
+                # Mudae's "(Stock: N)" after the game: the daily sphere pass
+                # needs no $tu after the minigames.
+                session.state.sphere_stock = int(stock)
+
+        self._minigames_running = True
+        try:
+            runner = PlayAllMinigames(
+                session.actions,
+                session.monitor,
+                log=lambda t: self._append_activity_log(f"{session.spec.name}: {t}"),
+                on_game_reward=lambda _game, amount, _clicks: ledger.add(acc, "spheres_earned", int(amount)),
+                on_game_result=on_result,
+                daily_get=daily_get,
+                daily_save=daily_save,
+                state=session.state,
+                games=list(session.spec.rules.spheres.games),
+            )
+            return await runner.play(prefix=session.spec.config.prefix)
+        finally:
+            self._minigames_running = False
+
+    async def _stop_alts(self) -> None:
+        pool = self._alt_pool
+        self._alt_pool = None
+        self._alt_kakera = None
+        if self._engine is not None:
+            self._engine.kakera_power_short = None
+            self._engine.before_roll_batch = None
+            self._engine.alt_spare_claim = None
+            self._engine.alt_batch_end = None
+            self._engine.alt_fd_ready = None
+            self._engine.alt_fd_claim = None
+            self._engine.alt_fd_return = None
+            self._engine.alt_user_id = None
+            self._engine.alt_account_for = None
+            self._engine.alt_fd_find = None
+        self._alt_claims = None
+        self._coordinator = None
+        if self._actions:
+            self._actions.set_lane(None, "")
+        if pool is not None:
+            await pool.stop()
+            self._append_activity_log("Alts: disconnected")
+        self._on_alts_live()
+
+    def _on_alts_live(self) -> None:
+        QMetaObject.invokeMethod(self, "_emit_alts_live", Qt.ConnectionType.QueuedConnection)
+
+    @Slot()
+    def _emit_alts_live(self) -> None:
+        self.altsLiveChanged.emit()
+
+    @Property(bool, notify=altsChanged)
+    def altsOn(self) -> bool:
+        return self._alts_on
+
+    @Slot(bool)
+    def setAltsOn(self, on: bool) -> None:
+        on = bool(on)
+        if on == self._alts_on:
+            return
+        self._alts_on = on
+        self._persist()
+        self.altsChanged.emit()
+        if not self._loop or not self._connected:
+            return
+        if on:
+            channel = self._home_discord_channel_id()
+            main_id = self._alt_main_id()
+            if channel is None:
+                return
+            asyncio.run_coroutine_threadsafe(self._start_alts(main_id, channel), self._loop)
+        else:
+            asyncio.run_coroutine_threadsafe(self._stop_alts(), self._loop)
+
+    # ---- Alts › Setup › Sheets ---------------------------------------------
+
+    def _alt_channel_profile_id(self) -> str:
+        """The server the alts serve the main on: the Run channel."""
+        return self._default_fetch_scope()[1]
+
+    def _alt_sheet_report(self, account_id: str) -> dict[str, Any]:
+        """The alt's stored sheets for the run channel, and whether it may act."""
+        from macro.alt_readiness import alt_readiness
+
+        profile_id = self._alt_channel_profile_id()
+        found = self._profiles.find_channel_by_profile_id(profile_id) if profile_id else None
+        reads: dict[str, Any] = {}
+        main_ov: dict[str, Any] = {}
+        if found:
+            channel = found[1]
+            for kind in ("bonus", "shop", "ov"):
+                reads[kind] = self._profiles.account_sheet(channel, kind, account_id=account_id)
+            main_id = self._run_account_id or self._alt_main_id()
+            main_ov = self._profiles.account_sheet(channel, "ov", account_id=main_id).fields
+        fields = {k: (r.fields if r is not None else {}) for k, r in reads.items()}
+        report = alt_readiness(
+            bonus=fields.get("bonus"), shop=fields.get("shop"), ov=fields.get("ov"), main_ov=main_ov
+        )
+        bonus = fields.get("bonus") or {}
+        report["main_ov_read"] = bool(main_ov)
+        report["channel"] = found[1].name if found else ""
+        report["read_at"] = {k: (r.read_at if r is not None else "") for k, r in reads.items()}
+        report["bonus"] = {
+            "power_cost": bonus.get("power_cost_per_kakera_button"),
+            "power_max": bonus.get("kakera_max_power"),
+            "dk_cooldown": bonus.get("dk_cooldown"),
+            "rt_cooldown": bonus.get("rt_cooldown"),
+        }
+        report["shop"] = {"perk9_click_max": (fields.get("shop") or {}).get("perk9_click_max")}
+        report["_fields"] = fields
+        return report
+
+    def _refresh_alt_sheets(self, account_id: str) -> None:
+        """Apply the alt's own $bonus / $shop to its state and re-check readiness."""
+        from macro.sheet_caps import apply_sheet_caps
+
+        pool = self._alt_pool
+        session = pool.sessions.get(account_id) if pool is not None else None
+        if session is None:
+            return
+        report = self._alt_sheet_report(account_id)
+        fields = report["_fields"]
+        apply_sheet_caps(session.state, bonus=fields.get("bonus") or {}, shop=fields.get("shop") or {})
+        was = session.ready
+        session.ready = bool(report["ready"])
+        session.not_ready = "needs $bonus" if not session.ready else ""
+        if session.ready != was:
+            self._append_activity_log(
+                f"Alts: {session.spec.name} "
+                + ("ready — its own $bonus is applied" if session.ready else "not used until its $bonus is read")
+            )
+        self._on_alts_live()
+
+    @Slot(str)
+    def fetchAltSheets(self, account_id: str) -> None:
+        """$bonus, $shop and $ov for one alt, filed under that alt.
+
+        On the alt's own pool connection when it has one. Otherwise a short
+        connection of the alt's own — never the main's gateway, which the
+        general scope fetch would borrow (and move) while it is connected.
+        """
+        pool = self._alt_pool
+        session = pool.sessions.get(account_id) if pool is not None else None
+        name = self._account_name(account_id)
+        if session is not None and session.connected:
+            async def job() -> str:
+                await pool.own_gap(session)
+                missing = await self._fetch_sheet_set(
+                    session.actions, prefix=session.spec.config.prefix, file_as=account_id
+                )
+                session.last_command_at = time.monotonic()
+                return f"No reply to ${', $'.join(missing)}" if missing else ""
+
+            self._run_alt_pass(account_id, "sheets", job)
+            return
+        if self._engine is not None and self._engine.is_running:
+            self._set_status(
+                f"{name} isn't connected — stop the macro to fetch its sheets, "
+                "or turn it on in Alts and reconnect"
+            )
+            return
+        if self._scope_fetch_command:
+            self._set_status(f"Already fetching ${self._scope_fetch_command} — try again in a moment")
+            return
+        profile_id = self._alt_channel_profile_id()
+        resolved = resolve_scope_target(
+            self._accounts, self._profiles, self._presets, self._targets, account_id, profile_id
+        )
+        if resolved is None:
+            self._set_status(f"{name} needs a token and the run channel an ID")
+            return
+        self._scope_fetch_command = "sheets"
+        self._scope_fetch_alt = account_id
+        self.scopeFetchChanged.emit()
+        self.altsChanged.emit()
+        self._start_temporary_scope_fetch("sheets", resolved, profile_id)
+
+    def _account_name(self, account_id: str) -> str:
+        for acc in self._accounts.accounts:
+            if str(acc.id) == str(account_id):
+                return str(acc.name or account_id)
+        return str(account_id)
+
+    # ---- Alts › Ledger: passing to the main by hand ----------------------
+
+    @Slot(result=str)
+    def altPassJson(self) -> str:
+        """Per connected alt: stocks, harem page 1, keep defaults, busy state;
+        plus this session's transfers."""
+        pool = self._alt_pool
+        alts = []
+        if pool is not None:
+            for session in pool.connected_sessions():
+                acc = session.account_id
+                rules = session.spec.rules
+                st = session.state
+                alts.append(
+                    {
+                        "id": acc,
+                        "name": session.spec.name,
+                        "kakera_stock": st.kakera_stock,
+                        "sphere_stock": st.sphere_stock,
+                        "harem": session.harem,
+                        "harem_pages": session.harem_pages,
+                        "fetched_at": session.fetched_at,
+                        "fetched_from": session.fetched_from,
+                        "kakera_keep": int(rules.kakera.keep),
+                        "spheres_keep": int(rules.spheres.keep),
+                        "busy": self._alt_pass_busy.get(acc, ""),
+                        "note": self._alt_pass_note.get(acc, ""),
+                    }
+                )
+        return json.dumps(
+            {
+                "connected": pool is not None,
+                "main_id": (self._monitor.get_own_user_id() if self._monitor else None),
+                "alts": alts,
+                "transfers": list(reversed(self._alt_ledger.transfers[-60:])),
+                "ledger": self._alt_ledger_summary(),
+            }
+        )
+
+    def _alt_ledger_summary(self) -> dict[str, Any]:
+        """Today and the last 7 days per alt, for Alts › Ledger."""
+        ledger = self._alt_ledger
+        self._alts.sync(self._accounts.accounts)
+        names = {str(a.id): a.name for a in self._accounts.accounts}
+        today, week = ledger.day(), ledger.last_days(7)
+        order = self._alts.alt_ids(self._accounts.accounts)
+        order += [acc for acc in {**today, **week} if acc not in order]
+        pool = self._alt_pool
+        rows = []
+        for acc in order:
+            session = pool.sessions.get(acc) if pool is not None else None
+            rows.append(
+                {
+                    "id": acc,
+                    "name": names.get(acc, acc),
+                    "tier": self._alts.tier(acc),
+                    "connected": bool(session is not None and session.connected),
+                    "today": today.get(acc, {}),
+                    "week": week.get(acc, {}),
+                    "pending": list(ledger.pending.get(acc, [])),
+                }
+            )
+        return {"day": ledger.today(), "rows": rows}
+
+    def _run_alt_pass(self, account_id: str, label: str, job: Any) -> None:
+        if not self._loop or self._alt_pool is None:
+            self._set_status("Alts are not connected")
+            return
+        if self._alt_pass_busy.get(account_id):
+            return
+        self._alt_pass_busy[account_id] = label
+        self._alt_pass_note[account_id] = ""
+        self._on_alts_live()
+
+        async def run() -> None:
+            try:
+                self._alt_pass_note[account_id] = await job()
+            except Exception as exc:  # noqa: BLE001 - shown on the page
+                self._alt_pass_note[account_id] = f"{label} failed: {exc}"
+            finally:
+                self._alt_pass_busy.pop(account_id, None)
+                self._on_alts_live()
+
+        asyncio.run_coroutine_threadsafe(run(), self._loop)
+
+    @Slot(str)
+    def fetchAltBalances(self, account_id: str) -> None:
+        pool = self._alt_pool
+
+        async def job() -> str:
+            result = await pool.fetch_balances(account_id)
+            if not result.get("ok"):
+                return f"Fetch failed: {result.get('reason')}"
+            missing = [
+                name
+                for name, key in (("kakera", "kakera_stock"), ("spheres", "sphere_stock"))
+                if result.get(key) is None
+            ]
+            return f"Could not read {', '.join(missing)}" if missing else ""
+
+        self._run_alt_pass(account_id, "fetching", job)
+
+    @Slot(str, int, int, str)
+    def passAltToMain(self, account_id: str, kakera_keep: int, spheres_keep: int, characters_json: str) -> None:
+        """``*_keep`` < 0 leaves that currency alone; characters is a JSON list of names."""
+        pool = self._alt_pool
+        try:
+            characters = [str(n) for n in json.loads(characters_json or "[]") if str(n).strip()]
+        except (TypeError, ValueError):
+            characters = []
+
+        async def job() -> str:
+            results = await pool.pass_to_main(
+                account_id,
+                kakera_keep=kakera_keep if kakera_keep >= 0 else None,
+                spheres_keep=spheres_keep if spheres_keep >= 0 else None,
+                characters=characters,
+            )
+            if not results:
+                return "Nothing above keep to pass"
+            done = sum(1 for r in results if r.ok)
+            last = results[-1]
+            if last.ok:
+                return f"Passed {done} of {done}"
+            return f"Stopped after {done}: {last.transfer} — {last.reason}"
+
+        self._run_alt_pass(account_id, "passing", job)
+
+    @Slot()
+    def refreshAlts(self) -> None:
+        if not self._loop or self._alt_pool is None:
+            self._set_status("Alts are not connected")
+            return
+        asyncio.run_coroutine_threadsafe(self._alt_pool.refresh_all(), self._loop)
+
+    @Slot(result=str)
+    def altsLiveJson(self) -> str:
+        pool = self._alt_pool
+        return json.dumps(pool.snapshot() if pool is not None else [])
+
+    @Slot(result=str)
+    def altsJson(self) -> str:
+        """Everything the Alts page shows: the main, the alts in turn order, presets."""
+        if self._alts.sync(self._accounts.accounts):
+            self._persist()
+        main_id = self._alt_main_id()
+        main = self._accounts.find_account(main_id)
+        alts = []
+        for turn, acc_id in enumerate(self._alts.alt_ids(self._accounts.accounts), start=1):
+            account = self._accounts.find_account(acc_id)
+            if account is None:
+                continue
+            rules = self._alts.get(acc_id)
+            alts.append(
+                {
+                    "id": acc_id,
+                    "name": account.name,
+                    "turn": turn,
+                    "has_token": bool(account.token.strip()),
+                    "is_main": acc_id == main_id,
+                    "tier": self._alts.tier(acc_id),
+                    "rules": rules.to_dict(),
+                    "sheets": {k: v for k, v in self._alt_sheet_report(acc_id).items() if k != "_fields"},
+                    "busy": self._alt_pass_busy.get(acc_id, "")
+                    or ("sheets" if self._scope_fetch_command == "sheets" and self._scope_fetch_alt == acc_id else ""),
+                    "note": self._alt_pass_note.get(acc_id, ""),
+                    "connected": bool(
+                        self._alt_pool is not None
+                        and acc_id in self._alt_pool.sessions
+                        and self._alt_pool.sessions[acc_id].connected
+                    ),
+                }
+            )
+        return json.dumps(
+            {
+                "main": {"id": main_id, "name": main.name if main else ""},
+                "alts": alts,
+                "presets": sorted(self._presets.presets),
+                "alts_on": self._alts_on,
+                "running": self._alt_pool is not None,
+            }
+        )
+
+    def _alts_edited(self) -> None:
+        self._persist()
+        self.altsChanged.emit()
+
+    @Slot(str, str)
+    def setAltTier(self, account_id: str, tier: str) -> None:
+        try:
+            self._alts.apply_tier(account_id, tier)
+        except KeyError:
+            return
+        self._alts_edited()
+
+    @Slot(str, str)
+    def setAltRules(self, account_id: str, rules_json: str) -> None:
+        try:
+            data = json.loads(rules_json or "{}")
+        except json.JSONDecodeError:
+            return
+        if isinstance(data, dict):
+            self._alts.set_rules(account_id, data)
+            self._alts_edited()
+
+    @Slot(str, bool)
+    def setAltEnabled(self, account_id: str, on: bool) -> None:
+        self._alts.set_enabled(account_id, on)
+        self._alts_edited()
+
+    @Slot(str, int)
+    def moveAlt(self, account_id: str, index: int) -> None:
+        self._alts.sync(self._accounts.accounts)
+        if self._alts.move(account_id, index):
+            self._alts_edited()
 
     def _session_meta(self) -> dict[str, str]:
         channel = self._run_channel_name or self._profiles.active_label() or "?"
@@ -4768,14 +5398,30 @@ class AppBridge(QObject):
     # pointed at, whether or not that is where the macro is connected. See
     # `gui/scope_fetch.py` for the routes and why they exist.
 
-    def _sheet_account_id(self) -> str:
-        """Who a sheet arriving *right now* belongs to.
+    def _sheet_account_id(self, kind: str) -> str | None:
+        """Who a sheet arriving *right now* belongs to (``None``: nobody of ours).
 
-        Normally the Run target's account. While a scope fetch holds the
-        connection it is that fetch's account instead, because the sheet
-        Mudae is answering with describes the account that asked.
+        While a scope fetch holds the connection, that fetch's account,
+        because the sheet describes the account that asked. Otherwise whoever
+        typed the command: the main (the Run target's account), one of the
+        alts, or another player, whose sheet is not stored.
         """
-        return self._scope_fetch_account_id or self._run_account_id
+        from macro.sheet_attribution import attribute_sheet
+
+        pool = self._alt_pool
+        alt_ids = {}
+        if pool is not None:
+            alt_ids = {
+                int(s.user_id): acc for acc, s in pool.sessions.items() if s.user_id is not None
+            }
+        return attribute_sheet(
+            kind,
+            asker=self._sheet_askers.asker(kind),
+            scope_account=self._scope_fetch_account_id,
+            run_account=self._run_account_id,
+            main_user_id=self._monitor.get_own_user_id() if self._monitor else None,
+            alt_user_ids=alt_ids,
+        )
 
     def _has_live_session(self) -> bool:
         return bool(
@@ -4890,6 +5536,9 @@ class AppBridge(QObject):
 
     @Slot()
     def _deliver_scope_fetch_done(self) -> None:
+        if self._scope_fetch_alt:
+            self._scope_fetch_alt = ""
+            self.altsChanged.emit()
         self.scopeFetchChanged.emit()
         self.mudaeWishlistChanged.emit()
         self.mudaeListsChanged.emit()
@@ -4991,6 +5640,12 @@ class AppBridge(QObject):
             if command == "listsend":
                 await self._send_mudae_list_for(actions, resolved, channel_profile_id)
                 return
+            if command == "sheets":
+                missing = await self._fetch_sheet_set(actions)
+                self._on_status(
+                    f"Sheets · {resolved.label}" + (f" · no reply to ${', $'.join(missing)}" if missing else "")
+                )
+                return
             if command == "lists":
                 # Three different commands back to back: 1 s between each
                 # reply and the next send, on top of Mudae's own cooldowns.
@@ -5017,6 +5672,49 @@ class AppBridge(QObject):
                 self._on_status(f"${command} · {resolved.label}")
         finally:
             self._scope_fetch_account_id = ""
+
+    async def _fetch_sheet_set(
+        self,
+        actions: DiscordActions,
+        kinds: tuple[str, ...] = ("bonus", "shop", "ov"),
+        *,
+        prefix: str | None = None,
+        file_as: str = "",
+    ) -> list[str]:
+        """Send each sheet command and wait for its reply; returns those unanswered.
+
+        Without ``file_as`` the sheet goes wherever ``_on_parsed`` / the
+        temporary connection's handler attributes it. With it (an alt on its
+        own pool connection) each reply this waiter took is filed under that
+        account directly, so it does not depend on the main's connection
+        having seen both the command and the reply.
+        """
+        missing: list[str] = []
+        for index, kind in enumerate(kinds):
+            if index:
+                await asyncio.sleep(_LIST_COMMAND_GAP_SEC)
+            actions.drain_queue()
+            await actions.send_command(kind, prefix=prefix)
+            got = await actions.wait_for(
+                lambda _s, p, k=kind: profile_kind_from_parse(p) == k,
+                timeout=SCOPE_FETCH_TIMEOUT,
+            )
+            if got is None:
+                missing.append(kind)
+                continue
+            if file_as:
+                self._file_sheet(got[0], got[1], file_as)
+            fields = got[1].fields
+            if int(fields.get("parts") or 1) > int(fields.get("part") or 1):
+                # $bonus arrives in two messages; the second carries the
+                # sphere and kakera-button bonuses.
+                rest = await actions.wait_for(
+                    lambda _s, p, k=kind: profile_kind_from_parse(p) == k,
+                    timeout=6.0,
+                )
+                if rest is not None and file_as:
+                    self._file_sheet(rest[0], rest[1], file_as)
+        return missing
 
     async def _capture_wishlist_for(
         self,
@@ -5660,6 +6358,15 @@ class AppBridge(QObject):
         macro state — belongs to a *run*, and this is not one.
         """
         actions.feed(snapshot, parsed)
+        self._file_sheet(snapshot, parsed, account_id)
+
+    def _file_sheet(
+        self,
+        snapshot: MudaeMessageSnapshot,
+        parsed: ParseResult,
+        account_id: str,
+    ) -> None:
+        """File a parsed sheet reply under ``account_id`` (any thread)."""
         profile_kind = profile_kind_from_parse(parsed)
         if not profile_kind:
             return

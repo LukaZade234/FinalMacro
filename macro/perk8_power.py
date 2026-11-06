@@ -168,10 +168,23 @@ def burst_completes(
     """True when ``clicks`` at ``cost``% can be paid within ``horizon_sec``."""
     if clicks <= 0:
         return True
+    return burst_clicks(snap, clicks=clicks, cost=cost, horizon_sec=horizon_sec) >= clicks
+
+
+def burst_clicks(
+    snap: PowerSnapshot,
+    *,
+    clicks: int,
+    cost: float,
+    horizon_sec: float,
+) -> int:
+    """How many of ``clicks`` at ``cost``% can be paid within ``horizon_sec``."""
+    if clicks <= 0:
+        return 0
     if cost <= 0:
-        return True
+        return clicks
     if cost > float(snap.max_power) + 1e-9:
-        return False
+        return 0
     power = float(snap.power)
     stock = int(snap.dk_stock)
     dk_next = snap.dk_next_sec
@@ -182,9 +195,9 @@ def burst_completes(
     horizon = max(0.0, float(horizon_sec))
     for _ in range(clicks * 4 + 40):
         if done >= clicks:
-            return True
+            return clicks
         if t > horizon + 1e-6:
-            return False
+            return done
         if power + 1e-9 >= cost:
             power -= cost
             done += 1
@@ -203,13 +216,13 @@ def burst_completes(
         if wait < 0:
             wait = 0.0
         if wait == float("inf") or t + wait > horizon + 1e-6:
-            return False
+            return done
         power = apply_passive_regen(power, wait, max_power=max_power)
         t += wait
         if dk_next is not None and t + 1e-6 >= dk_next:
             stock += 1
             dk_next = t + cooldown
-    return done >= clicks
+    return min(done, clicks)
 
 
 def _idle_until(snap: PowerSnapshot, until_sec: float) -> PowerSnapshot:
@@ -231,6 +244,17 @@ def _idle_until(snap: PowerSnapshot, until_sec: float) -> PowerSnapshot:
     power = apply_passive_regen(power, until_sec - t, max_power=max_power)
     next_sec = None if dk_next is None else max(0.0, dk_next - until_sec)
     return replace(snap, power=power, dk_stock=stock, dk_next_sec=next_sec)
+
+
+def next_day_burst_clicks(
+    snap: PowerSnapshot,
+    *,
+    clicks: int,
+    window_sec: float,
+    until_midnight_sec: float,
+) -> int:
+    rested = _idle_until(snap, until_midnight_sec)
+    return burst_clicks(rested, clicks=clicks, cost=snap.perk8_cost, horizon_sec=window_sec)
 
 
 def next_day_burst_completes(
@@ -262,37 +286,42 @@ def should_spend_paid_non_perk8(
     until_midnight_sec: float,
     click_cap: int = PERK8_DAILY_CLICK_BUDGET,
 ) -> bool:
-    """True when a paid non-perk-8 react does not break the perk-8 floor."""
+    """True when a paid non-perk-8 react costs the perk-8 burst no clicks.
+
+    The burst is counted, not just checked for completion. When the full
+    burst is already out of reach (the bar is below the floor), every
+    percent still buys perk-8 clicks, so a spend is refused if it lowers how
+    many the burst can make. Comparing only "completes / doesn't" used to
+    let a bar under the floor be spent freely — 2026-11-05: 210% at 22:33
+    with tomorrow's 40 clicks just out of reach, spent to 121% on ordinary
+    chaos kakera, about a dozen perk-8 clicks lost.
+    """
     if cost <= 0:
         return True
     after = _apply_spend(snap, cost)
     if remaining > 0:
         horizon = today_horizon_sec(window_sec, until_midnight_sec)
-        ok_now = burst_completes(
-            snap, clicks=remaining, cost=snap.perk8_cost, horizon_sec=horizon
-        )
-        ok_after = burst_completes(
-            after, clicks=remaining, cost=snap.perk8_cost, horizon_sec=horizon
-        )
-        if ok_now and not ok_after:
-            return False
-        return True
-    cap = max(1, int(click_cap))
-    ok_now = next_day_burst_completes(
-        snap,
-        clicks=cap,
-        window_sec=window_sec,
-        until_midnight_sec=until_midnight_sec,
-    )
-    ok_after = next_day_burst_completes(
-        after,
-        clicks=cap,
-        window_sec=window_sec,
-        until_midnight_sec=until_midnight_sec,
-    )
-    if ok_now and not ok_after:
-        return False
-    return True
+
+        def count(sn: PowerSnapshot) -> int:
+            return burst_clicks(sn, clicks=remaining, cost=snap.perk8_cost, horizon_sec=horizon)
+
+        target = remaining
+    else:
+        target = max(1, int(click_cap))
+
+        def count(sn: PowerSnapshot) -> int:
+            return next_day_burst_clicks(
+                sn, clicks=target, window_sec=window_sec, until_midnight_sec=until_midnight_sec
+            )
+
+    now_clicks, after_clicks = count(snap), count(after)
+    if bar_is_pinned(snap, normal_cost=snap.normal_cost):
+        # At the cap regen is thrown away every minute, so only a spend that
+        # breaks a burst that would otherwise finish is refused. A stale
+        # perk-8 count must not pin the bar there all day
+        # (`hoarding_wastes_power`, tests/test_perk8_recheck.py).
+        return not (now_clicks >= target and after_clicks < target)
+    return after_clicks >= now_clicks
 
 
 def dk_allowed_for_click(

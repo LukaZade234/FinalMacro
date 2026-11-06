@@ -64,6 +64,20 @@ _MAX_KAKERA_CLICK_ATTEMPTS = 2
 _CHAOS_FOLLOWUP_WAIT_SEC = 6.0
 
 
+# Decision reasons that mean "this account leaves the roll's kakera for
+# power": it cannot pay, or it is holding power / clicks back for the perk-8
+# burst. An alt pays from its own bar, so it may take them (alt_kakera.py).
+_HAND_OFF_REASONS = (
+    "insufficient reaction power",
+    "reserving power for perk-8 burst",
+    "saving perk-8 kakera budget",
+)
+
+
+def hands_off_to_alts(reason: str) -> bool:
+    return any(r in str(reason or "") for r in _HAND_OFF_REASONS)
+
+
 @dataclass(frozen=True)
 class _KakeraClickResult:
     confirmed: bool
@@ -104,11 +118,20 @@ class KakeraReactor:
     # A chaos wish spawn is claimed from here, outside the roll loop entirely,
     # so a mode that reserves the claim slot has to reach this path too.
     claim_gate: Callable[[str], bool] | None = None
+    # Multi-account: told (message id, roll fields) whenever this account
+    # leaves a roll's kakera for power — out of it, or holding it back for
+    # the perk-8 burst / budget — so an alt can take it (macro/alt_kakera.py).
+    # ``fields["buttons"]`` only holds buttons this account has not taken.
+    # Must not block.
+    on_power_short: Callable[[int, dict[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         self._last_outcome_snapshot: MudaeMessageSnapshot | None = None
         self._last_kakera_outcome: ParseResult | None = None
         self._react_character: str = ""
+        self._react_fields: dict[str, Any] = {}
+        self._react_taken: set[str] = set()
+        self._react_reported = False
 
     async def react(
         self,
@@ -123,12 +146,17 @@ class KakeraReactor:
         self._drain_stale_kakera_outcomes()
         character = fields.get("character_name") or "?"
         self._react_character = character
+        self._react_fields = fields
+        self._react_taken = set()
+        self._react_reported = False
         decision = await self._resolve_decision(
             fields, rules, message_id, character, roll_index
         )
         if not decision.should_click:
             if rules.enabled:
                 self._debug(f"kakera skip {character}: {decision.reason}")
+                if hands_off_to_alts(decision.reason):
+                    self._report_power_short(message_id)
             return 0
 
         candidates = decision.buttons
@@ -162,6 +190,7 @@ class KakeraReactor:
                     f"kakera skip {character}: daily budget "
                     f"{self.state.kakera_clicks_today}/{budget} reached"
                 )
+                self._report_power_short(message_id)
                 return 0
 
         clicks = 0
@@ -195,6 +224,7 @@ class KakeraReactor:
             if result.wait_timed_out:
                 wait_timed_out = True
             if result.confirmed:
+                self._react_taken.add(str(choice.custom_id))
                 clicks += 1
                 if counts_toward_perk8_budget(
                     emoji=choice.emoji or "",
@@ -236,9 +266,30 @@ class KakeraReactor:
                 self.on_perk8_exhausted()
         elif decision.should_click:
             self.log(f"kakera click failed {character}")
+        if decision.held_back:
+            # It clicked the free ones and kept power for the perk-8 burst:
+            # the paid buttons it left go to the alts.
+            self._report_power_short(message_id)
         if wait_timed_out:
             await self._request_click_resync()
         return clicks
+
+    def _report_power_short(self, message_id: int) -> None:
+        """Once per roll: hand the buttons this account left to the alts."""
+        if self.on_power_short is None or self._react_reported:
+            return
+        self._react_reported = True
+        fields = dict(self._react_fields)
+        taken = self._react_taken
+        fields["buttons"] = [
+            b
+            for b in fields.get("buttons") or []
+            if not (isinstance(b, dict) and str(b.get("custom_id") or "") in taken)
+        ]
+        try:
+            self.on_power_short(int(message_id), fields)
+        except Exception as exc:  # noqa: BLE001 - an alt problem must not stop the main
+            self.log(f"Alts: kakera hand-off failed ({exc})")
 
     async def _resolve_decision(
         self,
@@ -324,6 +375,7 @@ class KakeraReactor:
                         f"({display_reaction_power(self.state.power_percent)}% "
                         f"need {cost:g}%)"
                     )
+                    self._report_power_short(message_id)
                     return _KakeraClickResult(False, wait_timed_out)
                 confirmed = False
                 outcome = None
