@@ -5977,6 +5977,7 @@ class AppBridge(QObject):
                     starwish_trade_rule(
                         self._mudae_wishlists.get(account_id, channel_profile_id).wl_max,
                         len(wanted.get("entries") or []),
+                        self._mudae_wishlists.get(account_id, channel_profile_id).sw_max,
                     )
                     if kind == "wl"
                     else None

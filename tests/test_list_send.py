@@ -148,7 +148,9 @@ def test_a_second_offer_counts_the_slots_already_traded():
     decide = starwish_trade_rule(1324, 168)
     fields = {"starwish_limit": 29, "sacrifice_slots": 1000, "gain": 20}
     assert decide(fields)[0] is True  # 1,324 → 324
-    assert decide(fields)[0] is False  # 324 → −676
+    # The next offer starts from the raised limit (29 + 20 = 49).
+    again = {"starwish_limit": 49, "sacrifice_slots": 1000, "gain": 20}
+    assert decide(again)[0] is False  # 324 → −676
 
 
 def test_starwish_trade_is_answered_by_the_rule():
@@ -375,3 +377,14 @@ def test_skip_clear_goes_straight_to_the_adds():
     outcome = _send(mudae, plan, skip_clear=True)
     assert outcome.ok
     assert mudae.sent == ["$sdc Abra$Absol"] and mudae.texts == []
+
+
+def test_a_capture_taken_with_the_trade_in_place_counts_those_slots_back():
+    """2026-11-08: `$wl` read 240 / 66 starwish with the trade in place; the
+    send's clear handed the slots back and Mudae offered 1,260 for +35 again.
+    Accepting lands back on 240, room for the preset's 116 wishes."""
+    fields = {"starwish_limit": 31, "sacrifice_slots": 1260, "gain": 35}
+    ok, why = starwish_trade_rule(240, 116, 66)(fields)
+    assert ok and "1,500 → 240" in why
+    # Without the starwish count of that capture, the old reading (refused) stays.
+    assert starwish_trade_rule(240, 116)(fields)[0] is False

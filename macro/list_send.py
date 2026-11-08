@@ -384,7 +384,9 @@ class ListSender:
         return outcome
 
 
-def starwish_trade_rule(wl_max: int | None, wishes_needed: int) -> StarwishTrade:
+def starwish_trade_rule(
+    wl_max: int | None, wishes_needed: int, sw_max: int | None = None
+) -> StarwishTrade:
     """Answer Mudae's offer to trade wishlist slots for more starwish slots.
 
     Accept when the wishlist still has room for every wish in the preset
@@ -392,8 +394,18 @@ def starwish_trade_rule(wl_max: int | None, wishes_needed: int) -> StarwishTrade
     yes; refuse when it would not, or when the wishlist size is unknown
     (``wl_max`` comes from the server's last `$wl` capture). An accepted trade
     lowers the remembered size, since Mudae may ask again.
+
+    **A capture taken with the trade already in place.** `$wl` prints the
+    wishlist size *after* any slots traded for starwish slots, and clearing the
+    wishlist hands them back. So a re-send meets the same offer again: on
+    2026-11-08 `$wl` read 240 wishlist / 66 starwish, the send cleared it, and
+    Mudae offered 1,260 slots to go from 31 starwish back to 66. 240 − 1,260
+    read as −1,020 and the send was refused, though accepting lands back on
+    240. The starwish slots the capture had above the prompt's limit
+    (``sw_max`` − limit) were bought at the offer's rate, so those slots are
+    added back first.
     """
-    size = {"wl_max": wl_max}
+    size = {"wl_max": wl_max, "sw_max": sw_max}
 
     def decide(fields: dict[str, Any]) -> tuple[bool, str]:
         cost = fields.get("sacrifice_slots")
@@ -408,15 +420,23 @@ def starwish_trade_rule(wl_max: int | None, wishes_needed: int) -> StarwishTrade
                 f"Mudae offered to {offer}, but this server's wishlist size is unknown — "
                 "answered n. Fetch $wl, then send again."
             )
-        after = int(current) - int(cost)
+        traded = 0
+        captured_sw = size["sw_max"]
+        if captured_sw is not None and limit is not None and gain:
+            extra = max(0, int(captured_sw) - int(limit))
+            traded = round(extra * int(cost) / int(gain))
+        untraded = int(current) + traded
+        after = untraded - int(cost)
         if after < wishes_needed:
             return False, (
                 f"Mudae offered to {offer}, which would leave {after:,} wishlist slots — "
                 f"fewer than the preset's {wishes_needed} wishes. Answered n."
             )
         size["wl_max"] = after
+        if limit is not None and gain:
+            size["sw_max"] = int(limit) + int(gain)
         return True, (
-            f"Accepted Mudae's offer to {offer}: wishlist {int(current):,} → {after:,} slots, "
+            f"Accepted Mudae's offer to {offer}: wishlist {untraded:,} → {after:,} slots, "
             f"room for the preset's {wishes_needed} wishes"
         )
 

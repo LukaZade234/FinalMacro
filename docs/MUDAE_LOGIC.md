@@ -1257,7 +1257,12 @@ The steps:
    trade wishlist slots for more starwish slots, the macro **accepts if the
    wishlist still has room for every wish in the preset afterwards** (size from
    the server's last `$wl` capture; 1,324 − 1,122 = 202 ≥ 168, so yes) and
-   remembers the smaller size in case Mudae asks again. Otherwise — or when the
+   remembers the smaller size in case Mudae asks again. `$wl` prints the size
+   *after* slots already traded, and the clear hands them back. So a capture
+   read with the trade in place counts those slots back first: its starwish
+   slots above the offer's limit, at the offer's rate. On 2026-11-08 the
+   capture read 240 / 66 starwish, and the offer was 1,260 for +35 from 31.
+   That is 1,500 − 1,260 = 240, so yes. Otherwise — or when the
    size is unknown — it answers `n` and stops, saying why, since a missing
    starwish would shift every later insert. The send dialog warns in advance
    when the preset has more starwishes than the server's limit. An add with no

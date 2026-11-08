@@ -164,3 +164,17 @@ def test_parse_bonus_two_message_labels():
     assert r1.fields["response_label"] == "$bonus response (1/2)"
     assert r2.fields["response_label"] == "$bonus response (2/2)"
     assert r1.fields["kakera_button_bonus_pct"] == 65
+
+
+def test_rolls_per_hour_over_a_thousand_keeps_its_thousands():
+    """2026-11-08: "+1,001" read as +1, so the page showed −698/h."""
+    content = (
+        "<:addroll:1> · Rolls per hour: **+1,001** (6 $k + 975 $kl + 10 $kt + 10 premium)"
+        " **-300** ($bw) **-420** ($bk)\n"
+        "<:wlslot:1> · Wishlist slots: **+1,493** (6 $k + 1,307 $kl + 150 $kt + 23 premium"
+        " + 7 server premium 3)\n"
+    )
+    rolls = parse_bonus(content).fields["rolls_per_hour"]
+    assert rolls["bonus"] == 1001
+    assert rolls["penalties"] == {"bw": 300, "bk": 420}
+    assert rolls["sources"]["kl"] == 975

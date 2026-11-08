@@ -15,8 +15,8 @@ from mudae.parsers.utils import strip_markdown
 from mudae.types import MessageKind, ParseResult
 
 _ROLLS_PER_HOUR_RE = re.compile(r"rolls per hour\s*:", re.IGNORECASE)
-_BONUS_SUM_RE = re.compile(r"rolls per hour\s*:\s*\+?(\d+)", re.IGNORECASE)
-_PENALTY_RE = re.compile(r"-\s*(\d+)\s*\(\$([^)]+)\)")
+_BONUS_SUM_RE = re.compile(r"rolls per hour\s*:\s*\+?(\d[\d,]*)", re.IGNORECASE)
+_PENALTY_RE = re.compile(r"-\s*(\d[\d,]*)\s*\(\$([^)]+)\)")
 _SOURCE_PART_RE = re.compile(
     r"(\d[\d,]*)\s+(?:"
     r"\$([a-zA-Z]+)"
@@ -123,7 +123,7 @@ def _parse_penalties(plain: str) -> dict[str, int]:
     penalties: dict[str, int] = {}
     for match in _PENALTY_RE.finditer(plain):
         cmd = match.group(2).strip().lstrip("$").split()[0].lower()
-        penalties[cmd] = int(match.group(1))
+        penalties[cmd] = int(match.group(1).replace(",", ""))
     return penalties
 
 
@@ -163,7 +163,7 @@ def _parse_rolls_per_hour_line(line: str, base_setrolls: int | None) -> dict[str
     if not bonus_match:
         return {}
 
-    bonus_sum = int(bonus_match.group(1))
+    bonus_sum = int(bonus_match.group(1).replace(",", ""))
     sources = _parse_sources(plain)
     penalties = _parse_penalties(plain)
     penalty_total = sum(penalties.values())
